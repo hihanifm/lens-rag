@@ -191,4 +191,4 @@ def export_results(project_id: int, req: SearchRequest):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "LENS API"}
+    return {"status": "ok", "service": "LENS API", "version": app.version}

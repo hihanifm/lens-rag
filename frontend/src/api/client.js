@@ -8,6 +8,10 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+// ── Health ────────────────────────────────────────────────────────────────
+
+export const getHealth = () => api.get('/health').then(r => r.data)
+
 // ── Projects ──────────────────────────────────────────────────────────────
 
 export const getProjects = () =>
