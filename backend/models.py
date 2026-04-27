@@ -62,3 +62,13 @@ class SearchStats(BaseModel):
 class SearchResponse(BaseModel):
     results: List[SearchResult]
     stats: SearchStats
+
+
+class EvalCase(BaseModel):
+    question: str
+    ground_truth: str
+
+
+class EvalRequest(BaseModel):
+    test_cases: List[EvalCase]
+    k: int = 10

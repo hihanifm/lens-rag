@@ -1,0 +1,42 @@
+[
+  {
+    "question": "What laptops are suitable for video editing and creative work?",
+    "ground_truth": "The Dell XPS 15 with NVIDIA RTX 4060 is ideal for photo and video editing on the go. The Apple MacBook Pro with M2 Pro chip is also excellent for creative work."
+  },
+  {
+    "question": "Which monitors support USB-C connectivity for powering a laptop?",
+    "ground_truth": "The LG UltraWide 34 supports USB-C 65W, the Dell UltraSharp 27 supports USB-C 90W, the ASUS ProArt PA279CV supports USB-C 65W, and the BenQ PD3220U supports Thunderbolt 3."
+  },
+  {
+    "question": "What are the best ergonomic office chairs with lumbar support?",
+    "ground_truth": "The Herman Miller Aeron and Steelcase Leap V2 are industry benchmarks for ergonomic seating with lumbar support. The Autonomous ErgoChair Pro also features adjustable lumbar and headrest controls."
+  },
+  {
+    "question": "Which gaming laptops have dedicated NVIDIA graphics cards?",
+    "ground_truth": "The ASUS ROG Zephyrus G14 has an NVIDIA RTX 4060 and the Dell XPS 15 has an NVIDIA RTX 4060, both suitable for gaming."
+  },
+  {
+    "question": "What standing desks have electric motors and memory presets?",
+    "ground_truth": "The Flexispot E7 Pro, Uplift V2, and Autonomous SmartDesk Pro all feature dual electric motors with programmable height memory presets."
+  },
+  {
+    "question": "Which network switches support PoE for powering access points?",
+    "ground_truth": "The Ubiquiti UniFi Switch 24 PoE (250W budget), TP-Link TL-SG108PE (55W budget), and Mikrotik CRS328-24P (500W budget) all support PoE+ for powering access points and other devices."
+  },
+  {
+    "question": "What routers support Wi-Fi 6E with a 6GHz band?",
+    "ground_truth": "The TP-Link Archer AXE75, ASUS ZenWiFi Pro ET12, and Netgear Orbi RBK863S all support Wi-Fi 6E with the 6GHz band for improved throughput and reduced interference."
+  },
+  {
+    "question": "Which monitors are designed for professional photo and video color work?",
+    "ground_truth": "The Dell UltraSharp 27 with 99% sRGB, BenQ PD3220U with 100% sRGB, and ASUS ProArt PA279CV with 100% sRGB and hardware calibration are designed for professional color-accurate work."
+  },
+  {
+    "question": "What office chairs are suitable for larger or taller users?",
+    "ground_truth": "The Secretlab Titan XL is specifically designed for larger users with a wider seat and higher weight capacity. The Steelcase Leap V2 and Herman Miller Aeron are also available in larger sizes."
+  },
+  {
+    "question": "Which products are currently discontinued or have limited stock?",
+    "ground_truth": "Some products in the catalog have a status of Discontinued or Limited Stock, indicating they are no longer in regular production or are running low on inventory."
+  }
+]

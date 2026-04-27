@@ -38,6 +38,11 @@ export const previewExcel = (file) => {
 export const searchProject = (projectId, query, mode, k) =>
   api.post(`/projects/${projectId}/search`, { query, mode, k }).then(r => r.data)
 
+// ── Evaluate ──────────────────────────────────────────────────────────────
+
+export const runEvaluation = (projectId, testCases, k) =>
+  api.post(`/projects/${projectId}/evaluate/run`, { test_cases: testCases, k }).then(r => r.data)
+
 // ── Export ────────────────────────────────────────────────────────────────
 
 export const exportResults = async (projectId, query, mode, k) => {
