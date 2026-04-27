@@ -208,7 +208,7 @@ export default function EvaluateProject() {
               <span className="text-sm text-gray-400">{results.length} questions · k={k}</span>
             </div>
             <div className="divide-y divide-gray-100">
-              {results.map((r, i) => (
+              {results.slice(0, 10).map((r, i) => (
                 <div key={i} className="px-6 py-4">
                   <p className="text-sm font-medium text-gray-800 mb-1">{r.question}</p>
                   <p className="text-xs text-gray-400">{r.contexts.length} context{r.contexts.length !== 1 ? 's' : ''} retrieved</p>
@@ -217,6 +217,9 @@ export default function EvaluateProject() {
               ))}
             </div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
+              {results.length > 10 && (
+                <p className="text-xs text-gray-400 mb-2">Showing 10 of {results.length} — export the JSON for the full dataset.</p>
+              )}
               <p className="text-xs text-gray-500">
                 Export the JSON and run <code className="bg-gray-200 px-1 rounded">ragas evaluate</code> locally to get precision and recall scores.
               </p>
