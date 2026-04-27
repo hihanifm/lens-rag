@@ -8,6 +8,11 @@ Works for any domain, any Excel structure.
 
 ---
 
+## Best Practices
+See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React, FastAPI, Git, and general rules.
+
+---
+
 ## Design Principles (NEVER violate these)
 
 1. **KISS** — If there's a simpler way, take it. Complexity only when simpler solution provably fails.
