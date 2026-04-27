@@ -98,6 +98,9 @@ DB_PORT=5432
 DB_NAME=lens
 DB_USER=lens_user
 DB_PASSWORD=changeme
+
+# Reverse proxy — set when serving under a sub-path (e.g. /lens-rag)
+ROOT_PATH=          # e.g. /lens-rag  (empty = serve at root)
 ```
 
 ### Switching to OpenAI (e.g. testing from home)
@@ -262,6 +265,20 @@ All search and evaluation history is stored **client-side** in `localStorage` un
 
 ---
 
+## Export Filename Conventions
+
+All client-side file exports follow the pattern `{project-name}_lens_{descriptor}_{YYYY-MM-DD}.ext`.
+Project names are slugified: lowercase, spaces → hyphens, special chars stripped.
+
+| Export | Filename |
+|---|---|
+| Search → Excel | `{project-name}_lens_results_{date}.xlsx` |
+| Evaluate → RAGAS JSON | `{project-name}_lens_ragas_{date}.json` |
+| History row → JSON | `{project-name}_lens_ragas_{date}.json` (date from session timestamp) |
+| History → CSV | `lens_history_{date}.csv` |
+
+---
+
 ## API Response — always includes stats
 
 ```json
@@ -371,7 +388,7 @@ lens/
       components/
         ResultsTable.jsx
         StatsPanel.jsx
-        BottomBar.jsx      ← API status + History link
+        BottomBar.jsx      ← LENS home link + API status + History link
         Layout.jsx
       utils/
         history.js         ← localStorage history helpers (saveSearch, saveEval, etc.)
@@ -379,12 +396,14 @@ lens/
         client.js          ← ALL axios calls here, nowhere else
       App.jsx
       main.jsx
+    .env.development       ← VITE_API_URL=http://localhost:37000 (dev only, committed)
     package.json
-    vite.config.js
+    vite.config.js         ← base driven by VITE_BASE_PATH env var
     tailwind.config.js
   docker-compose.yml
   requirements.txt
-  CLAUDE.md            ← this file
+  Makefile
+  CLAUDE.md              ← this file
 ```
 
 ---
@@ -435,10 +454,10 @@ Frontend runs separately in dev mode only:
 ```bash
 cd frontend
 npm install
-npm run dev   # http://localhost:5173
+npm run dev   # http://localhost:37001
 ```
 
-Backend API: `http://localhost:8000`
+Backend API: `http://localhost:37000`
 Postgres: `localhost:5432` (lens_user / changeme)
 
 ### Local Python (scripts / one-offs)
@@ -458,13 +477,25 @@ python scripts/your_script.py
 
 ### Dev vs Prod architecture
 
-**Dev:** Vite dev server (`localhost:5173`) runs separately from FastAPI (`localhost:8000`).
-The Vite proxy (`/api` → `localhost:8000`) handles API calls without CORS issues.
+**Dev:** Vite dev server (`localhost:37001`) runs separately from FastAPI (`localhost:37000`).
+`frontend/.env.development` pins `VITE_API_URL=http://localhost:37000` so the frontend talks directly to FastAPI (CORS is allowed for `localhost:37001`).
 
-**Prod (planned):** FastAPI serves the compiled frontend as static files — single port, no separate
-frontend process. Build the frontend (`npm run build`) and mount the `dist/` output in FastAPI
-via `StaticFiles`. Everything goes through one port; no Caddy or other reverse proxy needed
-unless you want TLS termination.
+**Prod — single port, FastAPI serves static files:**
+1. Build the frontend: `make build-frontend` (sets `VITE_BASE_PATH=/lens-rag/`)
+2. Mount `frontend/dist/` in FastAPI via `StaticFiles`
+3. Set `ROOT_PATH=/lens-rag` on the `lens-api` Docker service
+4. Point Caddy at the single FastAPI port:
+
+```caddy
+your.server {
+    handle /lens-rag/* {
+        uri strip_prefix /lens-rag
+        reverse_proxy localhost:37000
+    }
+}
+```
+
+API calls from the browser go to `/lens-rag/projects/...` → Caddy strips the prefix → FastAPI sees `/projects/...`. React Router uses `basename=/lens-rag/` so all client-side routes resolve correctly.
 
 ### Common Makefile targets
 | Command | What it does |
@@ -475,6 +506,7 @@ unless you want TLS termination.
 | `make logs` | Follow all container logs |
 | `make restart` | Stop + start (no rebuild) |
 | `make ps` | Show container status |
+| `make build-frontend` | Build frontend for prod (`/lens-rag/` base path) |
 
 > **IMPORTANT:** Any change to backend Python files requires `make build && make up`.
 > `make restart` alone does NOT pick up code changes — it only recreates containers from the existing image.
