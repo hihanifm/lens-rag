@@ -315,21 +315,14 @@ lens/
 
 ---
 
-## Origin Context
+## Design Decisions
 
-LENS was designed through an extensive design conversation covering:
-- Telecom MNO requirement documents (VZW LTESMS, LTEB13NAC)
-- Question taxonomy (Tier 1-8, only Tier 1-4 in scope for v1)
-- Why pure RAG is sufficient vs knowledge graph (graph deferred to v2)
-- pgvector vs dedicated vector DB (pgvector wins at this scale)
-- HNSW vs IVFFlat vs exact search (exact search at current scale)
+Key choices made during design:
+- pgvector vs dedicated vector DB — pgvector wins at this scale
+- HNSW vs IVFFlat vs exact search — exact search sufficient at current scale
 - Hybrid BM25 + vector + RRF + reranker pipeline
-- Slowly changing dimension for release management (deprecated_in IS NULL = latest)
 - On-premise constraint: bge-m3 + bge-reranker-base via Ollama on A4000 GPU
 - Excel ingestion: ffill → dropna(how='all') → treat everything as plain text
-
-The director's full NORA design (knowledge graph, compliance agent, cross-MNO) 
-is a valid v3. LENS is the validated v1 foundation.
 
 ---
 
