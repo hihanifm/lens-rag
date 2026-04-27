@@ -1,11 +1,12 @@
 import os
 import json
 import tempfile
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
+from starlette.responses import Response
 
 from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH
 from db import init_db, get_cursor
@@ -31,6 +32,16 @@ def startup():
     init_db()
 
 app.mount("/samples", StaticFiles(directory="samples"), name="samples")
+
+
+def _static_frontend_app():
+  dist_dir = os.environ.get("FRONTEND_DIST_DIR", "frontend/dist")
+  if not os.path.isdir(dist_dir):
+    return None
+  return StaticFiles(directory=dist_dir, html=True)
+
+
+_FRONTEND = _static_frontend_app() if os.environ.get("SERVE_FRONTEND", "").lower() == "true" else None
 
 # ── Projects ──────────────────────────────────────────────────────────────
 
@@ -251,3 +262,18 @@ def evaluate_run(project_id: int, req: EvalRequest):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "LENS API", "version": app.version}
+
+
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str, request: Request):
+    """
+    Production-only SPA fallback.
+    If SERVE_FRONTEND=true and frontend dist is mounted, serve built assets + index.html.
+    This route is defined last so it only triggers when no API route matched.
+    """
+    if _FRONTEND is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    # Let StaticFiles handle the request (assets + index.html fallback via html=True).
+    resp = await _FRONTEND.get_response(full_path, request.scope)
+    return resp

@@ -17,6 +17,7 @@ services:
       retries: 5
 
   lens-api:
+    profiles: ["dev"]
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -49,6 +50,7 @@ services:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
   frontend:
+    profiles: ["dev"]
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
@@ -64,6 +66,41 @@ services:
       - /app/node_modules
     depends_on:
       - lens-api
+
+  lens-api-prod:
+    profiles: ["prod"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lens-api-prod
+    restart: unless-stopped
+    ports:
+      - "37000:8000"
+    depends_on:
+      lens-postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: lens-postgres
+      DB_PORT: 5432
+      DB_NAME: lens
+      DB_USER: lens_user
+      DB_PASSWORD: changeme
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
+      EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
+      RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
+      RERANKER_MODEL: ${RERANKER_MODEL:-bge-reranker-base}
+      ROOT_PATH: /lens-rag
+      SERVE_FRONTEND: "true"
+      FRONTEND_DIST_DIR: /app/frontend/dist
+    volumes:
+      - lens-uploads:/data/projects
+      - ./frontend/dist:/app/frontend/dist:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach Ollama on host
 
 volumes:
   lens-postgres-data:
