@@ -49,6 +49,45 @@ def get_project(project_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def update_project(project_id: int, name: str = None, display_columns: list = None, default_k: int = None) -> dict | None:
+    """Update cheap fields — no re-ingestion required."""
+    fields = []
+    values = []
+    if name is not None:
+        fields.append("name = %s")
+        values.append(name)
+    if display_columns is not None:
+        fields.append("display_columns = %s")
+        values.append(display_columns)
+    if default_k is not None:
+        fields.append("default_k = %s")
+        values.append(default_k)
+    if not fields:
+        return get_project(project_id)
+    values.append(project_id)
+    with get_cursor() as (cur, conn):
+        cur.execute(
+            f"UPDATE public.projects SET {', '.join(fields)} WHERE id = %s RETURNING *",
+            values
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_project_columns(schema_name: str) -> list[str]:
+    """Return all original column names available in the project's records table."""
+    with get_cursor() as (cur, conn):
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = 'records'
+              AND column_name LIKE 'col\\_%%'
+            ORDER BY ordinal_position
+        """, [schema_name])
+        return [row['column_name'][4:] for row in cur.fetchall()]
+
+
 def update_project_status(project_id: int, status: str, row_count: int = None):
     with get_cursor() as (cur, conn):
         cur.execute("""

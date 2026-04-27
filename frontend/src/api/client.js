@@ -23,6 +23,12 @@ export const getProject = (id) =>
 export const createProject = (data) =>
   api.post('/projects', data).then(r => r.data)
 
+export const updateProject = (id, data) =>
+  api.patch(`/projects/${id}`, data).then(r => r.data)
+
+export const getProjectColumns = (id) =>
+  api.get(`/projects/${id}/columns`).then(r => r.data)
+
 // ── Excel Upload ──────────────────────────────────────────────────────────
 
 export const previewExcel = (file) => {

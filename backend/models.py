@@ -64,6 +64,12 @@ class SearchResponse(BaseModel):
     stats: SearchStats
 
 
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    display_columns: Optional[List[str]] = None
+    default_k: Optional[int] = None
+
+
 class EvalCase(BaseModel):
     question: str
     ground_truth: str

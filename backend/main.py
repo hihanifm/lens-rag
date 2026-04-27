@@ -9,8 +9,8 @@ import pandas as pd
 
 from config import CORS_ORIGINS, TOP_K_DEFAULT
 from db import init_db
-from models import ProjectCreate, SearchRequest, EvalRequest
-from projects import create_project, get_all_projects, get_project, update_project_status
+from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
+from projects import create_project, get_all_projects, get_project, update_project, get_project_columns, update_project_status
 from ingestion import read_excel, ingest
 from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
@@ -45,6 +45,24 @@ def get_project_detail(project_id: int):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@app.patch("/projects/{project_id}")
+def update_project_endpoint(project_id: int, data: ProjectUpdate):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    updated = update_project(project_id, data.name, data.display_columns, data.default_k)
+    return updated
+
+
+@app.get("/projects/{project_id}/columns")
+def get_columns_endpoint(project_id: int):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    columns = get_project_columns(project['schema_name'])
+    return {"columns": columns}
 
 
 # ── Excel Upload & Column Detection ───────────────────────────────────────
