@@ -14,7 +14,7 @@ const queryClient = new QueryClient()
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         <Layout>
           <Routes>
             <Route path="/" element={<Home />} />

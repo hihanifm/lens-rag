@@ -46,3 +46,9 @@ CORS_ORIGINS = [
     "http://localhost:37001",  # Vite dev server
     "http://localhost:3000",
 ]
+
+# ── Reverse proxy ──────────────────────────────────────────────────────────
+# Set to the sub-path prefix when running behind a reverse proxy.
+# e.g. ROOT_PATH=/lens-rag
+# Leave empty when running at root.
+ROOT_PATH = os.environ.get("ROOT_PATH", "")

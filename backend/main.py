@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
 
-from config import CORS_ORIGINS, TOP_K_DEFAULT
+from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH
 from db import init_db, get_cursor
 from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
 from projects import create_project, get_all_projects, get_project, update_project, get_project_columns, update_project_status
@@ -15,7 +15,7 @@ from ingestion import read_excel, ingest
 from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
 
-app = FastAPI(title="LENS API", version="1.2.0")
+app = FastAPI(title="LENS API", version="1.2.0", root_path=ROOT_PATH)
 
 app.add_middleware(
     CORSMiddleware,
