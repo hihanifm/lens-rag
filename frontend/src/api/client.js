@@ -1,8 +1,10 @@
 // api/client.js — ALL API calls live here. Never call axios directly in components.
 import axios from 'axios'
 
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' }
 })
 

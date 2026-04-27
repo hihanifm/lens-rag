@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { previewExcel, createProject } from '../api/client'
+import { previewExcel, createProject, API_BASE_URL } from '../api/client'
 
 const STEPS = ['Name', 'Upload', 'Content', 'Context', 'ID Column', 'Display', 'Settings']
 
@@ -53,7 +53,7 @@ export default function CreateProject() {
       // Start ingestion via SSE
       setStep(STEPS.length) // move to ingestion screen
       const evtSource = new EventSource(
-        `http://localhost:8000/projects/${project.id}/ingest?tmp_path=${encodeURIComponent(preview.tmp_path)}`
+        `${API_BASE_URL}/projects/${project.id}/ingest?tmp_path=${encodeURIComponent(preview.tmp_path)}`
       )
       evtSource.onmessage = (e) => {
         const data = JSON.parse(e.data)
