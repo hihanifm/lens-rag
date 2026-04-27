@@ -11,7 +11,17 @@ from starlette.responses import Response
 from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH
 from db import init_db, get_cursor
 from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
-from projects import create_project, get_all_projects, get_project, update_project, get_project_columns, update_project_status
+from projects import (
+    create_project,
+    get_all_projects,
+    get_project,
+    get_project_raw,
+    delete_project,
+    update_project,
+    get_project_columns,
+    update_project_status,
+    verify_project_pin,
+)
 from ingestion import read_excel, ingest
 from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
@@ -45,6 +55,15 @@ _FRONTEND = _static_frontend_app() if os.environ.get("SERVE_FRONTEND", "").lower
 
 # ── Projects ──────────────────────────────────────────────────────────────
 
+def _check_pin(project_raw: dict, request: Request):
+    stored = (project_raw.get("pin") or "").strip()
+    if not stored:
+        return
+    provided = request.headers.get("X-Project-Pin", "")
+    if provided != stored:
+        raise HTTPException(status_code=401, detail="PIN required")
+
+
 @app.get("/projects")
 def list_projects():
     return get_all_projects()
@@ -58,21 +77,43 @@ def get_project_detail(project_id: int):
     return project
 
 
+@app.post("/projects/{project_id}/verify-pin")
+def verify_pin_endpoint(project_id: int, body: dict):
+    pin = (body or {}).get("pin", "")
+    if verify_project_pin(project_id, pin):
+        return {"ok": True}
+    raise HTTPException(status_code=401, detail="Incorrect PIN")
+
+
 @app.patch("/projects/{project_id}")
-def update_project_endpoint(project_id: int, data: ProjectUpdate):
-    project = get_project(project_id)
-    if not project:
+def update_project_endpoint(project_id: int, data: ProjectUpdate, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
     updated = update_project(project_id, data.name, data.display_columns, data.default_k)
     return updated
 
 
-@app.get("/projects/{project_id}/browse")
-def browse_project(project_id: int):
-    project = get_project(project_id)
-    if not project:
+@app.delete("/projects/{project_id}")
+def delete_project_endpoint(project_id: int, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
-    schema = project['schema_name']
+    _check_pin(project_raw, request)
+    deleted = delete_project(project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"ok": True}
+
+
+@app.get("/projects/{project_id}/browse")
+def browse_project(project_id: int, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+    schema = project_raw['schema_name']
     with get_cursor() as (cur, conn):
         cur.execute(f"SELECT * FROM {schema}.records LIMIT 10")
         rows = [dict(r) for r in cur.fetchall()]
@@ -86,15 +127,16 @@ def browse_project(project_id: int):
             row['embedding'] = f"[{', '.join(f'{v:.3f}' for v in vals[:3])} \u2026 +{len(vals)-3} more]"
         if row.get('search_vector') is not None:
             row['search_vector'] = str(row['search_vector'])
-    return {"records": rows, "total": project['row_count']}
+    return {"records": rows, "total": project_raw['row_count']}
 
 
 @app.get("/projects/{project_id}/columns")
-def get_columns_endpoint(project_id: int):
-    project = get_project(project_id)
-    if not project:
+def get_columns_endpoint(project_id: int, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
-    columns = get_project_columns(project)
+    _check_pin(project_raw, request)
+    columns = get_project_columns(project_raw)
     return {"columns": columns}
 
 
@@ -178,25 +220,26 @@ async def ingest_project(project_id: int, tmp_path: str):
 # ── Search ────────────────────────────────────────────────────────────────
 
 @app.post("/projects/{project_id}/search")
-def search_endpoint(project_id: int, req: SearchRequest):
-    project = get_project(project_id)
-    if not project:
+def search_endpoint(project_id: int, req: SearchRequest, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
 
-    if project['status'] != 'ready':
-        raise HTTPException(status_code=400, detail=f"Project not ready (status: {project['status']})")
+    if project_raw['status'] != 'ready':
+        raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
 
-    if req.mode == "id" and not project['has_id_column']:
+    if req.mode == "id" and not project_raw['has_id_column']:
         raise HTTPException(status_code=400, detail="This project has no ID column configured")
 
-    k = req.k or project['default_k']
+    k = req.k or project_raw['default_k']
 
     result = do_search(
         query=req.query,
         mode=req.mode,
-        schema_name=project['schema_name'],
-        id_column=project['id_column'],
-        display_columns=project['display_columns'],
+        schema_name=project_raw['schema_name'],
+        id_column=project_raw['id_column'],
+        display_columns=project_raw['display_columns'],
         k=k
     )
 
@@ -206,22 +249,23 @@ def search_endpoint(project_id: int, req: SearchRequest):
 # ── Export ────────────────────────────────────────────────────────────────
 
 @app.post("/projects/{project_id}/export")
-def export_results(project_id: int, req: SearchRequest):
+def export_results(project_id: int, req: SearchRequest, request: Request):
     """Run search and return results as Excel file download."""
     from fastapi.responses import Response
     import io
 
-    project = get_project(project_id)
-    if not project:
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
 
-    k = req.k or project['default_k']
+    k = req.k or project_raw['default_k']
     result = do_search(
         query=req.query,
         mode=req.mode,
-        schema_name=project['schema_name'],
-        id_column=project['id_column'],
-        display_columns=project['display_columns'],
+        schema_name=project_raw['schema_name'],
+        id_column=project_raw['id_column'],
+        display_columns=project_raw['display_columns'],
         k=k
     )
 
@@ -244,15 +288,16 @@ def export_results(project_id: int, req: SearchRequest):
 # ── Evaluate ─────────────────────────────────────────────────────────────
 
 @app.post("/projects/{project_id}/evaluate/run")
-def evaluate_run(project_id: int, req: EvalRequest):
+def evaluate_run(project_id: int, req: EvalRequest, request: Request):
     """Stream evaluation progress via SSE, one event per question, then a complete event."""
-    project = get_project(project_id)
-    if not project:
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
 
     test_cases = [{"question": c.question, "ground_truth": c.ground_truth} for c in req.test_cases]
     return StreamingResponse(
-        stream_ragas_export(test_cases, project['schema_name'], req.k),
+        stream_ragas_export(test_cases, project_raw['schema_name'], req.k),
         media_type="text/event-stream"
     )
 

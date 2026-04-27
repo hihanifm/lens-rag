@@ -2,14 +2,25 @@ from db import get_cursor
 from models import ProjectCreate, ProjectResponse
 
 
+def _to_public_project(project: dict | None) -> dict | None:
+    if not project:
+        return None
+    has_pin = bool(project.get("pin") or "")
+    pub = dict(project)
+    pub.pop("pin", None)
+    pub["has_pin"] = has_pin
+    return pub
+
+
 def create_project(data: ProjectCreate) -> dict:
     """Create a new project record in the metadata table."""
+    pin = (data.pin or "").strip() or None
     with get_cursor() as (cur, conn):
         cur.execute("""
             INSERT INTO public.projects
                 (name, schema_name, content_column, context_columns,
-                 id_column, display_columns, has_id_column, default_k, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                 id_column, display_columns, has_id_column, default_k, pin, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
         """, [
             data.name,
@@ -19,7 +30,8 @@ def create_project(data: ProjectCreate) -> dict:
             data.id_column,
             data.display_columns,
             data.id_column is not None,
-            data.default_k
+            data.default_k,
+            pin,
         ])
         project = dict(cur.fetchone())
 
@@ -31,10 +43,10 @@ def create_project(data: ProjectCreate) -> dict:
         """, [schema_name, project['id']])
         project['schema_name'] = schema_name
 
-    return project
+    return _to_public_project(project)
 
 
-def get_all_projects() -> list[dict]:
+def _get_all_projects_raw() -> list[dict]:
     with get_cursor() as (cur, conn):
         cur.execute("""
             SELECT * FROM public.projects ORDER BY created_at DESC
@@ -42,11 +54,47 @@ def get_all_projects() -> list[dict]:
         return [dict(row) for row in cur.fetchall()]
 
 
-def get_project(project_id: int) -> dict | None:
+def get_all_projects() -> list[dict]:
+    return [_to_public_project(p) for p in _get_all_projects_raw()]
+
+
+def _get_project_raw(project_id: int) -> dict | None:
     with get_cursor() as (cur, conn):
         cur.execute("SELECT * FROM public.projects WHERE id = %s", [project_id])
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+def get_project_raw(project_id: int) -> dict | None:
+    return _get_project_raw(project_id)
+
+
+def get_project(project_id: int) -> dict | None:
+    return _to_public_project(_get_project_raw(project_id))
+
+
+def verify_project_pin(project_id: int, provided_pin: str) -> bool:
+    project = _get_project_raw(project_id)
+    if not project:
+        return False
+    stored = (project.get("pin") or "").strip()
+    if not stored:
+        return True
+    return (provided_pin or "") == stored
+
+
+def delete_project(project_id: int) -> dict | None:
+    project = _get_project_raw(project_id)
+    if not project:
+        return None
+
+    schema = project.get("schema_name")
+    with get_cursor() as (cur, conn):
+        if schema:
+            cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE;")
+        cur.execute("DELETE FROM public.projects WHERE id = %s;", [project_id])
+
+    return _to_public_project(project)
 
 
 def update_project(project_id: int, name: str = None, display_columns: list = None, default_k: int = None) -> dict | None:
@@ -71,7 +119,7 @@ def update_project(project_id: int, name: str = None, display_columns: list = No
             values
         )
         row = cur.fetchone()
-        return dict(row) if row else None
+        return _to_public_project(dict(row) if row else None)
 
 
 def get_project_columns(project: dict) -> list[str]:

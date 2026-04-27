@@ -5,6 +5,8 @@ import { getProject, searchProject, exportResults } from '../api/client'
 import ResultsTable from '../components/ResultsTable'
 import StatsPanel from '../components/StatsPanel'
 import { saveSearch } from '../utils/history'
+import { useProjectPin } from '../hooks/useProjectPin'
+import PinGate from '../components/PinGate'
 
 export default function Search() {
   const { projectId } = useParams()
@@ -21,6 +23,8 @@ export default function Search() {
     queryKey: ['project', projectId],
     queryFn: () => getProject(projectId)
   })
+
+  const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
 
   // Sync mode from router state once project loads (guards against id mode on projects without id column)
   useEffect(() => {
@@ -74,6 +78,7 @@ export default function Search() {
   }
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
+  if (isLocked) return <PinGate onUnlock={unlockWithPin} />
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -82,7 +87,15 @@ export default function Search() {
         {/* Header */}
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{project.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
+            {project.has_pin && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+                <span aria-hidden>🔒</span>
+                PIN protected
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-400 mb-4">{project.row_count?.toLocaleString()} records</p>
           <div className="flex gap-1">
             <Link
@@ -123,7 +136,10 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Settings
+              <span className="inline-flex items-center gap-1">
+                Settings
+                {project.has_pin && <span aria-hidden>🔒</span>}
+              </span>
             </Link>
           </div>
         </div>

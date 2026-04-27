@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useLocation } from 'react-router-dom'
+import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getProject, getProjectColumns, updateProject } from '../api/client'
+import { getProject, getProjectColumns, updateProject, deleteProject } from '../api/client'
+import { useProjectPin } from '../hooks/useProjectPin'
+import PinGate from '../components/PinGate'
 
 function Badge({ children }) {
   return (
@@ -23,6 +25,7 @@ function ReadOnlyField({ label, children }) {
 export default function Settings() {
   const { projectId } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   const { data: project } = useQuery({
@@ -30,10 +33,12 @@ export default function Settings() {
     queryFn: () => getProject(projectId),
   })
 
+  const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
+
   const { data: columnsData } = useQuery({
     queryKey: ['project-columns', projectId],
     queryFn: () => getProjectColumns(projectId),
-    enabled: !!project,
+    enabled: !!project && !isLocked,
   })
 
   const [name, setName] = useState('')
@@ -41,6 +46,7 @@ export default function Settings() {
   const [displayColumns, setDisplayColumns] = useState([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (project) {
@@ -72,6 +78,19 @@ export default function Settings() {
     }
   }
 
+  const handleDelete = async () => {
+    const ok = window.confirm(`Delete "${project.name}"? This cannot be undone.`)
+    if (!ok) return
+    setDeleting(true)
+    try {
+      await deleteProject(projectId)
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+      navigate('/')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const isDirty = project && (
     name !== project.name ||
     defaultK !== project.default_k ||
@@ -79,6 +98,7 @@ export default function Settings() {
   )
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
+  if (isLocked) return <PinGate onUnlock={unlockWithPin} />
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -87,7 +107,15 @@ export default function Settings() {
         {/* Header */}
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{project.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
+            {project.has_pin && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+                <span aria-hidden>🔒</span>
+                PIN protected
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-400 mb-4">{project.row_count?.toLocaleString()} records</p>
           <div className="flex gap-1">
             <Link
@@ -116,7 +144,10 @@ export default function Settings() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Settings
+              <span className="inline-flex items-center gap-1">
+                Settings
+                {project.has_pin && <span aria-hidden>🔒</span>}
+              </span>
             </Link>
           </div>
         </div>
@@ -238,6 +269,18 @@ export default function Settings() {
               {displayColumns.length === 0 && (
                 <span className="text-sm text-red-500">Select at least one display column.</span>
               )}
+            </div>
+
+            {/* Danger zone */}
+            <div className="mt-10 pt-6 border-t border-gray-100">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Danger zone</p>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-40 transition-colors"
+              >
+                {deleting ? 'Deleting...' : 'Delete project'}
+              </button>
             </div>
           </div>
 

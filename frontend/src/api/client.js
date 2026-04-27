@@ -12,6 +12,25 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+// ── Per-project PIN (localStorage) ─────────────────────────────────────────
+
+export const getProjectPin = (projectId) =>
+  localStorage.getItem(`lens_pin_${projectId}`) ?? ''
+
+export const setProjectPin = (projectId, pin) =>
+  localStorage.setItem(`lens_pin_${projectId}`, pin)
+
+export const clearProjectPin = (projectId) =>
+  localStorage.removeItem(`lens_pin_${projectId}`)
+
+export const projectHeaders = (projectId) => {
+  const pin = getProjectPin(projectId)
+  return pin ? { 'X-Project-Pin': pin } : {}
+}
+
+export const verifyProjectPin = (projectId, pin) =>
+  api.post(`/projects/${projectId}/verify-pin`, { pin }).then(r => r.data)
+
 // ── Health ────────────────────────────────────────────────────────────────
 
 export const getHealth = () => api.get('/health').then(r => r.data)
@@ -28,13 +47,16 @@ export const createProject = (data) =>
   api.post('/projects', data).then(r => r.data)
 
 export const updateProject = (id, data) =>
-  api.patch(`/projects/${id}`, data).then(r => r.data)
+  api.patch(`/projects/${id}`, data, { headers: projectHeaders(id) }).then(r => r.data)
+
+export const deleteProject = (id) =>
+  api.delete(`/projects/${id}`, { headers: projectHeaders(id) }).then(r => r.data)
 
 export const getProjectColumns = (id) =>
-  api.get(`/projects/${id}/columns`).then(r => r.data)
+  api.get(`/projects/${id}/columns`, { headers: projectHeaders(id) }).then(r => r.data)
 
 export const browseProject = (id) =>
-  api.get(`/projects/${id}/browse`).then(r => r.data)
+  api.get(`/projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
 
 // ── Excel Upload ──────────────────────────────────────────────────────────
 
@@ -49,14 +71,18 @@ export const previewExcel = (file) => {
 // ── Search ────────────────────────────────────────────────────────────────
 
 export const searchProject = (projectId, query, mode, k) =>
-  api.post(`/projects/${projectId}/search`, { query, mode, k }).then(r => r.data)
+  api.post(
+    `/projects/${projectId}/search`,
+    { query, mode, k },
+    { headers: projectHeaders(projectId) }
+  ).then(r => r.data)
 
 // ── Evaluate ──────────────────────────────────────────────────────────────
 
 export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete, onError) => {
   fetch(`${API_BASE_URL}/projects/${projectId}/evaluate/run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...projectHeaders(projectId) },
     body: JSON.stringify({ test_cases: testCases, k }),
   }).then(async (res) => {
     const reader = res.body.getReader()
@@ -84,7 +110,7 @@ export const exportResults = async (projectId, query, mode, k, projectName = '')
   const response = await api.post(
     `/projects/${projectId}/export`,
     { query, mode, k },
-    { responseType: 'blob' }
+    { responseType: 'blob', headers: projectHeaders(projectId) }
   )
   const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
   const date = new Date().toISOString().slice(0, 10)

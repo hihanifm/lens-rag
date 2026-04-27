@@ -79,7 +79,15 @@ export default function Home() {
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="font-semibold text-gray-900">{p.name}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900">{p.name}</h3>
+                          {p.has_pin && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+                              <span aria-hidden>🔒</span>
+                              PIN
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-400 mt-0.5">
                           {p.row_count ? `${p.row_count.toLocaleString()} records` : 'Processing...'}
                           {' · '}

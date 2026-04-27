@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getProject, browseProject } from '../api/client'
+import { useProjectPin } from '../hooks/useProjectPin'
+import PinGate from '../components/PinGate'
 
 export default function Browse() {
   const { projectId } = useParams()
@@ -13,10 +15,12 @@ export default function Browse() {
     queryFn: () => getProject(projectId),
   })
 
+  const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ['browse', projectId],
     queryFn: () => browseProject(projectId),
-    enabled: !!project,
+    enabled: !!project && !isLocked,
   })
 
   const records = data?.records ?? []
@@ -31,6 +35,8 @@ export default function Browse() {
     })
   }
 
+  if (project && isLocked) return <PinGate onUnlock={unlockWithPin} />
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-6 py-10">
@@ -38,14 +44,22 @@ export default function Browse() {
         {/* Header */}
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{project?.name}</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-2xl font-bold text-gray-900">{project?.name}</h1>
+            {project?.has_pin && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+                <span aria-hidden>🔒</span>
+                PIN protected
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-400 mb-4">{project?.row_count?.toLocaleString()} records</p>
           <div className="flex gap-1">
             {[
               { label: 'Search', path: 'search' },
               { label: 'Evaluate', path: 'evaluate' },
               { label: 'Browse', path: 'browse' },
-              { label: 'Settings', path: 'settings' },
+              { label: project?.has_pin ? 'Settings 🔒' : 'Settings', path: 'settings' },
             ].map(({ label, path }) => (
               <Link
                 key={path}

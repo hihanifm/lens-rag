@@ -240,7 +240,7 @@ def rrf_merge(vector_results, bm25_results, k=60):
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/projects` | List all projects |
-| GET | `/projects/{id}` | Get project detail |
+| GET | `/projects/{id}` | Get project detail (includes `has_pin`, never returns raw `pin`) |
 | POST | `/projects` | Create project metadata |
 | PATCH | `/projects/{id}` | Update name / display_columns / default_k (no re-ingest) |
 | GET | `/projects/{id}/columns` | All original column names for the project schema |
@@ -249,8 +249,24 @@ def rrf_merge(vector_results, bm25_results, k=60):
 | POST | `/projects/{id}/export` | Search + return Excel download |
 | GET | `/projects/{id}/browse` | First 10 raw records (SELECT * LIMIT 10) |
 | POST | `/projects/{id}/evaluate/run` | SSE RAGAS export stream |
+| POST | `/projects/{id}/verify-pin` | Verify PIN for a protected project |
 | POST | `/upload/preview` | Parse Excel → return columns + row count |
 | GET | `/health` | Liveness check |
+
+### Per-project PIN protection
+
+Projects can optionally be created with a PIN (`public.projects.pin`, stored as plain text; on-prem internal tool).
+
+- **If no PIN is set**: all endpoints behave as before.
+- **If a PIN is set**: the following endpoints require `X-Project-Pin: <pin>` or they return `401`:
+  - `PATCH /projects/{id}`
+  - `GET /projects/{id}/columns`
+  - `GET /projects/{id}/browse`
+  - `POST /projects/{id}/search`
+  - `POST /projects/{id}/export`
+  - `POST /projects/{id}/evaluate/run`
+
+To validate a PIN from the UI, call `POST /projects/{id}/verify-pin` with body `{ "pin": "..." }`.
 
 ---
 
@@ -511,3 +527,23 @@ make prod-up
 
 > **IMPORTANT:** Any change to backend Python files requires `make build && make up`.
 > `make restart` alone does NOT pick up code changes — it only recreates containers from the existing image.
+
+### E2E Tests (Playwright)
+
+Requires the dev stack to be running (`make up`).
+
+```bash
+make e2e          # run full Playwright suite
+make e2e-up       # start stack + build before running tests
+make e2e-down     # tear down after
+
+cd frontend
+npm run e2e       # same as make e2e
+npm run e2e:ui    # Playwright interactive UI mode
+```
+
+Test files live in `frontend/e2e/`:
+- `smoke.spec.ts` — basic liveness checks
+- `create_ingest.spec.ts` — project creation + ingestion flow
+- `search_export.spec.ts` — search, export to Excel
+- `major_flows.spec.ts` — end-to-end user journeys

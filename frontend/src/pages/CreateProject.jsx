@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { previewExcel, createProject, API_BASE_URL } from '../api/client'
 
@@ -15,12 +15,63 @@ export default function CreateProject() {
   const [idColumn, setIdColumn] = useState(null)
   const [displayColumns, setDisplayColumns] = useState([])
   const [defaultK, setDefaultK] = useState(10)
+  const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ingestProgress, setIngestProgress] = useState(null)
 
   const next = () => setStep(s => s + 1)
   const back = () => setStep(s => s - 1)
+
+  useEffect(() => {
+    // Enter should behave like clicking the primary action (Continue/Create) in the create wizard.
+    const onKeyDown = (e) => {
+      if (e.key !== 'Enter') return
+      if (e.isComposing) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (step >= STEPS.length) return // ingestion screen
+
+      const el = document.activeElement
+      if (el?.tagName === 'TEXTAREA') return
+      if (el?.isContentEditable) return
+
+      const canProceed =
+        (step === 0 && name.trim()) ||
+        (step === 1 && file && !loading) ||
+        (step === 2 && contentColumn) ||
+        (step === 3) ||
+        (step === 4) ||
+        (step === 5 && displayColumns.length > 0) ||
+        (step === 6 && !loading)
+
+      if (!canProceed) return
+      e.preventDefault()
+
+      if (step === 0) return next()
+      if (step === 1) return handleUpload()
+      if (step === 2) return next()
+      if (step === 3) return next()
+      if (step === 4) {
+        const defaults = [...new Set([...contextColumns, idColumn, contentColumn].filter(Boolean))]
+        setDisplayColumns(defaults)
+        return next()
+      }
+      if (step === 5) return next()
+      if (step === 6) return handleCreate()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    step,
+    name,
+    file,
+    loading,
+    contentColumn,
+    contextColumns,
+    idColumn,
+    displayColumns.length,
+  ])
 
   const handleUpload = async () => {
     if (!file) return
@@ -47,7 +98,8 @@ export default function CreateProject() {
         context_columns: contextColumns,
         id_column: idColumn || null,
         display_columns: displayColumns,
-        default_k: defaultK
+        default_k: defaultK,
+        pin: pin || null,
       })
 
       // Start ingestion via SSE
@@ -329,6 +381,20 @@ export default function CreateProject() {
                 </button>
               ))}
             </div>
+
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Access PIN <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                type="password"
+                value={pin}
+                onChange={e => setPin(e.target.value)}
+                placeholder="Leave blank for open access"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
             <div className="mt-10 bg-gray-50 rounded-xl border border-gray-200 p-5 text-sm text-gray-600 space-y-1.5">
               <p><span className="font-medium">Project:</span> {name}</p>
               <p><span className="font-medium">Content:</span> {contentColumn}</p>

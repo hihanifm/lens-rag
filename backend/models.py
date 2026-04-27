@@ -10,6 +10,7 @@ class ProjectCreate(BaseModel):
     id_column: Optional[str] = None
     display_columns: List[str]
     default_k: int = 10
+    pin: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):
