@@ -1,0 +1,45 @@
+services:
+
+  lens-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: lens-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lens
+      POSTGRES_USER: lens_user
+      POSTGRES_PASSWORD: changeme
+    ports:
+      - "5432:5432"
+    volumes:
+      - lens-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lens_user -d lens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  lens-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lens-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      lens-postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: lens-postgres
+      DB_PORT: 5432
+      DB_NAME: lens
+      DB_USER: lens_user
+      DB_PASSWORD: changeme
+    volumes:
+      - lens-uploads:/data/projects
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach Ollama on host
+
+volumes:
+  lens-postgres-data:
+  lens-uploads:
