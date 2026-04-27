@@ -1,43 +1,35 @@
 from openai import OpenAI
-from config import EMBEDDING_BASE_URL, EMBEDDING_MODEL, RERANKER_MODEL
-
-# Single client pointed at Ollama — NOT OpenAI servers
-_client = OpenAI(
-    base_url=EMBEDDING_BASE_URL,
-    api_key="ollama"  # required by client, ignored by Ollama
+from config import (
+    EMBEDDING_PROVIDER, EMBEDDING_MODEL,
+    OLLAMA_BASE_URL, OPENAI_API_KEY,
+    RERANKER_ENABLED, RERANKER_MODEL
 )
+
+# Embedding client — Ollama or OpenAI depending on provider
+if EMBEDDING_PROVIDER == "openai":
+    _embed_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    _embed_client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+
+# Reranker always runs via Ollama
+_rerank_client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 
 def embed(text: str) -> list[float]:
-    """Embed a single text using bge-m3 via Ollama."""
-    response = _client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=text
-    )
+    response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
     return response.data[0].embedding
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    """Embed multiple texts in one call."""
-    response = _client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=texts
-    )
+    response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
     return [item.embedding for item in response.data]
 
 
 def rerank(query: str, candidates: list[str]) -> list[float]:
-    """
-    Score each candidate against the query using bge-reranker-base.
-    Returns list of relevance scores, same order as candidates.
-    """
+    """Score each candidate against the query. Returns scores in same order."""
     scores = []
     for candidate in candidates:
         combined = f"{query} [SEP] {candidate}"
-        response = _client.embeddings.create(
-            model=RERANKER_MODEL,
-            input=combined
-        )
-        # Reranker returns a relevance score as first embedding value
+        response = _rerank_client.embeddings.create(model=RERANKER_MODEL, input=combined)
         scores.append(response.data[0].embedding[0])
     return scores

@@ -37,7 +37,7 @@ Works for any domain, any Excel structure.
 - Python + FastAPI
 - PostgreSQL + pgvector extension
 - pandas + openpyxl (Excel reading)
-- openai Python client (pointed at Ollama — NOT OpenAI servers)
+- openai Python client (Ollama by default; configurable to OpenAI for testing)
 - psycopg2 (Postgres connection)
 
 ### Frontend
@@ -54,32 +54,41 @@ Works for any domain, any Excel structure.
 
 ---
 
-## System Config (config.py)
+## System Config (env vars → config.py)
 
-```python
-# Embedding
-EMBEDDING_BASE_URL = "http://host.docker.internal:11434/v1"
-EMBEDDING_MODEL    = "bge-m3"
-EMBEDDING_DIMS     = 1024
+All values configurable via environment variables. Defaults shown.
 
-# Reranker
-RERANKER_MODEL     = "bge-reranker-base"
+```bash
+# Embedding provider: "ollama" (on-prem) or "openai" (for testing)
+EMBEDDING_PROVIDER=ollama
 
-# Search defaults
-TOP_K_RETRIEVAL    = 50     # internal candidate pool
-TOP_K_DEFAULT      = 10     # default results shown to user
-TOP_K_MAX          = 50     # user cannot exceed this
+# Ollama settings (used when EMBEDDING_PROVIDER=ollama)
+OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+OLLAMA_EMBED_MODEL=bge-m3
+EMBEDDING_DIMS=1024
+
+# OpenAI settings (used when EMBEDDING_PROVIDER=openai)
+OPENAI_API_KEY=sk-...
+OPENAI_EMBED_MODEL=text-embedding-3-small
+EMBEDDING_DIMS=1536   # override when switching to OpenAI
+
+# Reranker — always Ollama, no OpenAI equivalent
+RERANKER_ENABLED=true           # set false to skip reranking
+RERANKER_MODEL=bge-reranker-base
 
 # Database
-DB_HOST            = "lens-postgres"
-DB_PORT            = 5432
-DB_NAME            = "lens"
-DB_USER            = "lens_user"
-DB_PASSWORD        = "changeme"
-
-# Projects
-PROJECTS_BASE_DIR  = "/data/projects"
+DB_HOST=lens-postgres
+DB_PORT=5432
+DB_NAME=lens
+DB_USER=lens_user
+DB_PASSWORD=changeme
 ```
+
+### Switching to OpenAI (e.g. testing from home)
+```bash
+EMBEDDING_PROVIDER=openai OPENAI_API_KEY=sk-... EMBEDDING_DIMS=1536 RERANKER_ENABLED=false make up
+```
+Or set in a local `.env` file (never commit it).
 
 ---
 

@@ -1,7 +1,7 @@
 import time
 from db import get_cursor
 from embedder import embed, rerank
-from config import TOP_K_RETRIEVAL, TOP_K_DEFAULT, TOP_K_MAX
+from config import TOP_K_RETRIEVAL, TOP_K_DEFAULT, TOP_K_MAX, RERANKER_ENABLED
 from models import SearchResponse, SearchResult, SearchStats
 from ingestion import safe_col_name
 
@@ -133,23 +133,26 @@ def topic_search(
     stats['rrf_merge_ms'] = round((time.perf_counter() - t) * 1000, 1)
     stats['candidates_retrieved'] = len(merged_ids)
 
-    # Step 5: Rerank top candidates
+    # Step 5: Rerank top candidates (skipped if RERANKER_ENABLED=false)
     t = time.perf_counter()
     candidates_to_rerank = merged_ids[:min(len(merged_ids), TOP_K_RETRIEVAL)]
-    candidate_texts = [
-        rows_by_id[cid]['contextual_content']
-        for cid in candidates_to_rerank
-        if cid in rows_by_id
-    ]
-    rerank_scores = rerank(query, candidate_texts)
 
-    # Sort by rerank score
-    ranked = sorted(
-        zip(candidates_to_rerank, rerank_scores),
-        key=lambda x: x[1],
-        reverse=True
-    )
-    stats['reranker_ms'] = round((time.perf_counter() - t) * 1000, 1)
+    if RERANKER_ENABLED:
+        candidate_texts = [
+            rows_by_id[cid]['contextual_content']
+            for cid in candidates_to_rerank
+            if cid in rows_by_id
+        ]
+        rerank_scores = rerank(query, candidate_texts)
+        ranked = sorted(
+            zip(candidates_to_rerank, rerank_scores),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        stats['reranker_ms'] = round((time.perf_counter() - t) * 1000, 1)
+    else:
+        ranked = [(doc_id, None) for doc_id in candidates_to_rerank]
+        stats['reranker_ms'] = None
 
     # Step 6: Build results
     results = []
@@ -161,7 +164,7 @@ def topic_search(
         for col in display_columns:
             safe = f'col_{safe_col_name(col)}'
             display_data[col] = row.get(safe)
-        results.append(SearchResult(display_data=display_data, score=round(float(score), 4)))
+        results.append(SearchResult(display_data=display_data, score=round(float(score), 4) if score is not None else None))
 
     stats['total_ms'] = round((time.perf_counter() - total_start) * 1000, 1)
 
