@@ -18,7 +18,7 @@ function append(entry) {
   save(entries)
 }
 
-export function saveSearch({ project_id, project_name, query, mode, k, results_returned, total_ms }) {
+export function saveSearch({ project_id, project_name, query, mode, k, results_returned, total_ms, display_columns, results }) {
   append({
     id: Date.now(),
     type: 'search',
@@ -29,11 +29,13 @@ export function saveSearch({ project_id, project_name, query, mode, k, results_r
     k,
     results_returned,
     total_ms,
+    display_columns: display_columns ?? [],
+    results: results ?? [],
     at: new Date().toISOString(),
   })
 }
 
-export function saveEval({ project_id, project_name, test_case_count, k }) {
+export function saveEval({ project_id, project_name, test_case_count, k, results }) {
   append({
     id: Date.now(),
     type: 'evaluate',
@@ -41,6 +43,7 @@ export function saveEval({ project_id, project_name, test_case_count, k }) {
     project_name,
     test_case_count,
     k,
+    results: results ?? [],
     at: new Date().toISOString(),
   })
 }

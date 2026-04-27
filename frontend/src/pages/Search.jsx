@@ -50,6 +50,8 @@ export default function Search() {
         k: effectiveK,
         results_returned: data.results.length,
         total_ms: data.stats?.total_ms,
+        display_columns: project?.display_columns ?? [],
+        results: data.results,
       })
     } catch (e) {
       setError('Search failed. Please try again.')

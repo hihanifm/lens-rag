@@ -85,6 +85,7 @@ export default function EvaluateProject() {
           project_name: project?.name ?? '',
           test_case_count: data.length,
           k,
+          results: data,
         })
       },
       () => { setError('Evaluation failed. Please try again.'); setLoading(false) }
