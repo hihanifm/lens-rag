@@ -443,26 +443,14 @@ Key choices made during design:
 
 ### Running the stack
 ```bash
-make up       # start FastAPI + PostgreSQL in background
+make up       # start Postgres + API + frontend (dev) in background
 make logs     # tail logs
 make down     # stop everything
 make build    # rebuild images after code changes
 make restart  # down + up
 ```
 
-Frontend runs separately in dev mode only:
-```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:37001
-```
-
-Alternatively, you can run the frontend dev server in Docker (so `make up` starts everything):
-```bash
-make up
-# UI:  http://localhost:37001
-# API: http://localhost:37000
-```
+Dev UI: `http://localhost:37001`  \nDev API: `http://localhost:37000`
 
 Backend API: `http://localhost:37000`
 Postgres: `localhost:5432` (lens_user / changeme)
@@ -503,6 +491,12 @@ your.server {
 ```
 
 API calls from the browser go to `/lens-rag/projects/...` → Caddy strips the prefix → FastAPI sees `/projects/...`. React Router uses `basename=/lens-rag/` so all client-side routes resolve correctly.
+
+To run prod via Docker Compose (single port `37000`), use:
+```bash
+make prod-up
+# then open http://localhost:37000/lens-rag/
+```
 
 ### Common Makefile targets
 | Command | What it does |
