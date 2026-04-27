@@ -48,6 +48,23 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: lens-frontend
+    restart: unless-stopped
+    ports:
+      - "37001:37001"
+    environment:
+      # Browser needs to reach the API on the host-mapped port.
+      - VITE_API_URL=http://localhost:37000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - lens-api
+
 volumes:
   lens-postgres-data:
   lens-uploads:

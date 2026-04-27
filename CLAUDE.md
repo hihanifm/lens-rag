@@ -64,7 +64,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 - Axios (API calls)
 
 ### Infrastructure
-- Docker Compose: lens-api (FastAPI) + lens-postgres (pgvector)
+- Docker Compose: lens-api (FastAPI) + lens-postgres (pgvector) + frontend (Vite dev server)
 - Ollama: runs on host, outside Docker
 - Communication: FastAPI → Ollama via host.docker.internal:11434
 
@@ -455,6 +455,13 @@ Frontend runs separately in dev mode only:
 cd frontend
 npm install
 npm run dev   # http://localhost:37001
+```
+
+Alternatively, you can run the frontend dev server in Docker (so `make up` starts everything):
+```bash
+make up
+# UI:  http://localhost:37001
+# API: http://localhost:37000
 ```
 
 Backend API: `http://localhost:37000`
