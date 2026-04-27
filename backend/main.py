@@ -1,6 +1,7 @@
 import os
 import json
 import tempfile
+import time
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,6 +28,7 @@ from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
 
 app = FastAPI(title="LENS API", version="1.3.0", root_path=ROOT_PATH)
+_STARTED_AT = time.time()
 
 app.add_middleware(
     CORSMiddleware,
@@ -306,7 +308,12 @@ def evaluate_run(project_id: int, req: EvalRequest, request: Request):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "LENS API", "version": app.version}
+    return {
+        "status": "ok",
+        "service": "LENS API",
+        "version": app.version,
+        "uptime_s": int(time.time() - _STARTED_AT),
+    }
 
 
 @app.get("/{full_path:path}")

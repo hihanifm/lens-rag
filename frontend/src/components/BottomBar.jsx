@@ -13,6 +13,17 @@ export default function BottomBar() {
   const online = !isError && data?.status === 'ok'
   const version = data?.version ?? '—'
   const mode = import.meta.env.PROD ? 'PROD' : 'DEV'
+  const uptimeS = typeof data?.uptime_s === 'number' ? data.uptime_s : null
+
+  const fmtUptime = (s) => {
+    if (s === null) return '—'
+    const hrs = Math.floor(s / 3600)
+    const mins = Math.floor((s % 3600) / 60)
+    const secs = s % 60
+    if (hrs > 0) return `${hrs}h ${mins}m`
+    if (mins > 0) return `${mins}m ${secs}s`
+    return `${secs}s`
+  }
 
   return (
     <div className="fixed bottom-0 left-0 right-0 h-8 bg-gray-100 border-t border-gray-200 flex items-center justify-between px-4 text-xs text-gray-500">
@@ -26,6 +37,8 @@ export default function BottomBar() {
         <span className="text-gray-300">·</span>
         <span className={`inline-block w-2 h-2 rounded-full ${online ? 'bg-emerald-400' : 'bg-red-400'}`} />
         <span>API {online ? 'online' : 'offline'}</span>
+        <span className="text-gray-300">·</span>
+        <span>up {fmtUptime(uptimeS)}</span>
         <span className="text-gray-300">·</span>
         <span>v{version}</span>
       </div>
