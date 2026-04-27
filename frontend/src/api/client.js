@@ -40,8 +40,30 @@ export const searchProject = (projectId, query, mode, k) =>
 
 // ── Evaluate ──────────────────────────────────────────────────────────────
 
-export const runEvaluation = (projectId, testCases, k) =>
-  api.post(`/projects/${projectId}/evaluate/run`, { test_cases: testCases, k }).then(r => r.data)
+export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete, onError) => {
+  fetch(`${API_BASE_URL}/projects/${projectId}/evaluate/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ test_cases: testCases, k }),
+  }).then(async (res) => {
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const event = JSON.parse(line.slice(6))
+        if (event.type === 'progress') onProgress(event)
+        if (event.type === 'complete') onComplete(event.results)
+      }
+    }
+  }).catch(onError)
+}
 
 // ── Export ────────────────────────────────────────────────────────────────
 

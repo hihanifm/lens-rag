@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getProject, runEvaluation } from '../api/client'
+import { getProject, streamEvaluation } from '../api/client'
 import { API_BASE_URL } from '../api/client'
 
 export default function EvaluateProject() {
@@ -9,6 +9,7 @@ export default function EvaluateProject() {
   const [testCases, setTestCases] = useState(null)
   const [k, setK] = useState(10)
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(null)   // {index, total, question}
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
 
@@ -65,19 +66,18 @@ export default function EvaluateProject() {
     reader.readAsText(file)
   }
 
-  const handleRun = async () => {
+  const handleRun = () => {
     if (!testCases?.length) return
     setLoading(true)
     setError('')
     setResults(null)
-    try {
-      const data = await runEvaluation(projectId, testCases, k)
-      setResults(data)
-    } catch {
-      setError('Evaluation failed. Please try again.')
-    } finally {
-      setLoading(false)
-    }
+    setProgress(null)
+    streamEvaluation(
+      projectId, testCases, k,
+      (event) => setProgress({ index: event.index, total: event.total, question: event.question }),
+      (data) => { setResults(data); setLoading(false); setProgress(null) },
+      () => { setError('Evaluation failed. Please try again.'); setLoading(false) }
+    )
   }
 
   const handleExport = () => {
@@ -170,7 +170,7 @@ export default function EvaluateProject() {
               disabled={!testCases || loading}
               className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
-              {loading ? `Running ${testCases?.length} searches...` : 'Run Evaluation'}
+              {loading ? 'Running...' : 'Run Evaluation'}
             </button>
             <button
               onClick={handleExport}
@@ -182,6 +182,22 @@ export default function EvaluateProject() {
           </div>
 
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+          {/* Live progress */}
+          {progress && (
+            <div className="mt-5">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span className="truncate max-w-xs">{progress.question}</span>
+                <span className="ml-2 shrink-0">{progress.index} / {progress.total}</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-1.5">
+                <div
+                  className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${(progress.index / progress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Results */}

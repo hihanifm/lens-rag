@@ -13,7 +13,7 @@ from models import ProjectCreate, SearchRequest, EvalRequest
 from projects import create_project, get_all_projects, get_project, update_project_status
 from ingestion import read_excel, ingest
 from search import search as do_search
-from evaluate import build_ragas_export
+from evaluate import build_ragas_export, stream_ragas_export
 
 app = FastAPI(title="LENS API", version="1.1.0")
 
@@ -194,13 +194,16 @@ def export_results(project_id: int, req: SearchRequest):
 
 @app.post("/projects/{project_id}/evaluate/run")
 def evaluate_run(project_id: int, req: EvalRequest):
-    """Run each test case through search and return RAGAS-format results as JSON."""
+    """Stream evaluation progress via SSE, one event per question, then a complete event."""
     project = get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     test_cases = [{"question": c.question, "ground_truth": c.ground_truth} for c in req.test_cases]
-    return build_ragas_export(test_cases, project['schema_name'], req.k)
+    return StreamingResponse(
+        stream_ragas_export(test_cases, project['schema_name'], req.k),
+        media_type="text/event-stream"
+    )
 
 
 # ── Health ────────────────────────────────────────────────────────────────

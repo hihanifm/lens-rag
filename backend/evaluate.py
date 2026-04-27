@@ -76,3 +76,24 @@ def build_ragas_export(test_cases: list[dict], schema_name: str, k: int) -> list
             "ground_truth": case['ground_truth'],
         })
     return output
+
+
+def stream_ragas_export(test_cases: list[dict], schema_name: str, k: int):
+    """
+    Generator — yields SSE-formatted strings, one progress event per question,
+    then a final complete event with the full results list.
+    """
+    total = len(test_cases)
+    results = []
+
+    for i, case in enumerate(test_cases):
+        contexts = search_for_eval(case['question'], schema_name, k)
+        result = {
+            "question": case['question'],
+            "contexts": contexts,
+            "ground_truth": case['ground_truth'],
+        }
+        results.append(result)
+        yield f"data: {json.dumps({'type': 'progress', 'index': i + 1, 'total': total, 'question': case['question'], 'contexts_count': len(contexts)})}\n\n"
+
+    yield f"data: {json.dumps({'type': 'complete', 'results': results})}\n\n"
