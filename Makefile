@@ -17,7 +17,12 @@ ps:
 	docker compose ps
 
 prod-up: build-frontend
+	docker compose --profile dev down
 	docker compose --profile prod up -d --build
+
+dev-up:
+	docker compose --profile prod down
+	docker compose --profile dev up -d
 
 prod-down:
 	docker compose --profile prod down
