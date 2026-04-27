@@ -8,6 +8,17 @@ Works for any domain, any Excel structure.
 
 ---
 
+## Interaction Protocol (NEVER skip this)
+
+Before writing any code or plan, Claude MUST:
+1. Ask clarifying questions to fully understand the requirements
+2. Wait for the user to respond
+3. Only proceed to coding after the user confirms you have enough context
+
+Do NOT jump straight into code. Always converse first.
+
+---
+
 ## Best Practices
 See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React, FastAPI, Git, and general rules.
 
