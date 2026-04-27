@@ -94,11 +94,13 @@ export default function EvaluateProject() {
 
   const handleExport = () => {
     if (!results) return
+    const slug = (project?.name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const date = new Date().toISOString().slice(0, 10)
     const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', 'lens_ragas_export.json')
+    link.setAttribute('download', `${slug}_lens_ragas_${date}.json`)
     document.body.appendChild(link)
     link.click()
     link.remove()

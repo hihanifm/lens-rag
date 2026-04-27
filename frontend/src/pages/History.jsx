@@ -35,7 +35,11 @@ function EvalExpansion({ entry }) {
             {entry.results.length} question{entry.results.length !== 1 ? 's' : ''} · k={entry.k}
           </span>
           <button
-            onClick={() => downloadJSON(entry.results, 'lens_ragas_export.json')}
+            onClick={() => {
+              const slug = (entry.project_name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+              const date = new Date(entry.ts).toISOString().slice(0, 10)
+              downloadJSON(entry.results, `${slug}_lens_ragas_${date}.json`)
+            }}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium"
           >
             Download JSON ↓

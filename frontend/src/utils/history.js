@@ -80,7 +80,7 @@ export function exportHistoryCSV() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'lens_history.csv'
+  a.download = `lens_history_${new Date().toISOString().slice(0, 10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }

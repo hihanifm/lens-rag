@@ -76,16 +76,19 @@ export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete
 
 // ── Export ────────────────────────────────────────────────────────────────
 
-export const exportResults = async (projectId, query, mode, k) => {
+export const exportResults = async (projectId, query, mode, k, projectName = '') => {
   const response = await api.post(
     `/projects/${projectId}/export`,
     { query, mode, k },
     { responseType: 'blob' }
   )
+  const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  const date = new Date().toISOString().slice(0, 10)
+  const filename = `${slug}_lens_results_${date}.xlsx`
   const url = window.URL.createObjectURL(new Blob([response.data]))
   const link = document.createElement('a')
   link.href = url
-  link.setAttribute('download', 'lens_results.xlsx')
+  link.setAttribute('download', filename)
   document.body.appendChild(link)
   link.click()
   link.remove()

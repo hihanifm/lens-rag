@@ -63,7 +63,7 @@ export default function Search() {
   const handleExport = async () => {
     if (!query.trim()) return
     try {
-      await exportResults(projectId, query, effectiveMode, effectiveK)
+      await exportResults(projectId, query, effectiveMode, effectiveK, project?.name)
     } catch (e) {
       setError('Export failed.')
     }
