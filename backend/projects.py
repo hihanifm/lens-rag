@@ -74,8 +74,23 @@ def update_project(project_id: int, name: str = None, display_columns: list = No
         return dict(row) if row else None
 
 
-def get_project_columns(schema_name: str) -> list[str]:
-    """Return all original column names available in the project's records table."""
+def get_project_columns(project: dict) -> list[str]:
+    """Return all original column names available in the project's records table.
+
+    DB stores columns as col_{lowercased_underscored}, but the project metadata
+    holds the original names (e.g. 'Asset ID'). We build a reverse map so the
+    returned names match what's stored in display_columns / context_columns etc.
+    """
+    # Build normalized_name -> original_name from all stored column lists
+    known: dict[str, str] = {}
+    for col in (
+        list(project.get('context_columns') or [])
+        + list(project.get('display_columns') or [])
+        + ([project['content_column']] if project.get('content_column') else [])
+        + ([project['id_column']] if project.get('id_column') else [])
+    ):
+        known[col.lower().replace(' ', '_')] = col
+
     with get_cursor() as (cur, conn):
         cur.execute("""
             SELECT column_name
@@ -84,8 +99,10 @@ def get_project_columns(schema_name: str) -> list[str]:
               AND table_name = 'records'
               AND column_name LIKE 'col\\_%%'
             ORDER BY ordinal_position
-        """, [schema_name])
-        return [row['column_name'][4:] for row in cur.fetchall()]
+        """, [project['schema_name']])
+        normalized = [row['column_name'][4:] for row in cur.fetchall()]
+
+    return [known.get(n, n) for n in normalized]
 
 
 def update_project_status(project_id: int, status: str, row_count: int = None):

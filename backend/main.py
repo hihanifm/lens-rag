@@ -61,7 +61,7 @@ def get_columns_endpoint(project_id: int):
     project = get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    columns = get_project_columns(project['schema_name'])
+    columns = get_project_columns(project)
     return {"columns": columns}
 
 
