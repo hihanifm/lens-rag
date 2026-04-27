@@ -232,6 +232,36 @@ def rrf_merge(vector_results, bm25_results, k=60):
 
 ---
 
+## API Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/projects` | List all projects |
+| GET | `/projects/{id}` | Get project detail |
+| POST | `/projects` | Create project metadata |
+| PATCH | `/projects/{id}` | Update name / display_columns / default_k (no re-ingest) |
+| GET | `/projects/{id}/columns` | All original column names for the project schema |
+| GET | `/projects/{id}/ingest?tmp_path=...` | SSE ingestion stream |
+| POST | `/projects/{id}/search` | Search (id or topic mode) |
+| POST | `/projects/{id}/export` | Search + return Excel download |
+| GET | `/projects/{id}/browse` | First 10 raw records (SELECT * LIMIT 10) |
+| POST | `/projects/{id}/evaluate/run` | SSE RAGAS export stream |
+| POST | `/upload/preview` | Parse Excel → return columns + row count |
+| GET | `/health` | Liveness check |
+
+---
+
+## Browser localStorage — Session History
+
+All search and evaluation history is stored **client-side** in `localStorage` under the key `lens_history`. No backend involvement.
+
+- Max 100 entries (oldest trimmed automatically)
+- Utility in `frontend/src/utils/history.js`: `saveSearch()`, `saveEval()`, `loadHistory()`, `clearHistory()`, `exportHistoryCSV()`
+- Each search entry stores: project_id, project_name, query, mode, k, results_returned, total_ms, display_columns, full results array, timestamp
+- Each eval entry stores: project_id, project_name, test_case_count, k, full RAGAS results array, timestamp
+
+---
+
 ## API Response — always includes stats
 
 ```json
@@ -258,10 +288,11 @@ def rrf_merge(vector_results, bm25_results, k=60):
 
 ---
 
-## Frontend Screens (4 only)
+## Frontend Screens
 
 ### Screen 1 — Home
-- List of projects (name, status, row count, created date)
+- Two-column layout: Projects list (left) + Recent Activity panel (right)
+- Recent Activity shows last 5 history entries (search + eval) with quick re-run buttons
 - [+ New Project] button
 
 ### Screen 2 — Create Project (multi-step)
@@ -274,8 +305,8 @@ def rrf_merge(vector_results, bm25_results, k=60):
 - Step 7: Set default K (5/10/20/50, default 10)
 - [Create] → SSE progress bar → "Ready!"
 
-### Screen 3 — Search
-- Project name shown top
+### Screen 3 — Search (tab 1 of 4)
+- Project name shown top with [Search] [Evaluate] [Browse] [Settings] tab nav
 - Search mode toggle: [ID] [Topic] (ID only shown if has_id_column)
 - Query input
 - K selector: 5 / 10 / 20 / 50
@@ -283,8 +314,33 @@ def rrf_merge(vector_results, bm25_results, k=60):
 - Results table (display columns only, configured at project creation)
 - Stats panel (timing breakdown)
 - [Export to Excel] button
+- Each search is saved to browser localStorage history
 
-### Screen 4 — (future) Admin settings
+### Screen 4 — Evaluate (tab 2 of 4)
+- Upload test set CSV (question + ground_truth columns)
+- K selector
+- [Run Evaluation] → SSE live progress → results list
+- [Export RAGAS JSON] button
+- Each completed evaluation is saved to browser localStorage history
+
+### Screen 5 — Browse (tab 3 of 4)
+- Shows first 10 raw records from Postgres (SELECT * LIMIT 10)
+- Horizontally-scrollable fixed-layout table
+- All DB columns shown (col_* names, contextual_content, sheet_name, truncated embedding)
+- Cells default to 2-line clamp; click row to expand fully
+
+### Screen 6 — Settings (tab 4 of 4)
+- Left card: read-only ingestion config (content column, context columns, ID column, row count, schema)
+- Right card: editable fields — project name, default k, display columns (multi-select from full column list)
+- Save calls PATCH /projects/{id}; invalidates TanStack Query cache
+
+### Screen 7 — History (/history)
+- Global view of all past searches and evaluations (stored in browser localStorage)
+- Project filter dropdown
+- Table with type badge (Search / Evaluate), project, query/session, mode, k, results, latency, time ago
+- Click row to expand: search rows show full ResultsTable; eval rows show question preview + Download JSON
+- Re-run button on search rows (navigates to Search page with query pre-filled)
+- Export CSV + Clear all buttons
 
 ---
 
@@ -299,21 +355,28 @@ lens/
     embedder.py        ← Ollama embedding calls
     ingestion.py       ← Excel reading + ingestion pipeline
     search.py          ← vector + BM25 + RRF + reranker
-    projects.py        ← project CRUD
-    models.py          ← Pydantic models
+    projects.py        ← project CRUD + update_project + get_project_columns
+    models.py          ← Pydantic models (incl. ProjectUpdate)
+    evaluate.py        ← RAGAS export builder + SSE streamer
   frontend/
     src/
       pages/
-        Home.jsx
+        Home.jsx           ← projects list + recent activity panel
         CreateProject.jsx
         Search.jsx
+        EvaluateProject.jsx
+        Browse.jsx         ← raw record viewer (SELECT * LIMIT 10)
+        Settings.jsx       ← project config viewer + editable fields
+        History.jsx        ← global search/eval history from localStorage
       components/
         ResultsTable.jsx
         StatsPanel.jsx
-        ProgressBar.jsx
-        ColumnPicker.jsx
+        BottomBar.jsx      ← API status + History link
+        Layout.jsx
+      utils/
+        history.js         ← localStorage history helpers (saveSearch, saveEval, etc.)
       api/
-        client.js      ← ALL axios calls here, nowhere else
+        client.js          ← ALL axios calls here, nowhere else
       App.jsx
       main.jsx
     package.json
@@ -333,7 +396,6 @@ lens/
 - Not a cross-source comparison tool
 - Not a version diff tool
 - Not a standards linker
-- Not a filter/browse tool (deferred to next project)
 - Not a multi-column keyword index tool (deferred to v2)
 - Not connected to any external API ever
 
@@ -411,5 +473,8 @@ unless you want TLS termination.
 | `make down` | Stop stack |
 | `make build` | Rebuild Docker images |
 | `make logs` | Follow all container logs |
-| `make restart` | Full restart |
+| `make restart` | Stop + start (no rebuild) |
 | `make ps` | Show container status |
+
+> **IMPORTANT:** Any change to backend Python files requires `make build && make up`.
+> `make restart` alone does NOT pick up code changes — it only recreates containers from the existing image.
