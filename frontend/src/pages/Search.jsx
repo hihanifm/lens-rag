@@ -160,6 +160,7 @@ export default function Search() {
           {/* Query input */}
           <div className="flex gap-3">
             <input
+              data-testid="search-query"
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
@@ -174,6 +175,7 @@ export default function Search() {
             />
             <button
               onClick={handleSearch}
+              data-testid="search-submit"
               disabled={loading || !query.trim()}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
@@ -217,6 +219,7 @@ export default function Search() {
               {results.length > 0 && (
                 <button
                   onClick={handleExport}
+                  data-testid="export-excel"
                   className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                 >
                   Export to Excel ↓
@@ -230,7 +233,9 @@ export default function Search() {
               </div>
             ) : (
               <>
+                <div data-testid="results-table">
                 <ResultsTable results={results} displayColumns={project.display_columns} />
+                </div>
                 <StatsPanel stats={stats} />
               </>
             )}

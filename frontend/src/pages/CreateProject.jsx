@@ -107,6 +107,7 @@ export default function CreateProject() {
             <h2 className="text-2xl font-bold text-gray-900 mb-2">New Project</h2>
             <p className="text-gray-500 mb-8">Give your project a name.</p>
             <input
+              data-testid="project-name"
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
@@ -115,6 +116,7 @@ export default function CreateProject() {
             />
             <button
               onClick={next}
+              data-testid="continue"
               disabled={!name.trim()}
               className="mt-6 w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
@@ -139,6 +141,7 @@ export default function CreateProject() {
               )}
               <input
                 id="file-input"
+                data-testid="file-input"
                 type="file"
                 accept=".xlsx,.xls"
                 className="hidden"
@@ -174,6 +177,7 @@ export default function CreateProject() {
               </button>
               <button
                 onClick={handleUpload}
+                data-testid="upload-continue"
                 disabled={!file || loading}
                 className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40"
               >
@@ -208,7 +212,7 @@ export default function CreateProject() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button onClick={next} disabled={!contentColumn} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">Continue</button>
+              <button data-testid="content-continue" onClick={next} disabled={!contentColumn} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">Continue</button>
             </div>
           </div>
         )}
@@ -236,7 +240,7 @@ export default function CreateProject() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
+              <button data-testid="context-continue" onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
             </div>
           </div>
         )}
@@ -269,7 +273,7 @@ export default function CreateProject() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button onClick={() => {
+              <button data-testid="id-continue" onClick={() => {
                 // Pre-fill display columns with context + id + content
                 const defaults = [...new Set([...contextColumns, idColumn, contentColumn].filter(Boolean))]
                 setDisplayColumns(defaults)
@@ -302,7 +306,7 @@ export default function CreateProject() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button onClick={next} disabled={displayColumns.length === 0} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">Continue</button>
+              <button data-testid="display-continue" onClick={next} disabled={displayColumns.length === 0} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">Continue</button>
             </div>
           </div>
         )}
@@ -337,6 +341,7 @@ export default function CreateProject() {
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
               <button
                 onClick={handleCreate}
+                data-testid="create-project"
                 disabled={loading}
                 className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40"
               >
@@ -367,7 +372,7 @@ export default function CreateProject() {
                   </>
                 )}
                 {ingestProgress.step === 'complete' && (
-                  <p className="text-emerald-600 font-medium">✓ Complete! Redirecting to search...</p>
+                  <p data-testid="ingest-complete" className="text-emerald-600 font-medium">✓ Complete! Redirecting to search...</p>
                 )}
                 {ingestProgress.step === 'error' && (
                   <p className="text-red-600">Error: {ingestProgress.message}</p>
