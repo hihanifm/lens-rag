@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import time
+import threading
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,7 +28,7 @@ from ingestion import read_excel, ingest
 from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
 
-app = FastAPI(title="LENS API", version="1.3.0", root_path=ROOT_PATH)
+app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
 
 app.add_middleware(
@@ -44,6 +45,10 @@ def startup():
     init_db()
 
 app.mount("/samples", StaticFiles(directory="samples"), name="samples")
+
+# Tracks live ingestion progress keyed by project_id.
+# Written by background ingestion threads; read by SSE polling loop.
+_ingest_progress: dict[int, dict] = {}
 
 
 def _static_frontend_app():
@@ -184,7 +189,11 @@ async def create_project_endpoint(data: ProjectCreate):
 async def ingest_project(project_id: int, tmp_path: str):
     """
     Stream ingestion progress via SSE.
-    Client connects and receives progress events until complete.
+
+    Ingestion runs in a background thread so it completes even if the client
+    navigates away mid-stream. The SSE generator polls _ingest_progress and
+    forwards events; when the client disconnects the thread keeps running and
+    the DB status is always updated to 'ready' or 'error' on completion.
     """
     project = get_project(project_id)
     if not project:
@@ -193,10 +202,25 @@ async def ingest_project(project_id: int, tmp_path: str):
     if not os.path.exists(tmp_path):
         raise HTTPException(status_code=400, detail="Upload file not found. Please re-upload.")
 
-    def event_stream():
+    # If a thread is already running for this project (e.g. browser EventSource
+    # auto-reconnected), just stream the existing progress instead of starting a
+    # duplicate ingestion.
+    if project_id in _ingest_progress:
+        def _stream_existing():
+            while True:
+                prog = _ingest_progress.get(project_id, {'step': 'starting', 'message': 'Preparing ingestion...'})
+                yield f"data: {json.dumps(prog)}\n\n"
+                if prog.get('step') in ('complete', 'error'):
+                    _ingest_progress.pop(project_id, None)
+                    break
+                time.sleep(1)
+        return StreamingResponse(_stream_existing(), media_type="text/event-stream")
+
+    _ingest_progress[project_id] = {'step': 'starting', 'message': 'Preparing ingestion...'}
+
+    def _run_ingestion():
         try:
             update_project_status(project_id, 'ingesting')
-
             for progress in ingest(
                 filepath=tmp_path,
                 project_id=project_id,
@@ -206,15 +230,24 @@ async def ingest_project(project_id: int, tmp_path: str):
                 id_column=project['id_column'],
                 display_columns=project['display_columns'],
             ):
-                yield f"data: {json.dumps(progress)}\n\n"
-
+                _ingest_progress[project_id] = progress
         except Exception as e:
             update_project_status(project_id, 'error')
-            yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+            _ingest_progress[project_id] = {'step': 'error', 'message': str(e)}
         finally:
-            # Clean up temp file
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    threading.Thread(target=_run_ingestion, daemon=True).start()
+
+    def event_stream():
+        while True:
+            prog = _ingest_progress.get(project_id, {'step': 'starting', 'message': 'Preparing ingestion...'})
+            yield f"data: {json.dumps(prog)}\n\n"
+            if prog.get('step') in ('complete', 'error'):
+                _ingest_progress.pop(project_id, None)
+                break
+            time.sleep(1)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

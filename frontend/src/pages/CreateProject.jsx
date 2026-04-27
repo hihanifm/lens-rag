@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { previewExcel, createProject, API_BASE_URL } from '../api/client'
 
@@ -19,9 +19,16 @@ export default function CreateProject() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ingestProgress, setIngestProgress] = useState(null)
+  const evtSourceRef = useRef(null)
 
   const next = () => setStep(s => s + 1)
   const back = () => setStep(s => s - 1)
+
+  // Close the EventSource when the component unmounts so the browser doesn't
+  // auto-reconnect and trigger a duplicate ingestion request.
+  useEffect(() => {
+    return () => { evtSourceRef.current?.close() }
+  }, [])
 
   useEffect(() => {
     // Enter should behave like clicking the primary action (Continue/Create) in the create wizard.
@@ -100,6 +107,7 @@ export default function CreateProject() {
         display_columns: displayColumns,
         default_k: defaultK,
         pin: pin || null,
+        source_filename: file?.name || null,
       })
 
       // Start ingestion via SSE
@@ -107,11 +115,13 @@ export default function CreateProject() {
       const evtSource = new EventSource(
         `${API_BASE_URL}/projects/${project.id}/ingest?tmp_path=${encodeURIComponent(preview.tmp_path)}`
       )
+      evtSourceRef.current = evtSource
       evtSource.onmessage = (e) => {
         const data = JSON.parse(e.data)
         setIngestProgress(data)
         if (data.step === 'complete' || data.step === 'error') {
           evtSource.close()
+          evtSourceRef.current = null
           if (data.step === 'complete') {
             setTimeout(() => navigate(`/projects/${project.id}/search`), 1500)
           }

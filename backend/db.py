@@ -55,6 +55,7 @@ def init_db():
         # Optional project PIN (on-prem internal tool; stored in plain text).
         # Safe to run on every startup.
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS pin TEXT;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS source_filename TEXT;")
 
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None):

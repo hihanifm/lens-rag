@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getProjectPin, setProjectPin, verifyProjectPin } from '../api/client'
 
 export function useProjectPin(projectId, hasPin) {
-  const needsPin = !!hasPin
-  const storedPin = useMemo(() => {
-    if (!projectId) return ''
-    return getProjectPin(projectId)
-  }, [projectId])
+  const [locked, setLocked] = useState(false)
 
-  const [locked, setLocked] = useState(() => needsPin && !storedPin)
+  // hasPin is undefined while project is still loading; only set locked state
+  // once we know for sure whether a PIN is required.
+  useEffect(() => {
+    if (hasPin == null) return
+    setLocked(hasPin && !getProjectPin(projectId))
+  }, [projectId, hasPin])
 
   const unlockWithPin = async (pin) => {
     await verifyProjectPin(projectId, pin)
@@ -18,4 +19,3 @@ export function useProjectPin(projectId, hasPin) {
 
   return { isLocked: locked, unlockWithPin }
 }
-

@@ -174,6 +174,11 @@ export default function Settings() {
               <ReadOnlyField label="Records">
                 <Badge>{project.row_count?.toLocaleString() ?? '—'}</Badge>
               </ReadOnlyField>
+              {project.source_filename && (
+                <ReadOnlyField label="Source file">
+                  <span className="text-sm text-gray-600 font-mono">{project.source_filename}</span>
+                </ReadOnlyField>
+              )}
               <ReadOnlyField label="Created">
                 <span className="text-sm text-gray-600">
                   {new Date(project.created_at).toLocaleString()}

@@ -11,6 +11,7 @@ class ProjectCreate(BaseModel):
     display_columns: List[str]
     default_k: int = 10
     pin: Optional[str] = None
+    source_filename: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):

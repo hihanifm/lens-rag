@@ -19,8 +19,9 @@ def create_project(data: ProjectCreate) -> dict:
         cur.execute("""
             INSERT INTO public.projects
                 (name, schema_name, content_column, context_columns,
-                 id_column, display_columns, has_id_column, default_k, pin, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                 id_column, display_columns, has_id_column, default_k, pin,
+                 source_filename, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
         """, [
             data.name,
@@ -32,6 +33,7 @@ def create_project(data: ProjectCreate) -> dict:
             data.id_column is not None,
             data.default_k,
             pin,
+            data.source_filename or None,
         ])
         project = dict(cur.fetchone())
 
