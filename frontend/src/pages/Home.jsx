@@ -43,7 +43,7 @@ export default function Home() {
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">LENS</h1>
+            <Link to="/" className="text-3xl font-bold text-gray-900 tracking-tight hover:text-gray-700 transition-colors">LENS</Link>
             <p className="text-gray-500 mt-1">Lightweight ENgineering Search</p>
           </div>
           <Link
