@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../api/client'
 
@@ -20,14 +21,19 @@ export default function BottomBar() {
         <span className="text-gray-300">·</span>
         <span>v{version}</span>
       </div>
-      <a
-        href="https://github.com/hihanifm/lens-rag"
-        target="_blank"
-        rel="noreferrer"
-        className="hover:text-gray-700 transition-colors"
-      >
-        GitHub ↗
-      </a>
+      <div className="flex items-center gap-4">
+        <Link to="/history" className="hover:text-gray-700 transition-colors">
+          History
+        </Link>
+        <a
+          href="https://github.com/hihanifm/lens-rag"
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-gray-700 transition-colors"
+        >
+          GitHub ↗
+        </a>
+      </div>
     </div>
   )
 }

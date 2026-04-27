@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getProject, streamEvaluation } from '../api/client'
 import { API_BASE_URL } from '../api/client'
+import { saveEval } from '../utils/history'
 
 export default function EvaluateProject() {
   const { projectId } = useParams()
@@ -75,7 +76,17 @@ export default function EvaluateProject() {
     streamEvaluation(
       projectId, testCases, k,
       (event) => setProgress({ index: event.index, total: event.total, question: event.question }),
-      (data) => { setResults(data); setLoading(false); setProgress(null) },
+      (data) => {
+        setResults(data)
+        setLoading(false)
+        setProgress(null)
+        saveEval({
+          project_id: Number(projectId),
+          project_name: project?.name ?? '',
+          test_case_count: data.length,
+          k,
+        })
+      },
       () => { setError('Evaluation failed. Please try again.'); setLoading(false) }
     )
   }

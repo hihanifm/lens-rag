@@ -4,6 +4,7 @@ import Home from './pages/Home'
 import CreateProject from './pages/CreateProject'
 import Search from './pages/Search'
 import EvaluateProject from './pages/EvaluateProject'
+import History from './pages/History'
 import Layout from './components/Layout'
 
 const queryClient = new QueryClient()
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/projects/new" element={<CreateProject />} />
             <Route path="/projects/:projectId/search" element={<Search />} />
             <Route path="/projects/:projectId/evaluate" element={<EvaluateProject />} />
+            <Route path="/history" element={<History />} />
           </Routes>
         </Layout>
       </BrowserRouter>

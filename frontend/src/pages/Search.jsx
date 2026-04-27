@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getProject, searchProject, exportResults } from '../api/client'
 import ResultsTable from '../components/ResultsTable'
 import StatsPanel from '../components/StatsPanel'
+import { saveSearch } from '../utils/history'
 
 export default function Search() {
   const { projectId } = useParams()
   const location = useLocation()
-  const [query, setQuery] = useState('')
-  const [mode, setMode] = useState('topic')
-  const [k, setK] = useState(null)  // null = use project default
+  const [query, setQuery] = useState(location.state?.query ?? '')
+  const [mode, setMode] = useState(location.state?.mode ?? 'topic')
+  const [k, setK] = useState(location.state?.k ?? null)  // null = use project default
   const [results, setResults] = useState(null)
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -21,7 +22,14 @@ export default function Search() {
     queryFn: () => getProject(projectId)
   })
 
-  // Set default mode based on project config
+  // Sync mode from router state once project loads (guards against id mode on projects without id column)
+  useEffect(() => {
+    if (location.state?.mode && project) {
+      if (location.state.mode === 'id' && !project.has_id_column) setMode('topic')
+      else setMode(location.state.mode)
+    }
+  }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const effectiveMode = mode
   const effectiveK = k || project?.default_k || 10
 
@@ -34,6 +42,15 @@ export default function Search() {
       const data = await searchProject(projectId, query, effectiveMode, effectiveK)
       setResults(data.results)
       setStats(data.stats)
+      saveSearch({
+        project_id: Number(projectId),
+        project_name: project?.name ?? '',
+        query,
+        mode: effectiveMode,
+        k: effectiveK,
+        results_returned: data.results.length,
+        total_ms: data.stats?.total_ms,
+      })
     } catch (e) {
       setError('Search failed. Please try again.')
     } finally {
