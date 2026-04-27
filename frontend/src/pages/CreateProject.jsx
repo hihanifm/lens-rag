@@ -145,6 +145,29 @@ export default function CreateProject() {
                 onChange={e => setFile(e.target.files[0])}
               />
             </div>
+
+            <div className="mt-8">
+              <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Or try a sample</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: 'Product Catalog', file: 'product_catalog.xlsx', icon: '📦' },
+                  { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
+                  { label: 'Book Library', file: 'book_library.xlsx', icon: '📚' },
+                  { label: 'HR Directory', file: 'hr_directory.xlsx', icon: '👥' },
+                ].map(s => (
+                  <a
+                    key={s.file}
+                    href={`${API_BASE_URL}/samples/${s.file}`}
+                    download
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                  >
+                    <span>{s.icon}</span>
+                    <span>{s.label}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">
                 Back

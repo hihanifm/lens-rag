@@ -363,6 +363,21 @@ npm run dev   # http://localhost:5173
 Backend API: `http://localhost:8000`
 Postgres: `localhost:5432` (lens_user / changeme)
 
+### Local Python (scripts / one-offs)
+
+The backend runs inside Docker, so you don't need a local venv for the server. But for
+one-off scripts (e.g. `backend/scripts/generate_samples.py`), use a venv:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/your_script.py
+```
+
+`.venv/` is gitignored. Never install packages system-wide (`pip install` without a venv).
+
 ### Dev vs Prod architecture
 
 **Dev:** Vite dev server (`localhost:5173`) runs separately from FastAPI (`localhost:8000`).

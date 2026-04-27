@@ -4,6 +4,7 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 import pandas as pd
 
 from config import CORS_ORIGINS, TOP_K_DEFAULT
@@ -13,7 +14,7 @@ from projects import create_project, get_all_projects, get_project, update_proje
 from ingestion import read_excel, ingest
 from search import search as do_search
 
-app = FastAPI(title="LENS API", version="1.0.0")
+app = FastAPI(title="LENS API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +29,7 @@ app.add_middleware(
 def startup():
     init_db()
 
+app.mount("/samples", StaticFiles(directory="samples"), name="samples")
 
 # ── Projects ──────────────────────────────────────────────────────────────
 
