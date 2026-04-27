@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 import pandas as pd
 
 from config import CORS_ORIGINS, TOP_K_DEFAULT
-from db import init_db
+from db import init_db, get_cursor
 from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
 from projects import create_project, get_all_projects, get_project, update_project, get_project_columns, update_project_status
 from ingestion import read_excel, ingest
@@ -54,6 +54,28 @@ def update_project_endpoint(project_id: int, data: ProjectUpdate):
         raise HTTPException(status_code=404, detail="Project not found")
     updated = update_project(project_id, data.name, data.display_columns, data.default_k)
     return updated
+
+
+@app.get("/projects/{project_id}/browse")
+def browse_project(project_id: int):
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    schema = project['schema_name']
+    with get_cursor() as (cur, conn):
+        cur.execute(f"SELECT * FROM {schema}.records LIMIT 10")
+        rows = [dict(r) for r in cur.fetchall()]
+    for row in rows:
+        if row.get('embedding') is not None:
+            emb = row['embedding']
+            if isinstance(emb, str):
+                vals = [float(v) for v in emb.strip('[]').split(',')]
+            else:
+                vals = [float(v) for v in emb]
+            row['embedding'] = f"[{', '.join(f'{v:.3f}' for v in vals[:3])} \u2026 +{len(vals)-3} more]"
+        if row.get('search_vector') is not None:
+            row['search_vector'] = str(row['search_vector'])
+    return {"records": rows, "total": project['row_count']}
 
 
 @app.get("/projects/{project_id}/columns")

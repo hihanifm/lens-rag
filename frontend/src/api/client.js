@@ -29,6 +29,9 @@ export const updateProject = (id, data) =>
 export const getProjectColumns = (id) =>
   api.get(`/projects/${id}/columns`).then(r => r.data)
 
+export const browseProject = (id) =>
+  api.get(`/projects/${id}/browse`).then(r => r.data)
+
 // ── Excel Upload ──────────────────────────────────────────────────────────
 
 export const previewExcel = (file) => {

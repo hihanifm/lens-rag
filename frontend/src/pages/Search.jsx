@@ -106,6 +106,16 @@ export default function Search() {
               Evaluate
             </Link>
             <Link
+              to={`/projects/${projectId}/browse`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname.endsWith('/browse')
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Browse
+            </Link>
+            <Link
               to={`/projects/${projectId}/settings`}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 location.pathname.endsWith('/settings')
