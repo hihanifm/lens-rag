@@ -10,6 +10,7 @@ function sampleXlsxPath() {
 }
 
 test('create project + ingest completes', async ({ page }) => {
+  test.skip(true, 'Covered by major_flows.spec.ts (create+ingest+search+export).')
   await page.goto('/')
   await page.getByTestId('new-project').click()
 
