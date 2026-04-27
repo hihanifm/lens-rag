@@ -15,7 +15,7 @@ from ingestion import read_excel, ingest
 from search import search as do_search
 from evaluate import build_ragas_export, stream_ragas_export
 
-app = FastAPI(title="LENS API", version="1.1.0")
+app = FastAPI(title="LENS API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
