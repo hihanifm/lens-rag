@@ -330,3 +330,44 @@ LENS was designed through an extensive design conversation covering:
 
 The director's full NORA design (knowledge graph, compliance agent, cross-MNO) 
 is a valid v3. LENS is the validated v1 foundation.
+
+---
+
+## Dev Setup
+
+### Prerequisites
+1. Docker + Docker Compose installed
+2. Ollama running on the host with GPU access:
+   ```bash
+   ollama pull bge-m3
+   ollama pull bge-reranker-base
+   ```
+
+### Running the stack
+```bash
+make up       # start FastAPI + PostgreSQL in background
+make logs     # tail logs
+make down     # stop everything
+make build    # rebuild images after code changes
+make restart  # down + up
+```
+
+Frontend runs separately (dev mode):
+```bash
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
+```
+
+Backend API: `http://localhost:8000`
+Postgres: `localhost:5432` (lens_user / changeme)
+
+### Common Makefile targets
+| Command | What it does |
+|---|---|
+| `make up` | Start stack detached |
+| `make down` | Stop stack |
+| `make build` | Rebuild Docker images |
+| `make logs` | Follow all container logs |
+| `make restart` | Full restart |
+| `make ps` | Show container status |
