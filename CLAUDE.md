@@ -353,7 +353,7 @@ make build    # rebuild images after code changes
 make restart  # down + up
 ```
 
-Frontend runs separately (dev mode):
+Frontend runs separately in dev mode only:
 ```bash
 cd frontend
 npm install
@@ -362,6 +362,16 @@ npm run dev   # http://localhost:5173
 
 Backend API: `http://localhost:8000`
 Postgres: `localhost:5432` (lens_user / changeme)
+
+### Dev vs Prod architecture
+
+**Dev:** Vite dev server (`localhost:5173`) runs separately from FastAPI (`localhost:8000`).
+The Vite proxy (`/api` → `localhost:8000`) handles API calls without CORS issues.
+
+**Prod (planned):** FastAPI serves the compiled frontend as static files — single port, no separate
+frontend process. Build the frontend (`npm run build`) and mount the `dist/` output in FastAPI
+via `StaticFiles`. Everything goes through one port; no Caddy or other reverse proxy needed
+unless you want TLS termination.
 
 ### Common Makefile targets
 | Command | What it does |
