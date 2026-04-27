@@ -43,6 +43,6 @@ PROJECTS_BASE_DIR  = "/data/projects"
 
 # ── CORS (frontend dev server) ─────────────────────────────────────────────
 CORS_ORIGINS = [
-    "http://localhost:5173",   # Vite dev server
+    "http://localhost:37001",  # Vite dev server
     "http://localhost:3000",
 ]
