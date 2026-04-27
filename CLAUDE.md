@@ -4,8 +4,7 @@
 A generic, on-premise RAG search portal for any Excel-based knowledge base.
 Not a chatbot. Not a reasoning engine. Just smart search — fast and accurate.
 
-Originally designed for telecom MNO device requirement specifications (VZW, AT&T, TMO)
-but intentionally generic — works for any domain, any Excel structure.
+Works for any domain, any Excel structure.
 
 ---
 
@@ -97,7 +96,7 @@ CREATE TABLE project_{id}.records (
   id                  SERIAL PRIMARY KEY,
   sheet_name          TEXT,
   -- all original Excel columns stored as col_{name}
-  -- e.g. col_mno, col_module, col_req_id, col_content
+  -- e.g. col_product, col_category, col_id, col_description
   contextual_content  TEXT,         -- built by system at ingestion
   embedding           vector(1024), -- bge-m3 output
   search_vector       tsvector      -- BM25 index, auto-generated
@@ -179,7 +178,7 @@ def build_contextual_content(row, context_columns, sheet_name, content_column):
 **Mode 1 — ID Search** (shown only if id_column configured)
 ```python
 # ILIKE — flexible, works for partial IDs too
-# e.g. "29550" matches "VZ_REQ_LTESMS_29550"
+# e.g. "1042" matches "PROD-1042"
 WHERE col_{id_column} ILIKE '%{query}%'
 AND schema = project_schema
 LIMIT k
@@ -214,7 +213,7 @@ def rrf_merge(vector_results, bm25_results, k=60):
 {
   "results": [
     {
-      "display_columns": {"REQ_ID": "VZ_REQ_LTESMS_29550", "MNO": "VZW", ...},
+      "display_columns": {"ID": "PROD-1042", "Category": "Hardware", ...},
       "score": 0.94
     }
   ],
@@ -306,9 +305,9 @@ lens/
 
 - Not a compliance tracker
 - Not a knowledge graph
-- Not a cross-MNO comparison tool
+- Not a cross-source comparison tool
 - Not a version diff tool
-- Not a standards linker (3GPP etc.)
+- Not a standards linker
 - Not a filter/browse tool (deferred to next project)
 - Not a multi-column keyword index tool (deferred to v2)
 - Not connected to any external API ever
