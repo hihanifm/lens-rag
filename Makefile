@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache
+.PHONY: up down build logs restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
 
 up:
 	docker compose --profile dev up -d
@@ -45,6 +45,22 @@ e2e:
 
 e2e-down:
 	docker compose --profile dev down --remove-orphans
+
+# Remove old lens-* containers/volumes (pre-rename leftovers) + prune networks and images.
+# Does NOT touch lens-rag-* volumes — your data is safe.
+clean:
+	@echo "Stopping all lens-rag containers..."
+	docker compose --profile dev down --remove-orphans 2>/dev/null || true
+	docker compose --profile prod down --remove-orphans 2>/dev/null || true
+	@echo "Removing old lens-* containers (pre-rename)..."
+	docker rm -f lens-postgres lens-api lens-frontend lens-api-prod 2>/dev/null || true
+	@echo "Removing old lens-* volumes (pre-rename)..."
+	docker volume rm lens-postgres-data lens-uploads 2>/dev/null || true
+	@echo "Pruning unused networks..."
+	docker network prune -f
+	@echo "Pruning unused images..."
+	docker image prune -a -f
+	@echo "Done. lens-rag-postgres-data and lens-rag-uploads are untouched."
 
 # Run this once on the Linux server (where pip works) before make build.
 # Downloads Linux/Python 3.11 compatible wheels so Docker installs offline.
