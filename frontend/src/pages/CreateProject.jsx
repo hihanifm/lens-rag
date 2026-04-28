@@ -298,7 +298,7 @@ export default function CreateProject() {
                 Back
               </button>
               <button
-                onClick={handleUpload}
+                onClick={() => handleUpload()}
                 data-testid="upload-continue"
                 disabled={!file || loading}
                 className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40"
