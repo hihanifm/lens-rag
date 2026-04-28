@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { getProjects } from '../api/client'
+import { getProjects, deleteProject } from '../api/client'
 import { loadHistory } from '../utils/history'
 
 const statusColor = {
@@ -22,6 +23,9 @@ function timeAgo(iso) {
 
 export default function Home() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [deletingId, setDeletingId] = useState(null)
+
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: getProjects,
@@ -34,6 +38,19 @@ export default function Home() {
     navigate(`/projects/${entry.project_id}/search`, {
       state: { query: entry.query, mode: entry.mode, k: entry.k },
     })
+  }
+
+  const handleDelete = async (e, project) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!window.confirm(`Delete "${project.name}"? This cannot be undone.`)) return
+    setDeletingId(project.id)
+    try {
+      await deleteProject(project.id)
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
@@ -94,9 +111,19 @@ export default function Home() {
                           {new Date(p.created_at).toLocaleDateString()}
                         </p>
                       </div>
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusColor[p.status] || statusColor.pending}`}>
-                        {p.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusColor[p.status] || statusColor.pending}`}>
+                          {p.status}
+                        </span>
+                        <button
+                          onClick={(e) => handleDelete(e, p)}
+                          disabled={deletingId === p.id}
+                          className="p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                          title="Delete project"
+                        >
+                          {deletingId === p.id ? '…' : '✕'}
+                        </button>
+                      </div>
                     </div>
                   </Link>
                 ))}
