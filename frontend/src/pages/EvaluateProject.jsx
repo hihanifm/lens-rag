@@ -86,6 +86,15 @@ export default function EvaluateProject() {
     const payload = {
       results: ev.results,
       _lens: {
+        project: {
+          id: Number(projectId),
+          name: project?.name ?? '',
+          embedding: {
+            url: project?.embed_url ?? null,
+            model: project?.embed_model ?? null,
+            dims: project?.embed_dims ?? null,
+          },
+        },
         pipeline: {
           vector:  ev.use_vector  ?? true,
           bm25:    ev.use_bm25    ?? true,
