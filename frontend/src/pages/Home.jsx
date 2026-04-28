@@ -23,7 +23,10 @@ function timeAgo(iso) {
 
 function fmtElapsed(startedAt, now) {
   if (!startedAt) return null
-  const secs = Math.floor(((now ?? Date.now()) - new Date(startedAt).getTime()) / 1000)
+  // Postgres returns naive datetimes (no tz suffix); append Z so the browser
+  // parses as UTC rather than local time, which would make elapsed negative.
+  const ts = startedAt.endsWith('Z') ? startedAt : startedAt + 'Z'
+  const secs = Math.floor(((now ?? Date.now()) - new Date(ts).getTime()) / 1000)
   if (secs < 0) return null
   const m = Math.floor(secs / 60)
   const s = secs % 60
