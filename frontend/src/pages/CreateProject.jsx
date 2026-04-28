@@ -20,6 +20,11 @@ export default function CreateProject() {
   const [error, setError] = useState('')
   const [ingestProgress, setIngestProgress] = useState(null)
   const evtSourceRef = useRef(null)
+  const nameInputRef = useRef(null)
+
+  useEffect(() => {
+    nameInputRef.current?.focus()
+  }, [])
 
   const next = () => setStep(s => s + 1)
   const back = () => setStep(s => s - 1)
@@ -169,6 +174,7 @@ export default function CreateProject() {
             <h2 className="text-2xl font-bold text-gray-900 mb-2">New Project</h2>
             <p className="text-gray-500 mb-8">Give your project a name.</p>
             <input
+              ref={nameInputRef}
               data-testid="project-name"
               type="text"
               value={name}
@@ -193,13 +199,30 @@ export default function CreateProject() {
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Upload Excel</h2>
             <p className="text-gray-500 mb-8">Upload your .xlsx file. All sheets will be read.</p>
             <div
-              className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center cursor-pointer hover:border-blue-400 transition-colors"
+              className={`border-2 rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                file
+                  ? 'border-blue-400 bg-blue-50'
+                  : 'border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50'
+              }`}
               onClick={() => document.getElementById('file-input').click()}
             >
               {file ? (
-                <p className="text-gray-700 font-medium">{file.name}</p>
+                <div className="flex flex-col items-center gap-2">
+                  <span className="text-2xl">📄</span>
+                  <p className="text-blue-700 font-semibold">{file.name}</p>
+                  <p className="text-xs text-blue-400">Click to change</p>
+                </div>
               ) : (
-                <p className="text-gray-400">Click to choose file</p>
+                <div className="flex flex-col items-center gap-3">
+                  <span className="text-3xl">📂</span>
+                  <button
+                    type="button"
+                    className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors pointer-events-none"
+                  >
+                    Choose file
+                  </button>
+                  <p className="text-xs text-gray-400">.xlsx or .xls</p>
+                </div>
               )}
               <input
                 id="file-input"
