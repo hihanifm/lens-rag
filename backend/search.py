@@ -74,19 +74,16 @@ def id_search(
     )
 
 
-def topic_search(
+def topic_search_stream(
     query: str,
     schema_name: str,
     display_columns: list[str],
     k: int
-) -> SearchResponse:
+):
     """
-    Hybrid topic/keyword search:
-    1. Embed query → vector search (pgvector)
-    2. BM25 keyword search (tsvector)
-    3. RRF merge
-    4. Rerank with bge-reranker-base
-    5. Return top k with stats
+    Generator that yields step dicts for SSE streaming, ending with a
+    'complete' event that contains results + stats.
+    Also used by topic_search() to avoid code duplication.
     """
     logger.info("topic_search schema=%s query=%r k=%d reranker=%s", schema_name, query, k, RERANKER_ENABLED)
     stats = {}
@@ -95,12 +92,14 @@ def topic_search(
     select_cols = ', '.join([f'"{c}"' for c in safe_display])
 
     # Step 1: Embed query
+    yield {"step": "embedding", "message": "Embedding query..."}
     t = time.perf_counter()
     query_vector = embed(query)
     stats['embedding_ms'] = round((time.perf_counter() - t) * 1000, 1)
     logger.debug("  embed done embedding_ms=%.1f", stats['embedding_ms'])
 
     # Step 2: Vector search
+    yield {"step": "vector", "message": "Vector search..."}
     t = time.perf_counter()
     with get_cursor() as (cur, conn):
         cur.execute(f"""
@@ -118,6 +117,7 @@ def topic_search(
     rows_by_id = {row['id']: row for row in vector_rows}
 
     # Step 3: BM25 search
+    yield {"step": "bm25", "message": "Keyword search..."}
     t = time.perf_counter()
     with get_cursor() as (cur, conn):
         cur.execute(f"""
@@ -138,17 +138,18 @@ def topic_search(
             rows_by_id[row['id']] = row
 
     # Step 4: RRF merge
+    yield {"step": "rrf", "message": "Merging results..."}
     t = time.perf_counter()
     merged_ids = rrf_merge(vector_ids, bm25_ids)
     stats['rrf_merge_ms'] = round((time.perf_counter() - t) * 1000, 1)
     stats['candidates_retrieved'] = len(merged_ids)
     logger.debug("  rrf merge candidates=%d rrf_ms=%.1f", len(merged_ids), stats['rrf_merge_ms'])
 
-    # Step 5: Rerank top candidates (skipped if RERANKER_ENABLED=false)
-    t = time.perf_counter()
+    # Step 5: Rerank
     candidates_to_rerank = merged_ids[:min(len(merged_ids), TOP_K_RETRIEVAL)]
-
+    t = time.perf_counter()
     if RERANKER_ENABLED:
+        yield {"step": "reranking", "message": f"Reranking {len(candidates_to_rerank)} candidates..."}
         candidate_texts = [
             rows_by_id[cid]['contextual_content']
             for cid in candidates_to_rerank
@@ -177,7 +178,10 @@ def topic_search(
         for col in display_columns:
             safe = f'col_{safe_col_name(col)}'
             display_data[col] = row.get(safe)
-        results.append(SearchResult(display_data=display_data, score=round(float(score), 4) if score is not None else None))
+        results.append(SearchResult(
+            display_data=display_data,
+            score=round(float(score), 4) if score is not None else None
+        ))
 
     stats['total_ms'] = round((time.perf_counter() - total_start) * 1000, 1)
     logger.info("topic_search done results=%d embed_ms=%.1f vector_ms=%.1f bm25_ms=%.1f reranker_ms=%s total_ms=%.1f",
@@ -186,20 +190,35 @@ def topic_search(
                 f"{stats['reranker_ms']:.1f}" if stats['reranker_ms'] is not None else "off",
                 stats['total_ms'])
 
-    return SearchResponse(
-        results=results,
-        stats=SearchStats(
-            mode="topic",
-            embedding_ms=stats['embedding_ms'],
-            vector_search_ms=stats['vector_search_ms'],
-            bm25_search_ms=stats['bm25_search_ms'],
-            rrf_merge_ms=stats['rrf_merge_ms'],
-            reranker_ms=stats['reranker_ms'],
-            total_ms=stats['total_ms'],
-            candidates_retrieved=stats['candidates_retrieved'],
-            results_returned=len(results)
+    yield {
+        "step": "complete",
+        "response": SearchResponse(
+            results=results,
+            stats=SearchStats(
+                mode="topic",
+                embedding_ms=stats['embedding_ms'],
+                vector_search_ms=stats['vector_search_ms'],
+                bm25_search_ms=stats['bm25_search_ms'],
+                rrf_merge_ms=stats['rrf_merge_ms'],
+                reranker_ms=stats['reranker_ms'],
+                total_ms=stats['total_ms'],
+                candidates_retrieved=stats['candidates_retrieved'],
+                results_returned=len(results)
+            )
         )
-    )
+    }
+
+
+def topic_search(
+    query: str,
+    schema_name: str,
+    display_columns: list[str],
+    k: int
+) -> SearchResponse:
+    """Synchronous wrapper — collects the final event from the stream generator."""
+    for event in topic_search_stream(query, schema_name, display_columns, k):
+        if event['step'] == 'complete':
+            return event['response']
 
 
 def search(

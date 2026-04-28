@@ -1,12 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getProject, searchProject, exportResults } from '../api/client'
+import { getProject, exportResults, API_BASE_URL } from '../api/client'
 import ResultsTable from '../components/ResultsTable'
 import StatsPanel from '../components/StatsPanel'
 import { saveSearch } from '../utils/history'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
+
+const STEP_LABELS = {
+  embedding:  'Embedding query',
+  vector:     'Vector search',
+  bm25:       'Keyword search',
+  rrf:        'Merging results',
+  reranking:  'Reranking',
+}
 
 export default function Search() {
   const { projectId } = useParams()
@@ -17,7 +25,10 @@ export default function Search() {
   const [results, setResults] = useState(null)
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [currentStep, setCurrentStep] = useState(null)   // active pipeline step
+  const [doneSteps, setDoneSteps] = useState([])          // completed steps
   const [error, setError] = useState('')
+  const evtSourceRef = useRef(null)
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -37,32 +48,71 @@ export default function Search() {
   const effectiveMode = mode
   const effectiveK = k || project?.default_k || 10
 
-  const handleSearch = async (e) => {
+  const handleSearch = (e) => {
     e?.preventDefault()
     if (!query.trim()) return
+
+    // Close any existing stream
+    evtSourceRef.current?.close()
+
     setLoading(true)
     setError('')
-    try {
-      const data = await searchProject(projectId, query, effectiveMode, effectiveK)
-      setResults(data.results)
-      setStats(data.stats)
-      saveSearch({
-        project_id: Number(projectId),
-        project_name: project?.name ?? '',
-        query,
-        mode: effectiveMode,
-        k: effectiveK,
-        results_returned: data.results.length,
-        total_ms: data.stats?.total_ms,
-        display_columns: project?.display_columns ?? [],
-        results: data.results,
-      })
-    } catch (e) {
+    setResults(null)
+    setCurrentStep(null)
+    setDoneSteps([])
+
+    const params = new URLSearchParams({ query, mode: effectiveMode, k: effectiveK })
+    const url = `${API_BASE_URL}/projects/${projectId}/search/stream?${params}`
+    const evtSource = new EventSource(url)
+    evtSourceRef.current = evtSource
+
+    evtSource.onmessage = (e) => {
+      const event = JSON.parse(e.data)
+      if (event.step === 'complete') {
+        evtSource.close()
+        evtSourceRef.current = null
+        const data = event.results
+        setResults(data.results)
+        setStats(data.stats)
+        setCurrentStep(null)
+        setDoneSteps([])
+        setLoading(false)
+        saveSearch({
+          project_id: Number(projectId),
+          project_name: project?.name ?? '',
+          query,
+          mode: effectiveMode,
+          k: effectiveK,
+          results_returned: data.results.length,
+          total_ms: data.stats?.total_ms,
+          display_columns: project?.display_columns ?? [],
+          results: data.results,
+        })
+      } else if (event.step === 'error') {
+        evtSource.close()
+        evtSourceRef.current = null
+        setError(event.message || 'Search failed.')
+        setLoading(false)
+        setCurrentStep(null)
+        setDoneSteps([])
+      } else {
+        setDoneSteps(prev => currentStep ? [...prev, currentStep] : prev)
+        setCurrentStep(event.step)
+      }
+    }
+
+    evtSource.onerror = () => {
+      evtSource.close()
+      evtSourceRef.current = null
       setError('Search failed. Please try again.')
-    } finally {
       setLoading(false)
+      setCurrentStep(null)
+      setDoneSteps([])
     }
   }
+
+  // Clean up on unmount
+  useEffect(() => () => evtSourceRef.current?.close(), [])
 
   const handleExport = async () => {
     if (!query.trim()) return
@@ -230,6 +280,31 @@ export default function Search() {
         {error && (
           <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
             {error}
+          </div>
+        )}
+
+        {/* Live pipeline steps */}
+        {loading && (
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            {Object.entries(STEP_LABELS).map(([key, label]) => {
+              const done = doneSteps.includes(key)
+              const active = currentStep === key
+              return (
+                <span
+                  key={key}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    done    ? 'bg-emerald-50 text-emerald-600' :
+                    active  ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-200' :
+                              'bg-gray-100 text-gray-400'
+                  }`}
+                >
+                  {done   ? '✓' :
+                   active ? <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> :
+                            <span className="inline-block w-2 h-2 rounded-full bg-gray-300" />}
+                  {label}
+                </span>
+              )
+            })}
           </div>
         )}
 

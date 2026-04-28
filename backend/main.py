@@ -34,7 +34,7 @@ from projects import (
     verify_project_pin,
 )
 from ingestion import read_excel, ingest
-from search import search as do_search
+from search import search as do_search, topic_search_stream
 from evaluate import build_ragas_export, stream_ragas_export
 
 app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
@@ -281,6 +281,55 @@ async def ingest_project(project_id: int, tmp_path: str):
 
 
 # ── Search ────────────────────────────────────────────────────────────────
+
+@app.get("/projects/{project_id}/search/stream")
+def search_stream(project_id: int, query: str, mode: str = "topic", k: int = None, request: Request = None):
+    """
+    SSE stream of search pipeline steps for the UI.
+    Events: embedding → vector → bm25 → rrf → reranking → complete (with results+stats JSON).
+    ID search falls back to a single complete event (it's instant).
+    """
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+
+    if project_raw['status'] != 'ready':
+        raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
+
+    effective_k = min(k or project_raw['default_k'], 50)
+
+    def event_stream():
+        import json as _json
+        try:
+            if mode == "id" and project_raw['has_id_column']:
+                result = do_search(
+                    query=query, mode="id",
+                    schema_name=project_raw['schema_name'],
+                    id_column=project_raw['id_column'],
+                    display_columns=project_raw['display_columns'],
+                    k=effective_k,
+                )
+                payload = _json.dumps({"step": "complete", "results": result.dict()})
+                yield f"data: {payload}\n\n"
+            else:
+                for event in topic_search_stream(
+                    query=query,
+                    schema_name=project_raw['schema_name'],
+                    display_columns=project_raw['display_columns'],
+                    k=effective_k,
+                ):
+                    if event['step'] == 'complete':
+                        payload = _json.dumps({"step": "complete", "results": event['response'].dict()})
+                    else:
+                        payload = _json.dumps({"step": event['step'], "message": event['message']})
+                    yield f"data: {payload}\n\n"
+        except Exception as e:
+            logger.exception("search_stream error project=%d query=%r", project_id, query)
+            yield f"data: {_json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
 
 @app.post("/projects/{project_id}/search")
 def search_endpoint(project_id: int, req: SearchRequest, request: Request):
