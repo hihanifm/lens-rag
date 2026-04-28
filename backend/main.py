@@ -35,7 +35,7 @@ from projects import (
 )
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
-from evaluate import build_ragas_export, stream_ragas_export
+from evaluate import stream_ragas_export
 
 app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
