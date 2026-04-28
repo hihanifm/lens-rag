@@ -1,11 +1,14 @@
 // api/client.js — ALL API calls live here. Never call axios directly in components.
 import axios from 'axios'
 
-// In dev: VITE_API_URL=http://localhost:37000 (set in .env.development)
-// In prod (built with VITE_BASE_PATH=/lens-rag/): falls back to BASE_URL (/lens-rag)
-// → same-origin calls, Caddy strips the prefix before forwarding to FastAPI
-export const API_BASE_URL = import.meta.env.VITE_API_URL
-  ?? import.meta.env.BASE_URL.replace(/\/$/, '')
+// Dev:
+// - Leave VITE_API_URL empty so the browser uses same-origin calls (Vite proxy handles API).
+// Prod:
+// - VITE_API_URL is typically unset; BASE_URL is /lens-rag/ and API calls are same-origin.
+const _explicitApiBase = (import.meta.env.VITE_API_URL ?? '').trim()
+export const API_BASE_URL = _explicitApiBase
+  ? _explicitApiBase.replace(/\/$/, '')
+  : (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
 
 const api = axios.create({
   baseURL: API_BASE_URL,
