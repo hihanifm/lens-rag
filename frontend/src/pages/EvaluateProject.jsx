@@ -189,7 +189,12 @@ export default function EvaluateProject() {
             {ev.testCases ? (
               <p className="text-gray-700 font-medium">{ev.testCases.length} question{ev.testCases.length !== 1 ? 's' : ''} loaded</p>
             ) : (
-              <p className="text-gray-400 text-sm">Click to upload test set CSV</p>
+              <div className="space-y-1">
+                <p className="text-gray-700 text-sm font-medium">Click to choose a test set CSV</p>
+                <p className="text-gray-400 text-xs">
+                  Required columns: <span className="font-mono">question</span>, <span className="font-mono">ground_truth</span>
+                </p>
+              </div>
             )}
             <input id="eval-file-input" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
           </div>
