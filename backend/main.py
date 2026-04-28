@@ -149,7 +149,7 @@ def get_columns_endpoint(project_id: int, request: Request):
 
 # ── Excel Upload & Column Detection ───────────────────────────────────────
 
-@app.post("/upload/preview")
+@app.post("/projects/preview")
 async def preview_excel(file: UploadFile = File(...)):
     """
     Upload Excel file and return column names + sheet names + row count.
@@ -322,7 +322,7 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
 
 # ── Evaluate ─────────────────────────────────────────────────────────────
 
-@app.post("/projects/{project_id}/evaluate/run")
+@app.post("/projects/{project_id}/evaluate")
 def evaluate_run(project_id: int, req: EvalRequest, request: Request):
     """Stream evaluation progress via SSE, one event per question, then a complete event."""
     project_raw = get_project_raw(project_id)

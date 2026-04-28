@@ -63,7 +63,7 @@ export const browseProject = (id) =>
 export const previewExcel = (file) => {
   const form = new FormData()
   form.append('file', file)
-  return api.post('/upload/preview', form, {
+  return api.post('/projects/preview', form, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }).then(r => r.data)
 }
@@ -80,7 +80,7 @@ export const searchProject = (projectId, query, mode, k) =>
 // ── Evaluate ──────────────────────────────────────────────────────────────
 
 export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete, onError) => {
-  fetch(`${API_BASE_URL}/projects/${projectId}/evaluate/run`, {
+  fetch(`${API_BASE_URL}/projects/${projectId}/evaluate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...projectHeaders(projectId) },
     body: JSON.stringify({ test_cases: testCases, k }),

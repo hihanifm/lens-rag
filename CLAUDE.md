@@ -154,6 +154,8 @@ CREATE TABLE public.projects (
   default_k       INTEGER DEFAULT 10,
   status          TEXT DEFAULT 'pending', -- pending | ingesting | ready | error
   row_count       INTEGER,
+  pin             TEXT,                   -- optional; plain text (on-prem only)
+  source_filename TEXT,                   -- original uploaded Excel filename
   created_at      TIMESTAMP DEFAULT NOW()
 );
 ```
@@ -248,9 +250,9 @@ def rrf_merge(vector_results, bm25_results, k=60):
 | POST | `/projects/{id}/search` | Search (id or topic mode) |
 | POST | `/projects/{id}/export` | Search + return Excel download |
 | GET | `/projects/{id}/browse` | First 10 raw records (SELECT * LIMIT 10) |
-| POST | `/projects/{id}/evaluate/run` | SSE RAGAS export stream |
+| POST | `/projects/{id}/evaluate` | SSE RAGAS export stream |
 | POST | `/projects/{id}/verify-pin` | Verify PIN for a protected project |
-| POST | `/upload/preview` | Parse Excel → return columns + row count |
+| POST | `/projects/preview` | Parse Excel → return columns + row count |
 | GET | `/health` | Liveness check |
 
 ### Per-project PIN protection
@@ -335,7 +337,7 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 - Step 4: Pick context columns (multi-select, excludes content column)
 - Step 5: Pick ID column (optional, single select or None)
 - Step 6: Pick display columns (multi-select, pre-filled with context + id columns)
-- Step 7: Set default K (5/10/20/50, default 10)
+- Step 7: Set default K (5/10/20/50, default 10) + optional PIN (password field; blank = open access)
 - [Create] → SSE progress bar → "Ready!"
 
 ### Screen 3 — Search (tab 1 of 4)
@@ -406,6 +408,9 @@ lens/
         StatsPanel.jsx
         BottomBar.jsx      ← LENS home link + API status + History link
         Layout.jsx
+        PinGate.jsx        ← PIN entry card rendered in place of page content when locked
+      hooks/
+        useProjectPin.js   ← { isLocked, unlockWithPin } — used in Search/Evaluate/Browse/Settings
       utils/
         history.js         ← localStorage history helpers (saveSearch, saveEval, etc.)
       api/
