@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       '/projects': API_PROXY_TARGET,
       '/health':   API_PROXY_TARGET,
+      '/samples':  API_PROXY_TARGET,
     }
   }
 })

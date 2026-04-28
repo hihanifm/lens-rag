@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import threading
+import mimetypes
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -42,6 +43,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
+    # Some Linux images don't ship with a mime.types mapping for .xlsx/.xls, which can
+    # cause downloads to be served as text/plain. Register explicitly for consistency.
+    mimetypes.add_type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx")
+    mimetypes.add_type("application/vnd.ms-excel", ".xls")
     init_db()
 
 _SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
