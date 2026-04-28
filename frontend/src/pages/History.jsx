@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { loadHistory, clearHistory, exportHistoryCSV, fileDateTime } from '../utils/history'
 import ResultsTable from '../components/ResultsTable'
 
@@ -179,7 +179,6 @@ function ClusterExpansion({ entry }) {
 }
 
 export default function History() {
-  const navigate = useNavigate()
   const [entries, setEntries] = useState(() => loadHistory())
   const [projectFilter, setProjectFilter] = useState('all')
   const [expandedId, setExpandedId] = useState(null)
@@ -195,21 +194,6 @@ export default function History() {
     clearHistory()
     setEntries([])
     setExpandedId(null)
-  }
-
-  const handleRerun = (entry) => {
-    navigate(`/projects/${entry.project_id}/search`, {
-      state: {
-        query: entry.query,
-        mode: entry.mode,
-        k: entry.k,
-        // backward compat: entries without flags default to true
-        use_vector: entry.use_vector ?? true,
-        use_bm25:   entry.use_bm25   ?? true,
-        use_rrf:    entry.use_rrf    ?? true,
-        use_rerank: entry.use_rerank ?? true,
-      },
-    })
   }
 
   const toggleExpand = (id) => {
@@ -339,14 +323,6 @@ export default function History() {
                             <span className="text-xs text-gray-400 mr-3">
                               {hasExpansion ? (isExpanded ? '▲' : '▼') : ''}
                             </span>
-                            {entry.type === 'search' && (
-                              <button
-                                onClick={e => { e.stopPropagation(); handleRerun(entry) }}
-                                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                              >
-                                Re-run →
-                              </button>
-                            )}
                           </td>
                         </tr>
                         {isExpanded && (
