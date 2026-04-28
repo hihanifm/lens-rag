@@ -12,6 +12,7 @@ export default defineConfig({
     host: true,
     port: 37001,
     strictPort: true,
+    historyApiFallback: true,
     proxy: {
       '/projects': API_PROXY_TARGET,
       '/health':   API_PROXY_TARGET,
