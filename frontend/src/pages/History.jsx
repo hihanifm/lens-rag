@@ -149,7 +149,7 @@ function ClusterExpansion({ entry }) {
                       >
                         {[...(entry.display_columns ?? []), 'Context'].map(col => (
                           <td key={col} className="px-4 py-2 text-gray-700 max-w-xs align-top">
-                            <span className={`block break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5'}`}>
+                            <span className={`block break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`}>
                               {col === 'Context'
                                 ? (rec.contextual_content ?? '')
                                 : (rec.display_data?.[col] ?? '')

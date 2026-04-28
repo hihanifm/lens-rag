@@ -5,3 +5,16 @@
 html {
   font-size: 17px;
 }
+
+/* Cross-browser clamp fallback for long table cells.
+   Tailwind's line-clamp uses -webkit-line-clamp which may not apply in all engines.
+   This utility enforces a predictable 5-line max height while still supporting
+   WebKit clamping when available. */
+.lens-clamp-5 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  line-height: 1.25em;
+  max-height: calc(1.25em * 5);
+}

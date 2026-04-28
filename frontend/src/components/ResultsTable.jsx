@@ -28,7 +28,7 @@ export default function ResultsTable({ results, displayColumns }) {
         return (
           <span
             className={`block text-sm text-gray-700 break-words ${
-              expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5'
+              expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
             }`}
           >
             {info.getValue() ?? ''}
