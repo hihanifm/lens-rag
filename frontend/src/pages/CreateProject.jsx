@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { previewExcel, createProject, API_BASE_URL } from '../api/client'
 
-const STEPS = ['Name', 'Upload', 'Content', 'Context', 'ID Column', 'Display', 'Settings']
+const STEPS = ['Name', 'Upload', 'Store', 'Content', 'Context', 'ID Column', 'Display', 'Settings']
 
 export default function CreateProject() {
   const navigate = useNavigate()
@@ -10,6 +10,7 @@ export default function CreateProject() {
   const [name, setName] = useState('')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)  // { columns, sheet_names, row_count, tmp_path }
+  const [storedColumns, setStoredColumns] = useState([])  // Step A: which columns to store in DB
   const [contentColumn, setContentColumn] = useState('')
   const [contextColumns, setContextColumns] = useState([])
   const [idColumn, setIdColumn] = useState(null)
@@ -50,11 +51,12 @@ export default function CreateProject() {
       const canProceed =
         (step === 0 && name.trim()) ||
         (step === 1 && file && !loading) ||
-        (step === 2 && contentColumn) ||
-        (step === 3) ||
+        (step === 2 && storedColumns.length > 0) ||
+        (step === 3 && contentColumn) ||
         (step === 4) ||
-        (step === 5 && displayColumns.length > 0) ||
-        (step === 6 && !loading)
+        (step === 5) ||
+        (step === 6 && displayColumns.length > 0) ||
+        (step === 7 && !loading)
 
       if (!canProceed) return
       e.preventDefault()
@@ -63,13 +65,18 @@ export default function CreateProject() {
       if (step === 1) return handleUpload()
       if (step === 2) return next()
       if (step === 3) return next()
-      if (step === 4) {
+      if (step === 4) return next()
+      if (step === 5) {
         const defaults = [...new Set([...contextColumns, idColumn, contentColumn].filter(Boolean))]
-        setDisplayColumns(defaults)
+        setDisplayColumns(prev => {
+          // Only keep previous selections that are still in storedColumns; otherwise default
+          const stillValid = prev.filter(c => storedColumns.includes(c))
+          return stillValid.length > 0 ? stillValid : defaults
+        })
         return next()
       }
-      if (step === 5) return next()
-      if (step === 6) return handleCreate()
+      if (step === 6) return next()
+      if (step === 7) return handleCreate()
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -79,6 +86,7 @@ export default function CreateProject() {
     name,
     file,
     loading,
+    storedColumns.length,
     contentColumn,
     contextColumns,
     idColumn,
@@ -92,6 +100,7 @@ export default function CreateProject() {
     try {
       const data = await previewExcel(file)
       setPreview(data)
+      setStoredColumns(data.columns)  // default: store all columns
       next()
     } catch (e) {
       setError('Failed to read Excel file. Please check the format.')
@@ -106,6 +115,7 @@ export default function CreateProject() {
     try {
       const project = await createProject({
         name,
+        stored_columns: storedColumns,
         content_column: contentColumn,
         context_columns: contextColumns,
         id_column: idColumn || null,
@@ -142,7 +152,23 @@ export default function CreateProject() {
     setList(prev => prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val])
   }
 
-  const availableForContext = preview?.columns.filter(c => c !== contentColumn) || []
+  // Downstream pickers are scoped to storedColumns (user's DB selection)
+  const availableForContent = storedColumns
+  const availableForContext = storedColumns.filter(c => c !== contentColumn)
+  const availableForId = storedColumns
+  const availableForDisplay = storedColumns
+
+  const toggleStored = (col) => {
+    setStoredColumns(prev => {
+      const next = prev.includes(col) ? prev.filter(x => x !== col) : [...prev, col]
+      // Cascade: clear downstream selections that are no longer in stored
+      if (!next.includes(contentColumn)) setContentColumn('')
+      setContextColumns(cc => cc.filter(c => next.includes(c)))
+      if (idColumn && !next.includes(idColumn)) setIdColumn(null)
+      setDisplayColumns(dc => dc.filter(c => next.includes(c)))
+      return next
+    })
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -272,16 +298,69 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 2: Content column ── */}
+        {/* ── Step 2: Store columns in DB ── */}
         {step === 2 && preview && (
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Content Column</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Store Columns in DB</h2>
             <p className="text-gray-500 mb-2">
               Found <strong>{preview.row_count.toLocaleString()}</strong> rows across <strong>{preview.sheet_names.length}</strong> sheet(s).
             </p>
-            <p className="text-gray-500 mb-8">Which column contains the main text to search?</p>
+            <p className="text-gray-500 mb-8">
+              Choose which columns to store. Only stored columns can be searched or shown in results.
+              Defaults to all — deselect columns you don't need to save space.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setStoredColumns(preview.columns)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Select all
+              </button>
+              <span className="text-gray-300">·</span>
+              <button
+                onClick={() => setStoredColumns([])}
+                className="text-xs text-gray-400 hover:underline"
+              >
+                Clear all
+              </button>
+            </div>
             <div className="space-y-2">
               {preview.columns.map(col => (
+                <button
+                  key={col}
+                  onClick={() => toggleStored(col)}
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                    storedColumns.includes(col)
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                  }`}
+                >
+                  <span className="mr-2">{storedColumns.includes(col) ? '☑' : '☐'}</span>
+                  {col}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
+              <button
+                data-testid="store-continue"
+                onClick={next}
+                disabled={storedColumns.length === 0}
+                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40"
+              >
+                Continue ({storedColumns.length} of {preview.columns.length} columns)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Content column ── */}
+        {step === 3 && preview && (
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Content Column</h2>
+            <p className="text-gray-500 mb-8">Which column contains the main text to search? Choose the most descriptive field.</p>
+            <div className="space-y-2">
+              {availableForContent.map(col => (
                 <button
                   key={col}
                   onClick={() => setContentColumn(col)}
@@ -302,11 +381,14 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 3: Context columns ── */}
-        {step === 3 && (
+        {/* ── Step 4: Context columns ── */}
+        {step === 4 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Context Columns</h2>
-            <p className="text-gray-500 mb-8">Which columns provide context? These will be prefixed to the content for better search accuracy.</p>
+            <p className="text-gray-500 mb-8">
+              Which columns add meaningful context to search? Keep it to a few — fewer, richer columns give better accuracy.
+              These are concatenated with the content to build the search index and <strong>cannot be changed later</strong>.
+            </p>
             <div className="space-y-2">
               {availableForContext.map(col => (
                 <button
@@ -330,11 +412,14 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 4: ID column (optional) ── */}
-        {step === 4 && (
+        {/* ── Step 5: ID column (optional) ── */}
+        {step === 5 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">ID Column <span className="text-gray-400 font-normal text-lg">(optional)</span></h2>
-            <p className="text-gray-500 mb-8">Is there a unique identifier column? If selected, users can search by exact or partial ID.</p>
+            <p className="text-gray-500 mb-8">
+              Is there a unique identifier like a request ID or task ID? If selected, users can search by exact or partial ID.
+              <strong className="block mt-1 text-gray-600">Cannot be changed after creation.</strong>
+            </p>
             <div className="space-y-2">
               <button
                 onClick={() => setIdColumn(null)}
@@ -344,7 +429,7 @@ export default function CreateProject() {
               >
                 None
               </button>
-              {availableForContext.map(col => (
+              {availableForId.map(col => (
                 <button
                   key={col}
                   onClick={() => setIdColumn(col)}
@@ -359,22 +444,24 @@ export default function CreateProject() {
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
               <button data-testid="id-continue" onClick={() => {
-                // Pre-fill display columns with context + id + content
                 const defaults = [...new Set([...contextColumns, idColumn, contentColumn].filter(Boolean))]
-                setDisplayColumns(defaults)
+                setDisplayColumns(prev => {
+                  const stillValid = prev.filter(c => storedColumns.includes(c))
+                  return stillValid.length > 0 ? stillValid : defaults
+                })
                 next()
               }} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
             </div>
           </div>
         )}
 
-        {/* ── Step 5: Display columns ── */}
-        {step === 5 && (
+        {/* ── Step 6: Results columns ── */}
+        {step === 6 && (
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Display Columns</h2>
-            <p className="text-gray-500 mb-8">Which columns should appear in search results?</p>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Results Columns</h2>
+            <p className="text-gray-500 mb-8">Which columns should appear in search results? You can change this later in Settings.</p>
             <div className="space-y-2">
-              {preview.columns.map(col => (
+              {availableForDisplay.map(col => (
                 <button
                   key={col}
                   onClick={() => toggleMulti(col, displayColumns, setDisplayColumns)}
@@ -396,8 +483,8 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 6: Settings ── */}
-        {step === 6 && (
+        {/* ── Step 7: Settings ── */}
+        {step === 7 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
             <p className="text-gray-500 mb-8">Default number of results to show per search.</p>
@@ -430,10 +517,11 @@ export default function CreateProject() {
 
             <div className="mt-10 bg-gray-50 rounded-xl border border-gray-200 p-5 text-sm text-gray-600 space-y-1.5">
               <p><span className="font-medium">Project:</span> {name}</p>
+              <p><span className="font-medium">Stored columns:</span> {storedColumns.length} of {preview?.columns.length}</p>
               <p><span className="font-medium">Content:</span> {contentColumn}</p>
               <p><span className="font-medium">Context:</span> {contextColumns.join(', ') || 'None'}</p>
               <p><span className="font-medium">ID column:</span> {idColumn || 'None'}</p>
-              <p><span className="font-medium">Display:</span> {displayColumns.join(', ')}</p>
+              <p><span className="font-medium">Results columns:</span> {displayColumns.join(', ')}</p>
               <p><span className="font-medium">Records:</span> {preview?.row_count?.toLocaleString()}</p>
             </div>
             <div className="flex gap-3 mt-6">

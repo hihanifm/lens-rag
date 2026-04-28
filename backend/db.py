@@ -58,6 +58,7 @@ def init_db():
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS source_filename TEXT;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMP;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS ingestion_ms INTEGER;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS stored_columns TEXT[] NOT NULL DEFAULT '{}';")
 
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None):

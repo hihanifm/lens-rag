@@ -21,23 +21,26 @@ test.describe.serial('major flows', () => {
     await page.getByTestId('file-input').setInputFiles(sampleXlsxPath())
     await page.getByTestId('upload-continue').click()
 
-    // Step 2: Content column
+    // Step 2: Store columns (default: all selected)
+    await page.getByTestId('store-continue').click()
+
+    // Step 3: Content column
     await page.getByRole('button', { name: 'Description' }).click()
     await page.getByTestId('content-continue').click()
 
-    // Step 3: Context columns
+    // Step 4: Context columns
     await page.getByRole('button', { name: /Category/ }).click()
     await page.getByRole('button', { name: /Name/ }).click()
     await page.getByTestId('context-continue').click()
 
-    // Step 4: ID column
+    // Step 5: ID column
     await page.getByRole('button', { name: 'Product ID' }).click()
     await page.getByTestId('id-continue').click()
 
-    // Step 5: Display columns
+    // Step 6: Results columns
     await page.getByTestId('display-continue').click()
 
-    // Step 6: Create + ingest
+    // Step 7: Create + ingest
     await page.getByTestId('create-project').click()
     await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 120_000 })
     await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })

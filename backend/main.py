@@ -203,6 +203,20 @@ async def preview_excel(file: UploadFile = File(...)):
 @app.post("/projects")
 async def create_project_endpoint(data: ProjectCreate):
     """Create project metadata record. Returns project id."""
+    stored = set(data.stored_columns)
+    errors = []
+    if data.content_column not in stored:
+        errors.append(f"content_column '{data.content_column}' is not in stored_columns")
+    bad_ctx = [c for c in data.context_columns if c not in stored]
+    if bad_ctx:
+        errors.append(f"context_columns not in stored_columns: {bad_ctx}")
+    if data.id_column and data.id_column not in stored:
+        errors.append(f"id_column '{data.id_column}' is not in stored_columns")
+    bad_disp = [c for c in data.display_columns if c not in stored]
+    if bad_disp:
+        errors.append(f"display_columns not in stored_columns: {bad_disp}")
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
     project = create_project(data)
     return project
 
@@ -249,6 +263,7 @@ async def ingest_project(project_id: int, tmp_path: str):
                 filepath=tmp_path,
                 project_id=project_id,
                 schema_name=project['schema_name'],
+                stored_columns=project['stored_columns'],
                 content_column=project['content_column'],
                 context_columns=project['context_columns'],
                 id_column=project['id_column'],

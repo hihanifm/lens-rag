@@ -5,6 +5,7 @@ from datetime import datetime
 
 class ProjectCreate(BaseModel):
     name: str
+    stored_columns: List[str]
     content_column: str
     context_columns: List[str]
     id_column: Optional[str] = None
@@ -18,6 +19,7 @@ class ProjectResponse(BaseModel):
     id: int
     name: str
     schema_name: str
+    stored_columns: List[str]
     content_column: str
     context_columns: List[str]
     id_column: Optional[str]

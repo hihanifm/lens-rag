@@ -76,6 +76,7 @@ def ingest(
     filepath: str,
     project_id: int,
     schema_name: str,
+    stored_columns: list[str],
     content_column: str,
     context_columns: list[str],
     id_column: str | None,
@@ -84,9 +85,10 @@ def ingest(
     """
     Full ingestion pipeline with progress reporting.
     Yields progress dicts for SSE streaming.
+    Only `stored_columns` are written to the DB table as col_* fields.
     """
-    logger.info("ingest() start project_id=%d schema=%s content_col=%r context_cols=%s id_col=%r",
-                project_id, schema_name, content_column, context_columns, id_column)
+    logger.info("ingest() start project_id=%d schema=%s stored_cols=%s content_col=%r context_cols=%s id_col=%r",
+                project_id, schema_name, stored_columns, content_column, context_columns, id_column)
     t_pipeline_start = time.monotonic()
 
     # Step 1: Read Excel
@@ -102,10 +104,10 @@ def ingest(
         "sheets": sheet_names
     }
 
-    # Step 2: Create schema and table
+    # Step 2: Create schema and table — only for stored_columns
     yield {"step": "schema", "message": "Creating database schema..."}
-    logger.debug("ingest() creating schema %s", schema_name)
-    create_project_schema(schema_name, original_columns, id_column)
+    logger.debug("ingest() creating schema %s with stored_columns=%s", schema_name, stored_columns)
+    create_project_schema(schema_name, stored_columns, id_column)
     logger.debug("ingest() schema created")
     yield {"step": "schema_complete", "message": "Database ready"}
 
@@ -133,9 +135,9 @@ def ingest(
             logger.error("embed failed on row %d/%d — %s: %s", i + 1, total_rows, type(e).__name__, e)
             raise
 
-        # Build column dict for DB insert
+        # Build column dict — only for stored_columns
         col_data = {}
-        for col in original_columns:
+        for col in stored_columns:
             safe = safe_col_name(col)
             val = row.get(col)
             col_data[f'col_{safe}'] = str(val) if val is not None and str(val) != 'nan' else None

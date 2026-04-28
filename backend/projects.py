@@ -18,14 +18,15 @@ def create_project(data: ProjectCreate) -> dict:
     with get_cursor() as (cur, conn):
         cur.execute("""
             INSERT INTO public.projects
-                (name, schema_name, content_column, context_columns,
+                (name, schema_name, stored_columns, content_column, context_columns,
                  id_column, display_columns, has_id_column, default_k, pin,
                  source_filename, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
         """, [
             data.name,
             f"project_{data.name.lower().replace(' ', '_')}",  # temp, updated with id
+            data.stored_columns,
             data.content_column,
             data.context_columns,
             data.id_column,
@@ -130,8 +131,17 @@ def get_project_columns(project: dict) -> list[str]:
     DB stores columns as col_{lowercased_underscored}, but the project metadata
     holds the original names (e.g. 'Asset ID'). We build a reverse map so the
     returned names match what's stored in display_columns / context_columns etc.
+
+    For new projects, `stored_columns` in the metadata is the canonical source.
+    For old projects (stored_columns empty), fall back to querying the schema.
     """
-    # Build normalized_name -> original_name from all stored column lists
+    stored = list(project.get('stored_columns') or [])
+
+    if stored:
+        # Fast path: stored_columns is the canonical list for new projects
+        return stored
+
+    # Fallback for old projects: reconstruct from known column metadata + schema
     known: dict[str, str] = {}
     for col in (
         list(project.get('context_columns') or [])
