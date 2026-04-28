@@ -37,7 +37,20 @@ function EvalExpansion({ entry }) {
           <button
             onClick={() => {
               const slug = (entry.project_name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-              downloadJSON(entry.results, `${slug}_lens_ragas_${fileDateTime(new Date(entry.ts))}.json`)
+              const payload = {
+                results: entry.results,
+                _lens: {
+                  pipeline: {
+                    vector:  entry.use_vector  ?? true,
+                    bm25:    entry.use_bm25    ?? true,
+                    rrf:     entry.use_rrf     ?? true,
+                    rerank:  entry.use_rerank  ?? true,
+                  },
+                  k: entry.k,
+                  exported_at: fileDateTime(new Date(entry.at)),
+                },
+              }
+              downloadJSON(payload, `${slug}_lens_ragas_${fileDateTime(new Date(entry.at))}.json`)
             }}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium"
           >

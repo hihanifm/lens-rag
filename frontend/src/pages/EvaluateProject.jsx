@@ -83,7 +83,20 @@ export default function EvaluateProject() {
   const handleExport = () => {
     if (!ev.results) return
     const slug = (project?.name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    const blob = new Blob([JSON.stringify(ev.results, null, 2)], { type: 'application/json' })
+    const payload = {
+      results: ev.results,
+      _lens: {
+        pipeline: {
+          vector:  ev.use_vector  ?? true,
+          bm25:    ev.use_bm25    ?? true,
+          rrf:     ev.use_rrf     ?? true,
+          rerank:  ev.use_rerank  ?? true,
+        },
+        k: ev.k,
+        exported_at: fileDateTime(),
+      },
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
