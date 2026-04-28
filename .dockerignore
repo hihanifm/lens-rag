@@ -5,7 +5,6 @@ frontend/test-results/
 frontend/playwright-report/
 backend/__pycache__/
 backend/.venv/
-backend/samples/
 backend/scripts/
 .env
 .git/
