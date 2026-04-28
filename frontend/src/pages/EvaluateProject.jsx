@@ -183,7 +183,7 @@ export default function EvaluateProject() {
           </p>
 
           <div
-            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition-colors mb-2"
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
             onClick={() => document.getElementById('eval-file-input').click()}
           >
             {ev.testCases ? (
@@ -197,30 +197,34 @@ export default function EvaluateProject() {
               </div>
             )}
             <input id="eval-file-input" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-          </div>
 
-          <button
-            onClick={async () => {
-              try {
-                const res = await fetch(`${API_BASE_URL}/samples/product_catalog_testset.csv`)
-                const text = await res.text()
-                const lines = text.trim().split(/\r?\n/)
-                const headers = parseCSVLine(lines[0]).map(h => h.trim())
-                const qi = headers.indexOf('question')
-                const gi = headers.indexOf('ground_truth')
-                const parsed = lines.slice(1).filter(l => l.trim()).map(line => {
-                  const vals = parseCSVLine(line)
-                  return { question: vals[qi]?.trim(), ground_truth: vals[gi]?.trim() }
-                }).filter(r => r.question && r.ground_truth)
-                if (parsed.length) setEval(projectId, { testCases: parsed, error: '' })
-              } catch {
-                setEval(projectId, { error: 'Could not load sample test set.' })
-              }
-            }}
-            className="text-xs text-blue-500 hover:text-blue-700"
-          >
-            Load product catalog sample test set
-          </button>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/samples/product_catalog_testset.csv`)
+                    const text = await res.text()
+                    const lines = text.trim().split(/\r?\n/)
+                    const headers = parseCSVLine(lines[0]).map(h => h.trim())
+                    const qi = headers.indexOf('question')
+                    const gi = headers.indexOf('ground_truth')
+                    const parsed = lines.slice(1).filter(l => l.trim()).map(line => {
+                      const vals = parseCSVLine(line)
+                      return { question: vals[qi]?.trim(), ground_truth: vals[gi]?.trim() }
+                    }).filter(r => r.question && r.ground_truth)
+                    if (parsed.length) setEval(projectId, { testCases: parsed, error: '' })
+                  } catch {
+                    setEval(projectId, { error: 'Could not load sample test set.' })
+                  }
+                }}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Or load the product catalog sample test set →
+              </button>
+            </div>
+          </div>
 
           {/* K selector */}
           <div className="flex items-center gap-3 mt-6 mb-6">
