@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import tempfile
 import time
 import threading
@@ -11,7 +12,14 @@ from fastapi.staticfiles import StaticFiles
 import pandas as pd
 from starlette.responses import Response
 
-from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH
+from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH, LOG_LEVEL
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL.upper(), logging.DEBUG),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
 from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
 from projects import (
@@ -43,11 +51,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
+    logger.info("LENS API starting up (log level: %s)", LOG_LEVEL)
     # Some Linux images don't ship with a mime.types mapping for .xlsx/.xls, which can
     # cause downloads to be served as text/plain. Register explicitly for consistency.
     mimetypes.add_type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx")
     mimetypes.add_type("application/vnd.ms-excel", ".xls")
     init_db()
+    logger.info("DB initialised")
 
 _SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
 if os.path.isdir(_SAMPLES_DIR):
@@ -226,6 +236,8 @@ async def ingest_project(project_id: int, tmp_path: str):
     _ingest_progress[project_id] = {'step': 'starting', 'message': 'Preparing ingestion...'}
 
     def _run_ingestion():
+        logger.info("Ingestion thread started for project %d (schema=%s, file=%s)",
+                    project_id, project['schema_name'], tmp_path)
         try:
             update_project_status(project_id, 'ingesting')
             for progress in ingest(
@@ -238,12 +250,16 @@ async def ingest_project(project_id: int, tmp_path: str):
                 display_columns=project['display_columns'],
             ):
                 _ingest_progress[project_id] = progress
+                if progress.get('step') not in ('progress',):
+                    logger.debug("Ingestion [project=%d] %s", project_id, progress)
         except Exception as e:
+            logger.exception("Ingestion failed for project %d", project_id)
             update_project_status(project_id, 'error')
             _ingest_progress[project_id] = {'step': 'error', 'message': str(e)}
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+                logger.debug("Cleaned up tmp file %s", tmp_path)
 
     threading.Thread(target=_run_ingestion, daemon=True).start()
 

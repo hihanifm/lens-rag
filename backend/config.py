@@ -52,3 +52,7 @@ CORS_ORIGINS = [
 # e.g. ROOT_PATH=/lens-rag
 # Leave empty when running at root.
 ROOT_PATH = os.environ.get("ROOT_PATH", "")
+
+# ── Logging ────────────────────────────────────────────────────────────────
+# Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")

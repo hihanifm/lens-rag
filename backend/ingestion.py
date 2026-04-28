@@ -1,8 +1,13 @@
+import logging
+import time
+
 import pandas as pd
 from typing import Generator
 from db import get_cursor, create_project_schema
 from embedder import embed
 import json
+
+logger = logging.getLogger("lens.ingestion")
 
 
 def read_excel(filepath: str) -> tuple[pd.DataFrame, list[str], list[str]]:
@@ -15,22 +20,27 @@ def read_excel(filepath: str) -> tuple[pd.DataFrame, list[str], list[str]]:
     - sheet_name column always added
     - All values read as str
     """
+    logger.debug("read_excel() path=%s", filepath)
+    t0 = time.monotonic()
     all_sheets = pd.read_excel(filepath, sheet_name=None, dtype=str)
 
     frames = []
     sheet_names = list(all_sheets.keys())
+    logger.debug("read_excel() sheets=%s", sheet_names)
 
     for sheet_name, df in all_sheets.items():
-        df = df.ffill()           # fill merged cells FIRST
-        df = df.dropna(how='all') # drop ONLY fully empty rows
+        before = len(df)
+        df = df.ffill()
+        df = df.dropna(how='all')
         df['sheet_name'] = sheet_name
+        logger.debug("  sheet=%r rows_before=%d rows_after=%d cols=%s",
+                     sheet_name, before, len(df), list(df.columns))
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)
-
-    # Original columns (excludes sheet_name we added)
     original_columns = [c for c in combined.columns if c != 'sheet_name']
-
+    logger.info("read_excel() total_rows=%d columns=%s elapsed_ms=%d",
+                len(combined), original_columns, int((time.monotonic() - t0) * 1000))
     return combined, original_columns, sheet_names
 
 
@@ -75,11 +85,15 @@ def ingest(
     Full ingestion pipeline with progress reporting.
     Yields progress dicts for SSE streaming.
     """
+    logger.info("ingest() start project_id=%d schema=%s content_col=%r context_cols=%s id_col=%r",
+                project_id, schema_name, content_column, context_columns, id_column)
+
     # Step 1: Read Excel
     yield {"step": "reading", "message": "Reading Excel file..."}
     df, original_columns, sheet_names = read_excel(filepath)
 
     total_rows = len(df)
+    logger.info("ingest() rows=%d sheets=%s columns=%s", total_rows, sheet_names, original_columns)
     yield {
         "step": "read_complete",
         "message": f"Found {total_rows} rows across {len(sheet_names)} sheet(s)",
@@ -89,14 +103,16 @@ def ingest(
 
     # Step 2: Create schema and table
     yield {"step": "schema", "message": "Creating database schema..."}
+    logger.debug("ingest() creating schema %s", schema_name)
     create_project_schema(schema_name, original_columns, id_column)
+    logger.debug("ingest() schema created")
     yield {"step": "schema_complete", "message": "Database ready"}
 
     # Step 3: Ingest rows
     yield {"step": "embedding", "message": "Starting ingestion..."}
 
     records = df.to_dict(orient='records')
-    batch_size = 10  # embed in small batches
+    t_ingest_start = time.monotonic()
 
     for i, row in enumerate(records):
         sheet_name = row.get('sheet_name', '')
@@ -105,9 +121,16 @@ def ingest(
         contextual_content = build_contextual_content(
             row, context_columns, content_column, sheet_name
         )
+        logger.debug("row %d/%d sheet=%r content_len=%d text=%r",
+                     i + 1, total_rows, sheet_name, len(contextual_content),
+                     contextual_content[:120])
 
         # Embed
-        vector = embed(contextual_content)
+        try:
+            vector = embed(contextual_content)
+        except Exception as e:
+            logger.error("embed failed on row %d/%d — %s: %s", i + 1, total_rows, type(e).__name__, e)
+            raise
 
         # Build column dict for DB insert
         col_data = {}
@@ -117,26 +140,37 @@ def ingest(
             col_data[f'col_{safe}'] = str(val) if val is not None and str(val) != 'nan' else None
 
         # Insert into DB
-        with get_cursor() as (cur, conn):
-            col_names = ', '.join([f'"{k}"' for k in col_data.keys()])
-            col_values = list(col_data.values())
-            placeholders = ', '.join(['%s'] * len(col_data))
+        try:
+            with get_cursor() as (cur, conn):
+                col_names = ', '.join([f'"{k}"' for k in col_data.keys()])
+                col_values = list(col_data.values())
+                placeholders = ', '.join(['%s'] * len(col_data))
 
-            cur.execute(f"""
-                INSERT INTO {schema_name}.records
-                    (sheet_name, {col_names}, contextual_content, embedding)
-                VALUES
-                    (%s, {placeholders}, %s, %s)
-            """, [sheet_name] + col_values + [contextual_content, vector])
+                cur.execute(f"""
+                    INSERT INTO {schema_name}.records
+                        (sheet_name, {col_names}, contextual_content, embedding)
+                    VALUES
+                        (%s, {placeholders}, %s, %s)
+                """, [sheet_name] + col_values + [contextual_content, vector])
+        except Exception as e:
+            logger.error("DB insert failed on row %d/%d — %s: %s", i + 1, total_rows, type(e).__name__, e)
+            raise
 
         # Report progress every 10 rows
         if (i + 1) % 10 == 0 or (i + 1) == total_rows:
+            elapsed = int((time.monotonic() - t_ingest_start) * 1000)
+            rate = (i + 1) / max(elapsed / 1000, 0.001)
+            logger.info("ingest() progress %d/%d (%.0f%%) elapsed_ms=%d rate=%.1f rows/s",
+                        i + 1, total_rows, ((i + 1) / total_rows) * 100, elapsed, rate)
             yield {
                 "step": "progress",
                 "processed": i + 1,
                 "total": total_rows,
                 "percent": round(((i + 1) / total_rows) * 100)
             }
+
+    total_elapsed = int((time.monotonic() - t_ingest_start) * 1000)
+    logger.info("ingest() embedding+insert done rows=%d elapsed_ms=%d", total_rows, total_elapsed)
 
     # Step 4: Update project status
     with get_cursor() as (cur, conn):
@@ -145,6 +179,7 @@ def ingest(
             SET status = 'ready', row_count = %s
             WHERE id = %s
         """, [total_rows, project_id])
+    logger.info("ingest() project %d marked ready", project_id)
 
     yield {
         "step": "complete",
