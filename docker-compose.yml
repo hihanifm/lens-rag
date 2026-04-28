@@ -1,6 +1,7 @@
 services:
 
   lens-rag-postgres:
+    profiles: ["dev"]
     image: pgvector/pgvector:pg16
     container_name: lens-rag-postgres
     restart: always
@@ -10,6 +11,23 @@ services:
       POSTGRES_PASSWORD: changeme
     volumes:
       - lens-rag-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lens_user -d lens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  lens-rag-postgres-prod:
+    profiles: ["prod"]
+    image: pgvector/pgvector:pg16
+    container_name: lens-rag-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_DB: lens
+      POSTGRES_USER: lens_user
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - lens-rag-postgres-prod-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lens_user -d lens"]
       interval: 5s
@@ -90,10 +108,10 @@ services:
     ports:
       - "37000:8000"
     depends_on:
-      lens-rag-postgres:
+      lens-rag-postgres-prod:
         condition: service_healthy
     environment:
-      DB_HOST: lens-rag-postgres
+      DB_HOST: lens-rag-postgres-prod
       DB_PORT: 5432
       DB_NAME: lens
       DB_USER: lens_user
@@ -110,11 +128,13 @@ services:
       SERVE_FRONTEND: "true"
       FRONTEND_DIST_DIR: /app/frontend/dist
     volumes:
-      - lens-rag-uploads:/data/projects
+      - lens-rag-uploads-prod:/data/projects
       - ./frontend/dist:/app/frontend/dist:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
 volumes:
   lens-rag-postgres-data:
+  lens-rag-postgres-prod-data:
   lens-rag-uploads:
+  lens-rag-uploads-prod:
