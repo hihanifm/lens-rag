@@ -51,7 +51,7 @@ export default function ResultsTable({ results, displayColumns }) {
   if (!results || results.length === 0) return null
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 mt-6">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 mt-6 pb-2">
       <table
         className="divide-y divide-gray-200"
         style={{ width: 'max-content', minWidth: '100%' }}

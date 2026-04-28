@@ -115,7 +115,7 @@ function ClusterExpansion({ entry }) {
   return (
     <div className="px-5 pb-5 space-y-2">
       {entry.groups.map(group => (
-        <div key={group.label} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div key={group.label} className="bg-white rounded-xl border border-gray-200">
           <button
             onClick={() => setCollapsed(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
             className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-gray-50 transition-colors"
@@ -127,7 +127,7 @@ function ClusterExpansion({ entry }) {
             <span className="text-gray-400 text-xs">{collapsed[group.label] ? '▶' : '▼'}</span>
           </button>
           {!collapsed[group.label] && (
-            <div className="overflow-x-auto border-t border-gray-100">
+            <div className="overflow-x-auto border-t border-gray-100 pb-2">
               <table
                 className="divide-y divide-gray-100 text-sm"
                 style={{ width: 'max-content', minWidth: '100%' }}
