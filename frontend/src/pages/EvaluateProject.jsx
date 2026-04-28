@@ -136,7 +136,7 @@ export default function EvaluateProject() {
               to={`/projects/${projectId}/search`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Search Pro 🚀
+              Search Pro
             </Link>
             <Link
               to={`/projects/${projectId}/evaluate`}

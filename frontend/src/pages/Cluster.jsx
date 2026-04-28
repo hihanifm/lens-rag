@@ -318,7 +318,7 @@ export default function Cluster() {
             {project.source_filename && <span className="ml-2 font-mono">{project.source_filename}</span>}
           </p>
           <div className="flex gap-1">
-            <NavLink to={`${activeBase}/search`} active={location.pathname.endsWith('/search')}>Search Pro 🚀</NavLink>
+            <NavLink to={`${activeBase}/search`} active={location.pathname.endsWith('/search')}>Search Pro</NavLink>
             <NavLink to={`${activeBase}/evaluate`} active={location.pathname.endsWith('/evaluate')}>Evaluate 🧪</NavLink>
             <NavLink to={`${activeBase}/browse`} active={location.pathname.endsWith('/browse')}>Browse 👀</NavLink>
             <NavLink to={`${activeBase}/cluster`} active={location.pathname.endsWith('/cluster')}>Cluster 🧩</NavLink>
