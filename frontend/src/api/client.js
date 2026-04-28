@@ -67,9 +67,11 @@ export const browseProject = (id) =>
 export const previewExcel = (file) => {
   const form = new FormData()
   form.append('file', file)
-  return api.post('/projects/preview', form, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  }).then(r => r.data)
+  // Use native fetch — the axios instance default Content-Type: application/json
+  // overrides multipart detection. fetch lets the browser set the correct
+  // multipart/form-data boundary automatically.
+  return fetch(`${API_BASE_URL}/projects/preview`, { method: 'POST', body: form })
+    .then(r => r.json())
 }
 
 // ── Search ────────────────────────────────────────────────────────────────

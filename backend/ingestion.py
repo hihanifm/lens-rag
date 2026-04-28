@@ -52,7 +52,8 @@ def build_contextual_content(
 ) -> str:
     """
     Build contextual content string for embedding.
-    Format: sheet_name | ctx1 | ctx2 | ... | content
+    Format: sheet_name | ctx1 | ctx2 | ... [| content if set]
+    content_column is optional; omitted when empty.
     """
     parts = [str(sheet_name)]
 
@@ -61,8 +62,10 @@ def build_contextual_content(
         if val and val.lower() != 'nan':
             parts.append(val)
 
-    content = str(row.get(content_column, '')) if row.get(content_column) is not None else ''
-    parts.append(content)
+    if content_column:
+        content = str(row.get(content_column, '')) if row.get(content_column) is not None else ''
+        if content and content.lower() != 'nan':
+            parts.append(content)
 
     return ' | '.join(parts)
 

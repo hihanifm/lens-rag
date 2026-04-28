@@ -26,23 +26,20 @@ test.describe.serial('project PIN', () => {
     // Step 2: Store columns (default: all selected)
     await page.getByTestId('store-continue').click()
 
-    // Step 3: Content column
-    await page.getByRole('button', { name: 'Description' }).click()
-    await page.getByTestId('content-continue').click()
-
-    // Step 4: Context columns
+    // Step 3: Context columns
     await page.getByRole('button', { name: /Category/ }).click()
     await page.getByRole('button', { name: /Name/ }).click()
+    await page.getByRole('button', { name: /Description/ }).click()
     await page.getByTestId('context-continue').click()
 
-    // Step 5: ID column
+    // Step 4: ID column
     await page.getByRole('button', { name: 'Product ID' }).click()
     await page.getByTestId('id-continue').click()
 
-    // Step 6: Results columns
+    // Step 5: Results columns
     await page.getByTestId('display-continue').click()
 
-    // Step 7: Settings -> set PIN -> Create + ingest
+    // Step 6: Settings -> set PIN -> Create + ingest
     await page.getByPlaceholder('Leave blank for open access').fill(pin)
     await page.getByTestId('create-project').click()
 

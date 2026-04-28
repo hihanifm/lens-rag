@@ -175,9 +175,11 @@ export default function Settings() {
                   ? project.stored_columns.map(c => <Badge key={c}>{c}</Badge>)
                   : <span className="text-sm text-gray-400">All (legacy project)</span>}
               </ReadOnlyField>
-              <ReadOnlyField label="Content column">
-                <Badge>{project.content_column}</Badge>
-              </ReadOnlyField>
+              {project.content_column && (
+                <ReadOnlyField label="Content column">
+                  <Badge>{project.content_column}</Badge>
+                </ReadOnlyField>
+              )}
               <ReadOnlyField label="Context columns">
                 {project.context_columns.length > 0
                   ? project.context_columns.map(c => <Badge key={c}>{c}</Badge>)

@@ -25,24 +25,20 @@ test('create project + ingest completes', async ({ page }) => {
   // Step 2: Store columns (default: all selected)
   await page.getByTestId('store-continue').click()
 
-  // Step 3: Content column
-  await page.getByRole('button', { name: 'Description' }).click()
-  await page.getByTestId('content-continue').click()
-
-  // Step 4: Context columns
+  // Step 3: Context columns
   await page.getByRole('button', { name: /Category/ }).click()
   await page.getByRole('button', { name: /Name/ }).click()
+  await page.getByRole('button', { name: /Description/ }).click()
   await page.getByTestId('context-continue').click()
 
-  // Step 5: ID column
+  // Step 4: ID column
   await page.getByRole('button', { name: 'Product ID' }).click()
   await page.getByTestId('id-continue').click()
 
-  // Step 6: Results columns
-  // Pre-filled from context/id/content; just continue.
+  // Step 5: Results columns (pre-filled; just continue)
   await page.getByTestId('display-continue').click()
 
-  // Step 7: Settings -> Create -> ingestion screen
+  // Step 6: Settings -> Create -> ingestion screen
   await page.getByTestId('create-project').click()
 
   // Ingestion can take a bit; wait for complete marker, then redirect to search.

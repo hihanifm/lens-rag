@@ -205,7 +205,7 @@ async def create_project_endpoint(data: ProjectCreate):
     """Create project metadata record. Returns project id."""
     stored = set(data.stored_columns)
     errors = []
-    if data.content_column not in stored:
+    if data.content_column and data.content_column not in stored:
         errors.append(f"content_column '{data.content_column}' is not in stored_columns")
     bad_ctx = [c for c in data.context_columns if c not in stored]
     if bad_ctx:
