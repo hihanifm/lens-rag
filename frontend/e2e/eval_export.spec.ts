@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { skipUnlessOllamaEmbedding } from './skipUnlessOllama'
 
 function sampleXlsxPath() {
   const __filename = fileURLToPath(import.meta.url)
@@ -9,7 +10,8 @@ function sampleXlsxPath() {
 }
 
 test.describe.serial('evaluate export', () => {
-  test('exported RAGAS JSON includes embedding config metadata', async ({ page }) => {
+  test('exported RAGAS JSON includes embedding config metadata', async ({ page, request }) => {
+    await skipUnlessOllamaEmbedding(request, test)
     // ── Create + ingest project ──────────────────────────────────────────
     await page.goto('/')
     await page.getByTestId('new-project').click()
@@ -36,7 +38,7 @@ test.describe.serial('evaluate export', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await page.getByTestId('create-project').click()
-    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 300_000 })
     await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })
 
     // ── Evaluate ─────────────────────────────────────────────────────────
@@ -55,7 +57,7 @@ test.describe.serial('evaluate export', () => {
     await page.getByTestId('eval-run').click()
 
     // Wait for results to appear then export JSON
-    await expect(page.getByRole('heading', { name: 'Results' })).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByRole('heading', { name: 'Results' })).toBeVisible({ timeout: 300_000 })
 
     const downloadPromise = page.waitForEvent('download', { timeout: 60_000 })
     await page.getByTestId('eval-export').click()

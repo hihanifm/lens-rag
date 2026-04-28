@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { skipUnlessOllamaEmbedding } from './skipUnlessOllama'
 
 function sampleXlsxPath() {
   const __filename = fileURLToPath(import.meta.url)
@@ -9,7 +10,8 @@ function sampleXlsxPath() {
 }
 
 test.describe.serial('cluster tab', () => {
-  test('k-means cluster, scatter view, filter, and export', async ({ page }) => {
+  test('k-means cluster, scatter view, filter, and export', async ({ page, request }) => {
+    await skipUnlessOllamaEmbedding(request, test)
     // ── Create + ingest project ──────────────────────────────────────────
     await page.goto('/')
     await page.getByTestId('new-project').click()
@@ -36,9 +38,12 @@ test.describe.serial('cluster tab', () => {
     // Display columns (pre-filled)
     await page.getByTestId('display-continue').click()
 
+    // Connection step (leave defaults)
+    await page.getByRole('button', { name: 'Continue' }).click()
+
     // Create + wait for ingestion
     await page.getByTestId('create-project').click()
-    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 300_000 })
     await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })
 
     // ── Navigate to Cluster tab ──────────────────────────────────────────
@@ -117,6 +122,12 @@ test.describe.serial('cluster tab', () => {
 
     await page.goto(`/projects/${projectId}/cluster`)
     await expect(page).toHaveURL(/\/projects\/\d+\/cluster/)
+
+    // PIN-protected projects render PinGate — no algorithm controls until unlock.
+    const pinGate = page.getByRole('heading', { name: 'This project is PIN protected' })
+    if (await pinGate.isVisible({ timeout: 3000 }).catch(() => false)) {
+      test.skip(true, 'First project is PIN-protected; DBSCAN smoke needs an unlocked project')
+    }
 
     // Switch to DBSCAN
     await page.getByRole('button', { name: 'DBSCAN (auto)' }).click()

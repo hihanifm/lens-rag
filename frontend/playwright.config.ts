@@ -2,7 +2,8 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 2 * 60 * 1000,
+  // Create+ingest flows can exceed 2 minutes on slower hosts (Ollama + 100 rows).
+  timeout: 6 * 60 * 1000,
   expect: { timeout: 15_000 },
   retries: 0,
   use: {

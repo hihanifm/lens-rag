@@ -38,11 +38,14 @@ test('create project + ingest completes', async ({ page }) => {
   // Step 5: Results columns (pre-filled; just continue)
   await page.getByTestId('display-continue').click()
 
-  // Step 6: Settings -> Create -> ingestion screen
+  // Step 6: Connection (leave defaults)
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  // Step 7: Settings -> Create -> ingestion screen
   await page.getByTestId('create-project').click()
 
   // Ingestion can take a bit; wait for complete marker, then redirect to search.
-  await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 300_000 })
   await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })
 })
 

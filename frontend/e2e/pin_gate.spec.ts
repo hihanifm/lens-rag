@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { skipUnlessOllamaEmbedding } from './skipUnlessOllama'
 
 function sampleXlsxPath() {
   const __filename = fileURLToPath(import.meta.url)
@@ -9,7 +10,8 @@ function sampleXlsxPath() {
 }
 
 test.describe.serial('project PIN', () => {
-  test('PIN gate blocks until unlocked, then search works', async ({ page }) => {
+  test('PIN gate blocks until unlocked, then search works', async ({ page, request }) => {
+    await skipUnlessOllamaEmbedding(request, test)
     const pin = '1234'
 
     await page.goto('/')
@@ -39,11 +41,14 @@ test.describe.serial('project PIN', () => {
     // Step 5: Results columns
     await page.getByTestId('display-continue').click()
 
-    // Step 6: Settings -> set PIN -> Create + ingest
+    // Step 6: Connection (leave defaults)
+    await page.getByRole('button', { name: 'Continue' }).click()
+
+    // Step 7: Settings -> set PIN -> Create + ingest
     await page.getByPlaceholder('Leave blank for open access').fill(pin)
     await page.getByTestId('create-project').click()
 
-    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByTestId('ingest-complete')).toBeVisible({ timeout: 300_000 })
     await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })
 
     // Should land on Search page but gated
