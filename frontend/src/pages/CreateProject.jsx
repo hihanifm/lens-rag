@@ -93,18 +93,35 @@ export default function CreateProject() {
     displayColumns.length,
   ])
 
-  const handleUpload = async () => {
-    if (!file) return
+  const handleUpload = async (fileArg) => {
+    const target = fileArg ?? file
+    if (!target) return
     setLoading(true)
     setError('')
     try {
-      const data = await previewExcel(file)
+      const data = await previewExcel(target)
+      setFile(target)
       setPreview(data)
       setStoredColumns(data.columns)  // default: store all columns
       next()
     } catch (e) {
       setError('Failed to read Excel file. Please check the format.')
     } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLoadSample = async (filename) => {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE_URL}/samples/${filename}`)
+      if (!res.ok) throw new Error('fetch failed')
+      const blob = await res.blob()
+      const sampleFile = new File([blob], filename, { type: blob.type })
+      await handleUpload(sampleFile)
+    } catch (e) {
+      setError('Failed to load sample file.')
       setLoading(false)
     }
   }
@@ -269,15 +286,16 @@ export default function CreateProject() {
                   { label: 'Book Library', file: 'book_library.xlsx', icon: '📚' },
                   { label: 'HR Directory', file: 'hr_directory.xlsx', icon: '👥' },
                 ].map(s => (
-                  <a
+                  <button
                     key={s.file}
-                    href={`${API_BASE_URL}/samples/${s.file}`}
-                    download
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleLoadSample(s.file)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 transition-colors"
                   >
                     <span>{s.icon}</span>
                     <span>{s.label}</span>
-                  </a>
+                  </button>
                 ))}
               </div>
             </div>
