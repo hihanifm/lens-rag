@@ -3,7 +3,7 @@ services:
   lens-postgres:
     image: pgvector/pgvector:pg16
     container_name: lens-postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_DB: lens
       POSTGRES_USER: lens_user
@@ -85,7 +85,7 @@ services:
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
     container_name: lens-api-prod
-    restart: unless-stopped
+    restart: always
     ports:
       - "37000:8000"
     depends_on:
