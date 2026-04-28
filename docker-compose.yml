@@ -124,7 +124,7 @@ services:
       EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
       RERANKER_MODEL: ${RERANKER_MODEL:-bbjson/bge-reranker-base:latest}
-      ROOT_PATH: /lens-rag
+      ROOT_PATH: ${ROOT_PATH:-}
       SERVE_FRONTEND: "true"
       FRONTEND_DIST_DIR: /app/frontend/dist
     volumes:
