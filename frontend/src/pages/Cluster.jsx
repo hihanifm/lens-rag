@@ -315,6 +315,7 @@ export default function Cluster() {
             <NavLink to={`${activeBase}/evaluate`} active={location.pathname.endsWith('/evaluate')}>Evaluate</NavLink>
             <NavLink to={`${activeBase}/browse`} active={location.pathname.endsWith('/browse')}>Browse</NavLink>
             <NavLink to={`${activeBase}/cluster`} active={location.pathname.endsWith('/cluster')}>Cluster</NavLink>
+            <NavLink to={`${activeBase}/system`} active={location.pathname.endsWith('/system')}>System</NavLink>
             <NavLink to={`${activeBase}/settings`} active={location.pathname.endsWith('/settings')}>
               <span className="inline-flex items-center gap-1">
                 Settings{project.has_pin && <span aria-hidden>🔒</span>}

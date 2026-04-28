@@ -12,7 +12,14 @@ from fastapi.staticfiles import StaticFiles
 import pandas as pd
 from starlette.responses import Response
 
-from config import CORS_ORIGINS, TOP_K_DEFAULT, ROOT_PATH, LOG_LEVEL
+from config import CORS_ORIGINS, TOP_K_DEFAULT, TOP_K_MAX, TOP_K_RETRIEVAL, ROOT_PATH, LOG_LEVEL
+from config import (
+    EMBEDDING_PROVIDER,
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMS,
+    RERANKER_ENABLED,
+    RERANKER_MODEL,
+)
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.DEBUG),
@@ -21,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
-from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest
+from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, SystemConfigResponse
 from projects import (
     create_project,
     get_all_projects,
@@ -168,6 +175,76 @@ def get_columns_endpoint(project_id: int, request: Request):
     _check_pin(project_raw, request)
     columns = get_project_columns(project_raw)
     return {"columns": columns}
+
+
+@app.get("/projects/{project_id}/system-config", response_model=SystemConfigResponse)
+def get_system_config(project_id: int, request: Request):
+    """
+    Read-only server retrieval configuration (embedding provider, models, indexes,
+    HNSW/BM25 summary). PIN-protected when project has a PIN.
+    """
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+
+    pgvector_version = None
+    hnsw_ef_search = None
+    with get_cursor() as (cur, conn):
+        cur.execute("SELECT extversion AS extversion FROM pg_extension WHERE extname = 'vector'")
+        row = cur.fetchone()
+        if row and row.get("extversion"):
+            pgvector_version = str(row["extversion"])
+        try:
+            cur.execute("SELECT current_setting('hnsw.ef_search', true) AS v")
+            r2 = cur.fetchone()
+            if r2 and r2.get("v"):
+                # May be '' if unset depending on Postgres / pgvector
+                v = r2["v"]
+                if v is not None and str(v).strip() != "":
+                    hnsw_ef_search = str(v)
+        except Exception as e:
+            logger.debug("Could not read hnsw.ef_search: %s", e)
+
+    hnsw_defaults_note = (
+        "Index is created without explicit WITH (m, ef_construction); pgvector defaults apply "
+        f"(typically m={16}, ef_construction=64). "
+        f"Detected pgvector {pgvector_version or 'unknown'}."
+    )
+
+    vector_index = (
+        "PostgreSQL pgvector HNSW on `records.embedding` using `vector_cosine_ops` "
+        "(cosine distance / inner-product style retrieval per pgvector cosine ops)."
+    )
+    keyword_search = (
+        "PostgreSQL full-text search: `search_vector` tsvector with GIN index generated from "
+        "`contextual_content` (`english` configuration) optionally unioned with the ID "
+        "column (`simple`) when configured — BM25-ish ranking via `ts_rank` / `plainto_tsquery` "
+        "(not Elastic BM25)."
+    )
+    topic_pipeline = (
+        "Topic mode: embed query → top-K cosine neighbors (HNSW) + top-K lexical matches "
+        "→ merged (RRF or vector-primary) → optional reranker (Ollama cross-encoder) → top-k results."
+    )
+
+    return SystemConfigResponse(
+        embedding_provider=EMBEDDING_PROVIDER,
+        embedding_model=EMBEDDING_MODEL,
+        embedding_dims=EMBEDDING_DIMS,
+        reranker_enabled=RERANKER_ENABLED,
+        reranker_model=RERANKER_MODEL,
+        top_k_retrieval=TOP_K_RETRIEVAL,
+        top_k_default=TOP_K_DEFAULT,
+        top_k_max=TOP_K_MAX,
+        pgvector_version=pgvector_version,
+        vector_index=vector_index,
+        keyword_search=keyword_search,
+        topic_pipeline=topic_pipeline,
+        hnsw_m_default=16,
+        hnsw_ef_construction_default=64,
+        hnsw_ef_search=hnsw_ef_search,
+        hnsw_defaults_note=hnsw_defaults_note,
+    )
 
 
 # ── Excel Upload & Column Detection ───────────────────────────────────────

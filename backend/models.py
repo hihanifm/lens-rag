@@ -33,6 +33,26 @@ class ProjectResponse(BaseModel):
     created_at: datetime
 
 
+class SystemConfigResponse(BaseModel):
+    """Read-only server retrieval configuration (for transparency UI)."""
+    embedding_provider: str
+    embedding_model: str
+    embedding_dims: int
+    reranker_enabled: bool
+    reranker_model: str
+    top_k_retrieval: int
+    top_k_default: int
+    top_k_max: int
+    pgvector_version: Optional[str] = None
+    vector_index: str
+    keyword_search: str
+    topic_pipeline: str
+    hnsw_m_default: int = 16
+    hnsw_ef_construction_default: int = 64
+    hnsw_ef_search: Optional[str] = None
+    hnsw_defaults_note: str
+
+
 class ColumnInfo(BaseModel):
     columns: List[str]
     sheet_names: List[str]

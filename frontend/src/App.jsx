@@ -8,6 +8,7 @@ import History from './pages/History'
 import Settings from './pages/Settings'
 import Browse from './pages/Browse'
 import Cluster from './pages/Cluster'
+import SystemConfig from './pages/SystemConfig'
 import Layout from './components/Layout'
 import { ProjectStateProvider } from './contexts/ProjectStateContext'
 
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/projects/:projectId/settings" element={<Settings />} />
             <Route path="/projects/:projectId/browse" element={<Browse />} />
             <Route path="/projects/:projectId/cluster" element={<Cluster />} />
+            <Route path="/projects/:projectId/system" element={<SystemConfig />} />
             <Route path="/history" element={<History />} />
           </Routes>
         </Layout>
