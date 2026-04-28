@@ -67,8 +67,9 @@ services:
     ports:
       - "37001:37001"
     environment:
-      # Browser needs to reach the API on the host-mapped port.
-      - VITE_API_URL=http://localhost:37000
+      # Vite proxy forwards API calls to the backend over the internal Docker network.
+      # The browser only ever talks to the Vite server — port 37000 need not be reachable.
+      - VITE_API_PROXY_TARGET=http://lens-rag-api:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
