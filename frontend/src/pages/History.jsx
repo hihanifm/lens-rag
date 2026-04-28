@@ -110,7 +110,7 @@ export default function History() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6 py-10">
+      <div className="w-[90%] mx-auto py-10">
 
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>

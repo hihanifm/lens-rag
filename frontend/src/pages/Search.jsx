@@ -82,7 +82,7 @@ export default function Search() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6 py-10">
+      <div className="w-[90%] mx-auto py-10">
 
         {/* Header */}
         <div className="mb-8">
