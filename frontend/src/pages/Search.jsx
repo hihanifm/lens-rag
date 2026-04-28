@@ -64,6 +64,18 @@ export default function Search() {
   const effectiveK    = s.k || project?.default_k || 10
   const legacyMethod  = s.legacy_method || 'bm25'
 
+  const orderedDisplayColumns = (() => {
+    const selected = project?.display_columns ?? []
+    const stored = project?.stored_columns ?? []
+    if (Array.isArray(stored) && stored.length > 0) {
+      const selectedSet = new Set(selected)
+      // Keep doc/source order, only for selected columns
+      return stored.filter(c => selectedSet.has(c))
+    }
+    // Legacy projects without stored_columns: preserve user order
+    return selected
+  })()
+
   // At least one retriever must be on (topic mode only)
   const retrieversOk = effectiveMode !== 'topic' ? true : (s.use_vector || s.use_bm25)
 
@@ -213,17 +225,6 @@ export default function Search() {
             >
               Topic / Keyword
             </button>
-            <button
-              onClick={() => setSearch(projectId, { mode: 'legacy' })}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                effectiveMode === 'legacy'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              title="Lexical baseline (no embeddings)"
-            >
-              Legacy keyword
-            </button>
             {project.has_id_column && (
               <button
                 onClick={() => setSearch(projectId, { mode: 'id' })}
@@ -236,6 +237,17 @@ export default function Search() {
                 {project.id_column} lookup
               </button>
             )}
+            <button
+              onClick={() => setSearch(projectId, { mode: 'legacy' })}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                effectiveMode === 'legacy'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title="Standard database-style lexical baseline (no embeddings)"
+            >
+              Legacy keyword
+            </button>
           </div>
 
           {/* Legacy method selector */}
@@ -272,6 +284,13 @@ export default function Search() {
                   : `Substring match against contextual content${project.has_id_column ? ` + ${project.id_column}` : ''}.`}
               </span>
             </div>
+          )}
+
+          {effectiveMode === 'legacy' && (
+            <p className="mb-4 text-xs text-gray-500 leading-relaxed">
+              This is a <span className="font-medium text-gray-600">standard database-style</span> keyword search baseline.
+              Use it to compare results against <span className="font-medium text-gray-600">Topic / Keyword</span> (semantic) search.
+            </p>
           )}
 
           {/* Query input */}
@@ -416,7 +435,7 @@ export default function Search() {
             ) : (
               <>
                 <div data-testid="results-table">
-                <ResultsTable results={s.results} displayColumns={project.display_columns} />
+                <ResultsTable results={s.results} displayColumns={orderedDisplayColumns} />
                 </div>
                 <StatsPanel stats={s.stats} />
               </>

@@ -213,6 +213,16 @@ export default function Cluster() {
 
   const allColumns = columnsData?.columns ?? []
 
+  const orderedDisplayColumns = (() => {
+    const selected = project?.display_columns ?? []
+    const stored = project?.stored_columns ?? []
+    if (Array.isArray(stored) && stored.length > 0) {
+      const selectedSet = new Set(selected)
+      return stored.filter(c => selectedSet.has(c))
+    }
+    return selected
+  })()
+
   const handleRun = async () => {
     const k = algorithm === 'kmeans' ? parseInt(kInput, 10) : null
     if (algorithm === 'kmeans' && (!Number.isInteger(k) || k < 2 || k > 50)) {
@@ -228,7 +238,7 @@ export default function Cluster() {
       k: k ?? null,
       filters: compact.map(({ column, values }) => ({ column, values })),
       projectName: project?.name ?? '',
-      displayColumns: project?.display_columns ?? [],
+      displayColumns: orderedDisplayColumns,
     })
   }
 
@@ -585,7 +595,7 @@ export default function Cluster() {
               <div data-testid="cluster-scatter" className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm overflow-x-auto">
                 <ClusterScatter
                   groups={result.groups}
-                  displayColumns={project.display_columns}
+                displayColumns={orderedDisplayColumns}
                 />
               </div>
             )}
@@ -627,7 +637,7 @@ export default function Cluster() {
                         <table className="min-w-full divide-y divide-gray-100">
                           <thead className="bg-gray-50">
                             <tr>
-                              {[...project.display_columns, 'Context'].map(col => (
+                              {[...orderedDisplayColumns, 'Context'].map(col => (
                                 <th
                                   key={col}
                                   className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
@@ -648,7 +658,7 @@ export default function Cluster() {
                                 className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
                                 title="Click to expand/collapse row"
                               >
-                                {[...project.display_columns, 'Context'].map(col => (
+                                {[...orderedDisplayColumns, 'Context'].map(col => (
                                   <td
                                     key={col}
                                     className="px-4 py-3 text-sm text-gray-700 max-w-xs align-top"
