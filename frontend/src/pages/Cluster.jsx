@@ -392,6 +392,14 @@ export default function Cluster() {
                 </button>
               )}
             </div>
+            <p className="text-xs text-gray-500 max-w-[40rem] leading-relaxed">
+              Each rule matches rows where that column{' '}
+              <span className="font-medium text-gray-600">contains your text</span> (substring, case-insensitive —
+              PostgreSQL ILIKE).
+              Regex is not supported. Multiple rows combine with{' '}
+              <span className="font-medium text-gray-600">AND</span> (every rule must match). Value dropdowns are{' '}
+              <span className="font-medium text-gray-600">single-select</span> — choose one option per rule; add another rule for a different column.
+            </p>
 
             {filters.map((row, idx) => {
               const valuesData = columnValuesQueries[idx]?.data
