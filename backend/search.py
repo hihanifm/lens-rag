@@ -1,9 +1,12 @@
+import logging
 import time
 from db import get_cursor
 from embedder import embed, rerank
 from config import TOP_K_RETRIEVAL, TOP_K_DEFAULT, TOP_K_MAX, RERANKER_ENABLED
 from models import SearchResponse, SearchResult, SearchStats
 from ingestion import safe_col_name
+
+logger = logging.getLogger("lens.search")
 
 
 def rrf_merge(vector_ids: list, bm25_ids: list, k: int = 60) -> list:
@@ -30,6 +33,7 @@ def id_search(
     Exact/partial ID search using ILIKE.
     Fast SQL lookup — no embedding, no BM25.
     """
+    logger.info("id_search schema=%s id_column=%r query=%r k=%d", schema_name, id_column, query, k)
     stats = {}
     total_start = time.perf_counter()
 
@@ -48,6 +52,8 @@ def id_search(
         rows = cur.fetchall()
     stats['sql_lookup_ms'] = round((time.perf_counter() - t) * 1000, 1)
     stats['total_ms'] = round((time.perf_counter() - total_start) * 1000, 1)
+    logger.info("id_search done results=%d sql_ms=%.1f total_ms=%.1f",
+                len(rows), stats['sql_lookup_ms'], stats['total_ms'])
 
     results = []
     for row in rows:
@@ -82,6 +88,7 @@ def topic_search(
     4. Rerank with bge-reranker-base
     5. Return top k with stats
     """
+    logger.info("topic_search schema=%s query=%r k=%d reranker=%s", schema_name, query, k, RERANKER_ENABLED)
     stats = {}
     total_start = time.perf_counter()
     safe_display = [f'col_{safe_col_name(c)}' for c in display_columns]
@@ -91,6 +98,7 @@ def topic_search(
     t = time.perf_counter()
     query_vector = embed(query)
     stats['embedding_ms'] = round((time.perf_counter() - t) * 1000, 1)
+    logger.debug("  embed done embedding_ms=%.1f", stats['embedding_ms'])
 
     # Step 2: Vector search
     t = time.perf_counter()
@@ -104,6 +112,7 @@ def topic_search(
         """, [query_vector, query_vector, TOP_K_RETRIEVAL])
         vector_rows = cur.fetchall()
     stats['vector_search_ms'] = round((time.perf_counter() - t) * 1000, 1)
+    logger.debug("  vector search hits=%d vector_ms=%.1f", len(vector_rows), stats['vector_search_ms'])
 
     vector_ids = [row['id'] for row in vector_rows]
     rows_by_id = {row['id']: row for row in vector_rows}
@@ -121,6 +130,7 @@ def topic_search(
         """, [query, query, TOP_K_RETRIEVAL])
         bm25_rows = cur.fetchall()
     stats['bm25_search_ms'] = round((time.perf_counter() - t) * 1000, 1)
+    logger.debug("  bm25 search hits=%d bm25_ms=%.1f", len(bm25_rows), stats['bm25_search_ms'])
 
     bm25_ids = [row['id'] for row in bm25_rows]
     for row in bm25_rows:
@@ -132,6 +142,7 @@ def topic_search(
     merged_ids = rrf_merge(vector_ids, bm25_ids)
     stats['rrf_merge_ms'] = round((time.perf_counter() - t) * 1000, 1)
     stats['candidates_retrieved'] = len(merged_ids)
+    logger.debug("  rrf merge candidates=%d rrf_ms=%.1f", len(merged_ids), stats['rrf_merge_ms'])
 
     # Step 5: Rerank top candidates (skipped if RERANKER_ENABLED=false)
     t = time.perf_counter()
@@ -150,9 +161,11 @@ def topic_search(
             reverse=True
         )
         stats['reranker_ms'] = round((time.perf_counter() - t) * 1000, 1)
+        logger.debug("  rerank done reranker_ms=%.1f", stats['reranker_ms'])
     else:
         ranked = [(doc_id, None) for doc_id in candidates_to_rerank]
         stats['reranker_ms'] = None
+        logger.debug("  reranker skipped")
 
     # Step 6: Build results
     results = []
@@ -167,6 +180,11 @@ def topic_search(
         results.append(SearchResult(display_data=display_data, score=round(float(score), 4) if score is not None else None))
 
     stats['total_ms'] = round((time.perf_counter() - total_start) * 1000, 1)
+    logger.info("topic_search done results=%d embed_ms=%.1f vector_ms=%.1f bm25_ms=%.1f reranker_ms=%s total_ms=%.1f",
+                len(results), stats['embedding_ms'], stats['vector_search_ms'],
+                stats['bm25_search_ms'],
+                f"{stats['reranker_ms']:.1f}" if stats['reranker_ms'] is not None else "off",
+                stats['total_ms'])
 
     return SearchResponse(
         results=results,
