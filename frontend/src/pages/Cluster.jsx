@@ -41,7 +41,13 @@ function colorFor(clusterId) {
 
 // ── Scatter plot ──────────────────────────────────────────────────────────
 
-function ClusterScatter({ groups, displayColumns }) {
+function ClusterScatter({
+  groups,
+  displayColumns,
+  selectedClusterId,
+  onSelectCluster,
+  onSelectRecord,
+}) {
   const [hovered, setHovered] = useState(null)
   const [hidden, setHidden] = useState(new Set())
 
@@ -78,6 +84,7 @@ function ClusterScatter({ groups, displayColumns }) {
                   setHovered({ record: p, clientX: e.clientX, clientY: e.clientY })
                 }
                 onMouseLeave={() => setHovered(null)}
+                onClick={() => onSelectRecord?.(p)}
               />
             ))}
         </svg>
@@ -110,26 +117,41 @@ function ClusterScatter({ groups, displayColumns }) {
       {/* Legend */}
       <div className="flex flex-col gap-1.5 min-w-[140px] max-h-[480px] overflow-y-auto pr-1">
         {groups.map(g => (
-          <button
+          <div
             key={g.cluster_id}
-            onClick={() =>
-              setHidden(prev => {
-                const next = new Set(prev)
-                next.has(g.cluster_id) ? next.delete(g.cluster_id) : next.add(g.cluster_id)
-                return next
-              })
-            }
             className={`flex items-center gap-2 text-left text-xs rounded px-2 py-1 transition-opacity ${
               hidden.has(g.cluster_id) ? 'opacity-30' : 'opacity-100'
-            } hover:bg-gray-100`}
+            } ${selectedClusterId === g.cluster_id ? 'bg-blue-50 ring-1 ring-blue-200' : ''}`}
           >
-            <span
-              className="inline-block w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: colorFor(g.cluster_id) }}
-            />
-            <span className="text-gray-700 truncate">{g.label}</span>
-            <span className="text-gray-400 ml-auto flex-shrink-0">{g.count}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => onSelectCluster?.(g.cluster_id)}
+              className="flex items-center gap-2 flex-1 hover:bg-gray-100 rounded px-1 py-0.5"
+              title="Select cluster (show records below)"
+            >
+              <span
+                className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                style={{ backgroundColor: colorFor(g.cluster_id) }}
+              />
+              <span className="text-gray-700 truncate">{g.label}</span>
+              <span className="text-gray-400 ml-auto flex-shrink-0">{g.count}</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setHidden(prev => {
+                  const next = new Set(prev)
+                  next.has(g.cluster_id) ? next.delete(g.cluster_id) : next.add(g.cluster_id)
+                  return next
+                })
+              }}
+              className="text-gray-400 hover:text-gray-600 px-1"
+              title={hidden.has(g.cluster_id) ? 'Show cluster in plot' : 'Hide cluster in plot'}
+            >
+              {hidden.has(g.cluster_id) ? 'Show' : 'Hide'}
+            </button>
+          </div>
         ))}
       </div>
     </div>
@@ -168,6 +190,8 @@ export default function Cluster() {
   const [result, setResult] = useState(null)
   const [collapsed, setCollapsed] = useState({})
   const [expandedRows, setExpandedRows] = useState(new Set())
+  const [selectedClusterId, setSelectedClusterId] = useState(null)
+  const [selectedRecord, setSelectedRecord] = useState(null)
   const projectIdStr = String(projectId)
 
   const toggleExpandedRow = (groupLabel, rowIdx) => {
@@ -222,6 +246,11 @@ export default function Cluster() {
     }
     return selected
   })()
+
+  const selectRecord = (rec) => {
+    setSelectedRecord(rec ?? null)
+    if (rec?.clusterId != null) setSelectedClusterId(rec.clusterId)
+  }
 
   const handleRun = async () => {
     const k = algorithm === 'kmeans' ? parseInt(kInput, 10) : null
@@ -596,7 +625,125 @@ export default function Cluster() {
                 <ClusterScatter
                   groups={result.groups}
                 displayColumns={orderedDisplayColumns}
+                  selectedClusterId={selectedClusterId}
+                  onSelectCluster={(cid) => {
+                    setSelectedClusterId(cid)
+                    setSelectedRecord(null)
+                  }}
+                  onSelectRecord={selectRecord}
                 />
+
+                {/* Bottom tables */}
+                <div className="mt-6 space-y-4">
+                  {selectedRecord && (
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                        <div className="text-sm font-medium text-gray-800">
+                          Selected record
+                          <span className="ml-2 text-xs text-gray-400 font-normal">
+                            · {selectedRecord.label}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRecord(null)}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="divide-y divide-gray-100" style={{ width: 'max-content', minWidth: '100%' }}>
+                          <thead className="bg-gray-50">
+                            <tr>
+                              {[...orderedDisplayColumns, 'Context'].map(col => (
+                                <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[160px]">
+                                  {col}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white">
+                            <tr className="hover:bg-blue-50/40 cursor-pointer transition-colors" title="Click to expand/collapse row" onClick={() => toggleExpandedRow('__selected__', 0)}>
+                              {(() => {
+                                const rowKey = `__selected__::0`
+                                const expanded = expandedRows.has(rowKey)
+                                return [...orderedDisplayColumns, 'Context'].map(col => (
+                                  <td key={col} className="px-4 py-2 text-sm text-gray-700 min-w-[160px] max-w-xs align-top">
+                                    <span className={`block break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`}>
+                                      {col === 'Context'
+                                        ? (selectedRecord.contextual_content ?? '')
+                                        : (selectedRecord.display_data?.[col] ?? '')
+                                      }
+                                    </span>
+                                  </td>
+                                ))
+                              })()}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedClusterId != null && (
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                        <div className="text-sm font-medium text-gray-800">
+                          Selected cluster
+                          <span className="ml-2 text-xs text-gray-400 font-normal">
+                            · {result.groups.find(g => g.cluster_id === selectedClusterId)?.label ?? `Cluster ${selectedClusterId}`}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedClusterId(null)}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="divide-y divide-gray-100" style={{ width: 'max-content', minWidth: '100%' }}>
+                          <thead className="bg-gray-50">
+                            <tr>
+                              {[...orderedDisplayColumns, 'Context'].map(col => (
+                                <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[160px]">
+                                  {col}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 bg-white">
+                            {(result.groups.find(g => g.cluster_id === selectedClusterId)?.records ?? []).map((rec, i) => {
+                              const rowKey = `__cluster__${selectedClusterId}::${i}`
+                              const expanded = expandedRows.has(rowKey)
+                              return (
+                                <tr
+                                  key={i}
+                                  onClick={() => toggleExpandedRow(`__cluster__${selectedClusterId}`, i)}
+                                  className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
+                                  title="Click to expand/collapse row"
+                                >
+                                  {[...orderedDisplayColumns, 'Context'].map(col => (
+                                    <td key={col} className="px-4 py-2 text-sm text-gray-700 min-w-[160px] max-w-xs align-top">
+                                      <span className={`block break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`}>
+                                        {col === 'Context'
+                                          ? (rec.contextual_content ?? '')
+                                          : (rec.display_data?.[col] ?? '')
+                                        }
+                                      </span>
+                                    </td>
+                                  ))}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
