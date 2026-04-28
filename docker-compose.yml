@@ -28,7 +28,7 @@ services:
     container_name: lens-rag-api
     restart: unless-stopped
     ports:
-      - "37000:8000"
+      - "37002:8000"
     depends_on:
       lens-rag-postgres:
         condition: service_healthy
@@ -68,7 +68,7 @@ services:
       - "37001:37001"
     environment:
       # Vite proxy forwards API calls to the backend over the internal Docker network.
-      # The browser only ever talks to the Vite server — port 37000 need not be reachable.
+      # The browser only ever talks to the Vite server — port 37002 need not be reachable.
       - VITE_API_PROXY_TARGET=http://lens-rag-api:8000
     volumes:
       - ./frontend:/app

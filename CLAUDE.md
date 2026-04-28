@@ -417,7 +417,7 @@ lens/
         client.js          ← ALL axios calls here, nowhere else
       App.jsx
       main.jsx
-    .env.development       ← VITE_API_URL=http://localhost:37000 (dev only, committed)
+    .env.development       ← VITE_API_URL= (dev only, committed; Vite proxies to :37002)
     package.json
     vite.config.js         ← base driven by VITE_BASE_PATH env var
     tailwind.config.js
@@ -471,9 +471,10 @@ make build    # rebuild images after code changes
 make restart  # down + up
 ```
 
-Dev UI: `http://localhost:37001`  \nDev API: `http://localhost:37000`
+Dev UI: `http://localhost:37001`  Dev API: `http://localhost:37002`
 
-Backend API: `http://localhost:37000`
+Backend API (dev): `http://localhost:37002`
+Backend API (prod): `http://localhost:37000`
 Postgres: `localhost:5432` (lens_user / changeme)
 
 ### Local Python (scripts / one-offs)
@@ -493,8 +494,8 @@ python scripts/your_script.py
 
 ### Dev vs Prod architecture
 
-**Dev:** Vite dev server (`localhost:37001`) runs separately from FastAPI (`localhost:37000`).
-`frontend/.env.development` pins `VITE_API_URL=http://localhost:37000` so the frontend talks directly to FastAPI (CORS is allowed for `localhost:37001`).
+**Dev:** Vite dev server (`localhost:37001`) runs separately from FastAPI (`localhost:37002`).
+Vite proxies `/projects`, `/health`, `/samples` to `http://localhost:37002` (CORS is not needed — the browser only ever talks to the Vite origin).
 
 **Prod — single port, FastAPI serves static files:**
 1. Build the frontend: `make build-frontend` (sets `VITE_BASE_PATH=/lens-rag/`)
