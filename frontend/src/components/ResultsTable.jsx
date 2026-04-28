@@ -8,6 +8,15 @@ import { useMemo, useState } from 'react'
 
 export default function ResultsTable({ results, displayColumns }) {
   const [sorting, setSorting] = useState([])
+  const [expandedRows, setExpandedRows] = useState(new Set())
+
+  const toggleRow = (rowId) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      next.has(rowId) ? next.delete(rowId) : next.add(rowId)
+      return next
+    })
+  }
 
   const columns = useMemo(() =>
     displayColumns.map(col => ({
@@ -57,15 +66,25 @@ export default function ResultsTable({ results, displayColumns }) {
           ))}
         </thead>
         <tbody className="bg-white divide-y divide-gray-100">
-          {table.getRowModel().rows.map((row, i) => (
-            <tr key={row.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+          {table.getRowModel().rows.map((row, i) => {
+            const expanded = expandedRows.has(row.id)
+            return (
+            <tr
+              key={row.id}
+              onClick={() => toggleRow(row.id)}
+              className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
+              title="Click to expand/collapse row"
+            >
               {row.getVisibleCells().map(cell => (
                 <td key={cell.id} className="px-4 py-3 max-w-xs align-top">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  <span className={`block ${expanded ? '' : 'line-clamp-5'}`}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </span>
                 </td>
               ))}
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

@@ -97,6 +97,16 @@ function ClusterExpansion({ entry }) {
     entry.groups?.forEach((g, i) => { s[g.label] = i >= 3 })
     return s
   })
+  const [expandedRows, setExpandedRows] = useState(new Set())
+
+  const toggleRow = (groupLabel, rowIdx) => {
+    const key = `${groupLabel}::${rowIdx}`
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
 
   if (!entry.groups?.length) {
     return <p className="px-5 pb-4 text-sm text-gray-400">No saved results for this session.</p>
@@ -121,19 +131,35 @@ function ClusterExpansion({ entry }) {
               <table className="min-w-full divide-y divide-gray-100 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    {entry.display_columns?.map(col => (
+                    {[...(entry.display_columns ?? []), 'Context'].map(col => (
                       <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {group.records.slice(0, 20).map((rec, i) => (
-                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                      {entry.display_columns?.map(col => (
-                        <td key={col} className="px-4 py-2 text-gray-700 max-w-xs truncate">{rec.display_data?.[col] ?? ''}</td>
-                      ))}
-                    </tr>
-                  ))}
+                  {group.records.slice(0, 20).map((rec, i) => {
+                    const rowKey = `${group.label}::${i}`
+                    const expanded = expandedRows.has(rowKey)
+                    return (
+                      <tr
+                        key={i}
+                        onClick={() => toggleRow(group.label, i)}
+                        className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
+                        title="Click to expand/collapse row"
+                      >
+                        {[...(entry.display_columns ?? []), 'Context'].map(col => (
+                          <td key={col} className="px-4 py-2 text-gray-700 max-w-xs align-top">
+                            <span className={`block whitespace-pre-wrap break-words ${expanded ? '' : 'line-clamp-5'}`}>
+                              {col === 'Context'
+                                ? (rec.contextual_content ?? '')
+                                : (rec.display_data?.[col] ?? '')
+                              }
+                            </span>
+                          </td>
+                        ))}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
               {group.records.length > 20 && (
