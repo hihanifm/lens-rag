@@ -56,6 +56,7 @@ def init_db():
         # Safe to run on every startup.
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS pin TEXT;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS source_filename TEXT;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMP;")
 
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None):

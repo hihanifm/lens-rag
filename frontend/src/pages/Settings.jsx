@@ -184,6 +184,13 @@ export default function Settings() {
                   {new Date(project.created_at).toLocaleString()}
                 </span>
               </ReadOnlyField>
+              <ReadOnlyField label="Ingested">
+                <span className="text-sm text-gray-600">
+                  {project.ingested_at
+                    ? new Date(project.ingested_at).toLocaleString()
+                    : <span className="text-gray-400">—</span>}
+                </span>
+              </ReadOnlyField>
               <ReadOnlyField label="Schema">
                 <span className="text-sm text-gray-400 font-mono">{project.schema_name}</span>
               </ReadOnlyField>

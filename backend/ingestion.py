@@ -172,11 +172,11 @@ def ingest(
     total_elapsed = int((time.monotonic() - t_ingest_start) * 1000)
     logger.info("ingest() embedding+insert done rows=%d elapsed_ms=%d", total_rows, total_elapsed)
 
-    # Step 4: Update project status
+    # Step 4: Update project status + stamp ingested_at
     with get_cursor() as (cur, conn):
         cur.execute("""
             UPDATE public.projects
-            SET status = 'ready', row_count = %s
+            SET status = 'ready', row_count = %s, ingested_at = NOW()
             WHERE id = %s
         """, [total_rows, project_id])
     logger.info("ingest() project %d marked ready", project_id)
