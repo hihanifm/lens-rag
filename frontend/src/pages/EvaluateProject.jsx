@@ -182,13 +182,28 @@ export default function EvaluateProject() {
             <input id="eval-file-input" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
           </div>
 
-          <a
-            href={`${API_BASE_URL}/samples/product_catalog_testset.csv`}
-            download
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API_BASE_URL}/samples/product_catalog_testset.csv`)
+                const text = await res.text()
+                const lines = text.trim().split(/\r?\n/)
+                const headers = parseCSVLine(lines[0]).map(h => h.trim())
+                const qi = headers.indexOf('question')
+                const gi = headers.indexOf('ground_truth')
+                const parsed = lines.slice(1).filter(l => l.trim()).map(line => {
+                  const vals = parseCSVLine(line)
+                  return { question: vals[qi]?.trim(), ground_truth: vals[gi]?.trim() }
+                }).filter(r => r.question && r.ground_truth)
+                if (parsed.length) setEval(projectId, { testCases: parsed, error: '' })
+              } catch {
+                setEval(projectId, { error: 'Could not load sample test set.' })
+              }
+            }}
             className="text-xs text-blue-500 hover:text-blue-700"
           >
-            Download product catalog sample test set ↗
-          </a>
+            Load product catalog sample test set
+          </button>
 
           {/* K selector */}
           <div className="flex items-center gap-3 mt-6 mb-6">
