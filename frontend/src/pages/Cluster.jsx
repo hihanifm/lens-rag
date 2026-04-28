@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import {

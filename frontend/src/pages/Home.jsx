@@ -184,7 +184,7 @@ export default function Home() {
 
             {recentHistory.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-200 px-5 py-8 text-center text-gray-400 text-sm">
-                No activity yet.<br />Run a search to see it here.
+                No activity yet.<br />Run a search or clustering to see it here.
               </div>
             ) : (
               <div className="space-y-2">
@@ -196,15 +196,19 @@ export default function Home() {
                     <span className={`mt-0.5 shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
                       entry.type === 'search'
                         ? 'bg-blue-100 text-blue-700'
-                        : 'bg-purple-100 text-purple-700'
+                        : entry.type === 'cluster'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-purple-100 text-purple-700'
                     }`}>
-                      {entry.type === 'search' ? 'S' : 'E'}
+                      {entry.type === 'search' ? 'S' : entry.type === 'cluster' ? 'C' : 'E'}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-gray-800 truncate font-medium">
                         {entry.type === 'search'
                           ? entry.query
-                          : `${entry.test_case_count} question eval`}
+                          : entry.type === 'cluster'
+                            ? `${entry.algorithm === 'kmeans' ? `K-Means k=${entry.k}` : 'DBSCAN'} · ${entry.n_clusters} cluster${entry.n_clusters !== 1 ? 's' : ''}`
+                            : `${entry.test_case_count} question eval`}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">{entry.project_name} · {timeAgo(entry.at)}</p>
                     </div>
