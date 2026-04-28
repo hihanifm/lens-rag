@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getProject, exportResults, API_BASE_URL } from '../api/client'
+import { getProject, exportResults } from '../api/client'
 import ResultsTable from '../components/ResultsTable'
 import StatsPanel from '../components/StatsPanel'
-import { saveSearch } from '../utils/history'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
+import { useProjectState } from '../contexts/ProjectStateContext'
 
 const STEP_LABELS = {
   embedding:  'Embedding query',
@@ -19,16 +19,8 @@ const STEP_LABELS = {
 export default function Search() {
   const { projectId } = useParams()
   const location = useLocation()
-  const [query, setQuery] = useState(location.state?.query ?? '')
-  const [mode, setMode] = useState(location.state?.mode ?? 'topic')
-  const [k, setK] = useState(location.state?.k ?? null)  // null = use project default
-  const [results, setResults] = useState(null)
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [currentStep, setCurrentStep] = useState(null)   // active pipeline step
-  const [doneSteps, setDoneSteps] = useState([])          // completed steps
-  const [error, setError] = useState('')
-  const evtSourceRef = useRef(null)
+  const { getSearch, setSearch, startSearch } = useProjectState()
+  const s = getSearch(projectId)
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -37,89 +29,34 @@ export default function Search() {
 
   const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
 
-  // Sync mode from router state once project loads (guards against id mode on projects without id column)
+  // Seed query/mode/k from router navigation state (e.g. re-run from History)
   useEffect(() => {
-    if (location.state?.mode && project) {
-      if (location.state.mode === 'id' && !project.has_id_column) setMode('topic')
-      else setMode(location.state.mode)
+    if (!location.state) return
+    const patch = {}
+    if (location.state.query != null) patch.query = location.state.query
+    if (location.state.k    != null) patch.k     = location.state.k
+    if (location.state.mode) {
+      patch.mode = (location.state.mode === 'id' && project && !project.has_id_column)
+        ? 'topic' : location.state.mode
     }
+    if (Object.keys(patch).length) setSearch(projectId, patch)
   }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const effectiveMode = mode
-  const effectiveK = k || project?.default_k || 10
+  const effectiveMode = s.mode
+  const effectiveK    = s.k || project?.default_k || 10
 
   const handleSearch = (e) => {
     e?.preventDefault()
-    if (!query.trim()) return
-
-    // Close any existing stream
-    evtSourceRef.current?.close()
-
-    setLoading(true)
-    setError('')
-    setResults(null)
-    setCurrentStep(null)
-    setDoneSteps([])
-
-    const params = new URLSearchParams({ query, mode: effectiveMode, k: effectiveK })
-    const url = `${API_BASE_URL}/projects/${projectId}/search/stream?${params}`
-    const evtSource = new EventSource(url)
-    evtSourceRef.current = evtSource
-
-    evtSource.onmessage = (e) => {
-      const event = JSON.parse(e.data)
-      if (event.step === 'complete') {
-        evtSource.close()
-        evtSourceRef.current = null
-        const data = event.results
-        setResults(data.results)
-        setStats(data.stats)
-        setCurrentStep(null)
-        setDoneSteps([])
-        setLoading(false)
-        saveSearch({
-          project_id: Number(projectId),
-          project_name: project?.name ?? '',
-          query,
-          mode: effectiveMode,
-          k: effectiveK,
-          results_returned: data.results.length,
-          total_ms: data.stats?.total_ms,
-          display_columns: project?.display_columns ?? [],
-          results: data.results,
-        })
-      } else if (event.step === 'error') {
-        evtSource.close()
-        evtSourceRef.current = null
-        setError(event.message || 'Search failed.')
-        setLoading(false)
-        setCurrentStep(null)
-        setDoneSteps([])
-      } else {
-        setDoneSteps(prev => currentStep ? [...prev, currentStep] : prev)
-        setCurrentStep(event.step)
-      }
-    }
-
-    evtSource.onerror = () => {
-      evtSource.close()
-      evtSourceRef.current = null
-      setError('Search failed. Please try again.')
-      setLoading(false)
-      setCurrentStep(null)
-      setDoneSteps([])
-    }
+    if (!s.query.trim()) return
+    startSearch(projectId, s.query, effectiveMode, effectiveK, project?.name ?? '', project?.display_columns ?? [])
   }
 
-  // Clean up on unmount
-  useEffect(() => () => evtSourceRef.current?.close(), [])
-
   const handleExport = async () => {
-    if (!query.trim()) return
+    if (!s.query.trim()) return
     try {
-      await exportResults(projectId, query, effectiveMode, effectiveK, project?.name)
+      await exportResults(projectId, s.query, effectiveMode, effectiveK, project?.name)
     } catch (e) {
-      setError('Export failed.')
+      setSearch(projectId, { error: 'Export failed.' })
     }
   }
 
@@ -208,7 +145,7 @@ export default function Search() {
           {/* Mode toggle */}
           <div className="flex gap-2 mb-5">
             <button
-              onClick={() => setMode('topic')}
+              onClick={() => setSearch(projectId, { mode: 'topic' })}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 effectiveMode === 'topic'
                   ? 'bg-blue-600 text-white'
@@ -219,7 +156,7 @@ export default function Search() {
             </button>
             {project.has_id_column && (
               <button
-                onClick={() => setMode('id')}
+                onClick={() => setSearch(projectId, { mode: 'id' })}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   effectiveMode === 'id'
                     ? 'bg-blue-600 text-white'
@@ -236,8 +173,8 @@ export default function Search() {
             <input
               data-testid="search-query"
               type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
+              value={s.query}
+              onChange={e => setSearch(projectId, { query: e.target.value })}
               onKeyDown={handleKeyDown}
               placeholder={
                 effectiveMode === 'id'
@@ -250,10 +187,10 @@ export default function Search() {
             <button
               onClick={handleSearch}
               data-testid="search-submit"
-              disabled={loading || !query.trim()}
+              disabled={s.loading || !s.query.trim()}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
-              {loading ? 'Searching...' : 'Search'}
+              {s.loading ? 'Searching...' : 'Search'}
             </button>
           </div>
 
@@ -263,7 +200,7 @@ export default function Search() {
             {[5, 10, 20, 50].map(val => (
               <button
                 key={val}
-                onClick={() => setK(val)}
+                onClick={() => setSearch(projectId, { k: val })}
                 className={`text-sm px-3 py-1 rounded-lg transition-colors ${
                   effectiveK === val
                     ? 'bg-blue-100 text-blue-700 font-medium'
@@ -277,18 +214,18 @@ export default function Search() {
         </div>
 
         {/* Error */}
-        {error && (
+        {s.error && (
           <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-            {error}
+            {s.error}
           </div>
         )}
 
         {/* Live pipeline steps */}
-        {loading && (
+        {s.loading && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
             {Object.entries(STEP_LABELS).map(([key, label]) => {
-              const done = doneSteps.includes(key)
-              const active = currentStep === key
+              const done = s.doneSteps.includes(key)
+              const active = s.currentStep === key
               return (
                 <span
                   key={key}
@@ -309,13 +246,13 @@ export default function Search() {
         )}
 
         {/* Results */}
-        {results && (
+        {s.results && (
           <div className="mt-6">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-500">
-                {results.length} result{results.length !== 1 ? 's' : ''}
+                {s.results.length} result{s.results.length !== 1 ? 's' : ''}
               </p>
-              {results.length > 0 && (
+              {s.results.length > 0 && (
                 <button
                   onClick={handleExport}
                   data-testid="export-excel"
@@ -326,16 +263,16 @@ export default function Search() {
               )}
             </div>
 
-            {results.length === 0 ? (
+            {s.results.length === 0 ? (
               <div className="mt-6 text-center py-16 text-gray-400">
                 No results found. Try different keywords.
               </div>
             ) : (
               <>
                 <div data-testid="results-table">
-                <ResultsTable results={results} displayColumns={project.display_columns} />
+                <ResultsTable results={s.results} displayColumns={project.display_columns} />
                 </div>
-                <StatsPanel stats={stats} />
+                <StatsPanel stats={s.stats} />
               </>
             )}
           </div>

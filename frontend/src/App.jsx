@@ -8,12 +8,14 @@ import History from './pages/History'
 import Settings from './pages/Settings'
 import Browse from './pages/Browse'
 import Layout from './components/Layout'
+import { ProjectStateProvider } from './contexts/ProjectStateContext'
 
 const queryClient = new QueryClient()
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ProjectStateProvider>
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <Layout>
           <Routes>
@@ -27,6 +29,7 @@ export default function App() {
           </Routes>
         </Layout>
       </BrowserRouter>
+      </ProjectStateProvider>
     </QueryClientProvider>
   )
 }

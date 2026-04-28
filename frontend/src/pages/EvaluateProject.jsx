@@ -1,20 +1,15 @@
-import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getProject, streamEvaluation } from '../api/client'
+import { getProject } from '../api/client'
 import { API_BASE_URL } from '../api/client'
-import { saveEval } from '../utils/history'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
+import { useProjectState } from '../contexts/ProjectStateContext'
 
 export default function EvaluateProject() {
   const { projectId } = useParams()
-  const [testCases, setTestCases] = useState(null)
-  const [k, setK] = useState(10)
-  const [loading, setLoading] = useState(false)
-  const [progress, setProgress] = useState(null)   // {index, total, question, step, message}
-  const [results, setResults] = useState(null)
-  const [error, setError] = useState('')
+  const { getEval, setEval, startEval } = useProjectState()
+  const ev = getEval(projectId)
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -45,15 +40,14 @@ export default function EvaluateProject() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0]
     if (!file) return
-    setError('')
-    setResults(null)
+    setEval(projectId, { error: '', results: null })
     const reader = new FileReader()
     reader.onload = (ev) => {
       try {
         const lines = ev.target.result.trim().split(/\r?\n/)
         const headers = parseCSVLine(lines[0]).map(h => h.trim())
         if (!headers.includes('question') || !headers.includes('ground_truth')) {
-          setError('CSV must have "question" and "ground_truth" columns.')
+          setEval(projectId, { error: 'CSV must have "question" and "ground_truth" columns.' })
           return
         }
         const qi = headers.indexOf('question')
@@ -62,45 +56,26 @@ export default function EvaluateProject() {
           const vals = parseCSVLine(line)
           return { question: vals[qi]?.trim(), ground_truth: vals[gi]?.trim() }
         }).filter(r => r.question && r.ground_truth)
-        if (!parsed.length) { setError('No valid rows found in CSV.'); return }
-        setTestCases(parsed)
+        if (!parsed.length) { setEval(projectId, { error: 'No valid rows found in CSV.' }); return }
+        setEval(projectId, { testCases: parsed })
       } catch {
-        setError('Could not parse CSV file.')
+        setEval(projectId, { error: 'Could not parse CSV file.' })
       }
     }
     reader.readAsText(file)
   }
 
   const handleRun = () => {
-    if (!testCases?.length) return
-    setLoading(true)
-    setError('')
-    setResults(null)
-    setProgress(null)
-    streamEvaluation(
-      projectId, testCases, k,
-      (event) => setProgress(event),
-      (data) => {
-        setResults(data)
-        setLoading(false)
-        setProgress(null)
-        saveEval({
-          project_id: Number(projectId),
-          project_name: project?.name ?? '',
-          test_case_count: data.length,
-          k,
-          results: data,
-        })
-      },
-      () => { setError('Evaluation failed. Please try again.'); setLoading(false) }
-    )
+    if (!ev.testCases?.length) return
+    const pin = localStorage.getItem(`pin_${projectId}`) ?? undefined
+    startEval(projectId, ev.testCases, ev.k, project?.name ?? '', pin)
   }
 
   const handleExport = () => {
-    if (!results) return
+    if (!ev.results) return
     const slug = (project?.name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
     const date = new Date().toISOString().slice(0, 10)
-    const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(ev.results, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -177,8 +152,8 @@ export default function EvaluateProject() {
             className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition-colors mb-2"
             onClick={() => document.getElementById('eval-file-input').click()}
           >
-            {testCases ? (
-              <p className="text-gray-700 font-medium">{testCases.length} question{testCases.length !== 1 ? 's' : ''} loaded</p>
+            {ev.testCases ? (
+              <p className="text-gray-700 font-medium">{ev.testCases.length} question{ev.testCases.length !== 1 ? 's' : ''} loaded</p>
             ) : (
               <p className="text-gray-400 text-sm">Click to upload test set CSV</p>
             )}
@@ -199,9 +174,9 @@ export default function EvaluateProject() {
             {[5, 10, 20, 50].map(val => (
               <button
                 key={val}
-                onClick={() => setK(val)}
+                onClick={() => setEval(projectId, { k: val })}
                 className={`text-sm px-3 py-1 rounded-lg transition-colors ${
-                  k === val ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                  ev.k === val ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
                 }`}
               >
                 {val}
@@ -213,47 +188,44 @@ export default function EvaluateProject() {
           <div className="flex gap-3">
             <button
               onClick={handleRun}
-              disabled={!testCases || loading}
+              disabled={!ev.testCases || ev.loading}
               className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
-              {loading ? 'Running...' : 'Run Evaluation'}
+              {ev.loading ? 'Running...' : 'Run Evaluation'}
             </button>
             <button
               onClick={handleExport}
-              disabled={!results}
+              disabled={!ev.results}
               className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
             >
               Export RAGAS JSON
             </button>
           </div>
 
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {ev.error && <p className="mt-3 text-sm text-red-600">{ev.error}</p>}
 
           {/* Live progress */}
-          {progress && (
+          {ev.progress && (
             <div className="mt-5 space-y-2">
-              {/* Question + count */}
               <div className="flex justify-between text-xs text-gray-500">
-                <span className="truncate max-w-xs font-medium text-gray-700">{progress.question}</span>
-                <span className="ml-2 shrink-0">{progress.index} / {progress.total}</span>
+                <span className="truncate max-w-xs font-medium text-gray-700">{ev.progress.question}</span>
+                <span className="ml-2 shrink-0">{ev.progress.index} / {ev.progress.total}</span>
               </div>
-              {/* Overall progress bar */}
               <div className="w-full bg-gray-200 rounded-full h-1.5">
                 <div
                   className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${(progress.index / progress.total) * 100}%` }}
+                  style={{ width: `${(ev.progress.index / ev.progress.total) * 100}%` }}
                 />
               </div>
-              {/* Current pipeline step */}
-              {progress.type === 'step' && (
+              {ev.progress.type === 'step' && (
                 <div className="flex items-center gap-1.5 text-xs text-blue-600">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  {progress.message}
+                  {ev.progress.message}
                 </div>
               )}
-              {progress.type === 'progress' && (
+              {ev.progress.type === 'progress' && (
                 <div className="flex items-center gap-1.5 text-xs text-emerald-600">
-                  ✓ {progress.contexts_count} context{progress.contexts_count !== 1 ? 's' : ''} retrieved
+                  ✓ {ev.progress.contexts_count} context{ev.progress.contexts_count !== 1 ? 's' : ''} retrieved
                 </div>
               )}
             </div>
@@ -261,14 +233,14 @@ export default function EvaluateProject() {
         </div>
 
         {/* Results */}
-        {results && (
+        {ev.results && (
           <div className="mt-6 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden max-w-2xl">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h2 className="text-base font-semibold text-gray-900">Results</h2>
-              <span className="text-sm text-gray-400">{results.length} questions · k={k}</span>
+              <span className="text-sm text-gray-400">{ev.results.length} questions · k={ev.k}</span>
             </div>
             <div className="divide-y divide-gray-100">
-              {results.slice(0, 10).map((r, i) => (
+              {ev.results.slice(0, 10).map((r, i) => (
                 <div key={i} className="px-6 py-4">
                   <p className="text-sm font-medium text-gray-800 mb-1">{r.question}</p>
                   <p className="text-xs text-gray-400">{r.contexts.length} context{r.contexts.length !== 1 ? 's' : ''} retrieved</p>
@@ -277,8 +249,8 @@ export default function EvaluateProject() {
               ))}
             </div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
-              {results.length > 10 && (
-                <p className="text-xs text-gray-400 mb-2">Showing 10 of {results.length} — export the JSON for the full dataset.</p>
+              {ev.results.length > 10 && (
+                <p className="text-xs text-gray-400 mb-2">Showing 10 of {ev.results.length} — export the JSON for the full dataset.</p>
               )}
               <p className="text-xs text-gray-500">
                 Export the JSON and upload it to the Lens RAGAS portal to get precision and recall scores.
