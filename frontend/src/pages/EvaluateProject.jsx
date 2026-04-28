@@ -129,7 +129,11 @@ export default function EvaluateProject() {
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-400 mb-4">{project.row_count?.toLocaleString()} records</p>
+          <p className="text-sm text-gray-400 mb-4">
+            {project.row_count?.toLocaleString()} records
+            {project.source_filename && <span className="ml-2 text-gray-300">·</span>}
+            {project.source_filename && <span className="ml-2 font-mono">{project.source_filename}</span>}
+          </p>
           <div className="flex gap-1">
             <Link
               to={`/projects/${projectId}/search`}
