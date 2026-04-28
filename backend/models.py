@@ -65,6 +65,7 @@ class SearchStats(BaseModel):
     use_bm25: Optional[bool] = None
     use_rrf: Optional[bool] = None
     use_rerank: Optional[bool] = None
+    reranker_available: Optional[bool] = None  # False when RERANKER_ENABLED=false server-side
     # topic mode timings + per-stage candidate counts
     embedding_ms: Optional[float] = None
     vector_search_ms: Optional[float] = None

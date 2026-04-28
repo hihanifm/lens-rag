@@ -44,8 +44,13 @@ export default function StatsPanel({ stats }) {
                   style={{ width: ms != null && maxMs > 0 ? `${(ms / maxMs) * 100}%` : '0%' }}
                 />
               </div>
-              <span className="text-xs text-gray-600 w-14 text-right">
-                {ms != null ? `${ms}ms` : '—'}
+              <span className="text-xs w-14 text-right">
+                {ms != null
+                  ? <span className="text-gray-600">{ms}ms</span>
+                  : label === 'Re-ranker' && stats.reranker_available === false
+                    ? <span className="text-amber-500" title="Reranker is disabled on this server (RERANKER_ENABLED=false)">server off</span>
+                    : <span className="text-gray-400">—</span>
+                }
               </span>
             </div>
           ) : null

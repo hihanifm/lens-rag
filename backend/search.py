@@ -263,6 +263,7 @@ def topic_search_stream(
                 use_bm25=use_bm25,
                 use_rrf=use_rrf,
                 use_rerank=eff_rerank,
+                reranker_available=RERANKER_ENABLED,
                 embedding_ms=stats['embedding_ms'],
                 vector_search_ms=stats['vector_search_ms'],
                 vector_candidates=stats['vector_candidates'],
