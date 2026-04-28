@@ -207,6 +207,7 @@ export default function EvaluateProject() {
             <div className="mt-4 pt-4 border-t border-gray-100">
               <button
                 type="button"
+                data-testid="eval-load-sample"
                 onClick={async (e) => {
                   e.stopPropagation()
                   try {
@@ -282,6 +283,7 @@ export default function EvaluateProject() {
             <button
               onClick={handleRun}
               disabled={!ev.testCases || ev.loading || !retrieversOk}
+              data-testid="eval-run"
               className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
               {ev.loading ? 'Running...' : 'Run Evaluation'}
@@ -289,6 +291,7 @@ export default function EvaluateProject() {
             <button
               onClick={handleExport}
               disabled={!ev.results}
+              data-testid="eval-export"
               className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
             >
               Export RAGAS JSON
