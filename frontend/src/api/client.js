@@ -100,7 +100,9 @@ export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
         const event = JSON.parse(line.slice(6))
-        if (event.type === 'progress') onProgress(event)
+        if (event.type === 'question_start') onProgress({ ...event, currentStep: null })
+        if (event.type === 'step') onProgress({ ...event })
+        if (event.type === 'progress') onProgress({ ...event, currentStep: null })
         if (event.type === 'complete') onComplete(event.results)
       }
     }

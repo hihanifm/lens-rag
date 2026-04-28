@@ -12,7 +12,7 @@ export default function EvaluateProject() {
   const [testCases, setTestCases] = useState(null)
   const [k, setK] = useState(10)
   const [loading, setLoading] = useState(false)
-  const [progress, setProgress] = useState(null)   // {index, total, question}
+  const [progress, setProgress] = useState(null)   // {index, total, question, step, message}
   const [results, setResults] = useState(null)
   const [error, setError] = useState('')
 
@@ -79,7 +79,7 @@ export default function EvaluateProject() {
     setProgress(null)
     streamEvaluation(
       projectId, testCases, k,
-      (event) => setProgress({ index: event.index, total: event.total, question: event.question }),
+      (event) => setProgress(event),
       (data) => {
         setResults(data)
         setLoading(false)
@@ -231,17 +231,31 @@ export default function EvaluateProject() {
 
           {/* Live progress */}
           {progress && (
-            <div className="mt-5">
-              <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span className="truncate max-w-xs">{progress.question}</span>
+            <div className="mt-5 space-y-2">
+              {/* Question + count */}
+              <div className="flex justify-between text-xs text-gray-500">
+                <span className="truncate max-w-xs font-medium text-gray-700">{progress.question}</span>
                 <span className="ml-2 shrink-0">{progress.index} / {progress.total}</span>
               </div>
+              {/* Overall progress bar */}
               <div className="w-full bg-gray-200 rounded-full h-1.5">
                 <div
                   className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
                   style={{ width: `${(progress.index / progress.total) * 100}%` }}
                 />
               </div>
+              {/* Current pipeline step */}
+              {progress.type === 'step' && (
+                <div className="flex items-center gap-1.5 text-xs text-blue-600">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                  {progress.message}
+                </div>
+              )}
+              {progress.type === 'progress' && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                  ✓ {progress.contexts_count} context{progress.contexts_count !== 1 ? 's' : ''} retrieved
+                </div>
+              )}
             </div>
           )}
         </div>
