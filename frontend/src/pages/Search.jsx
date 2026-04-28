@@ -152,7 +152,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Search Pro
+              Search Pro 🔍
             </Link>
             <Link
               to={`/projects/${projectId}/evaluate`}

@@ -83,7 +83,7 @@ export default function Home() {
           <div>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <Link to="/" className="text-3xl font-bold text-gray-900 tracking-tight hover:text-gray-700 transition-colors">
-                LENS
+                LENS 🔍
               </Link>
               <span className="text-gray-500 text-sm">
                 <span className="font-semibold text-gray-700">L</span>ightweight{' '}

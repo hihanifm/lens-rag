@@ -70,7 +70,7 @@ export default function SystemConfig() {
   })
 
   const tabs = [
-    { label: 'Search Pro', path: 'search' },
+    { label: 'Search Pro 🔍', path: 'search' },
     { label: 'Evaluate 🧪', path: 'evaluate' },
     { label: 'Browse 👀', path: 'browse' },
     { label: 'Cluster 🧩', path: 'cluster' },
