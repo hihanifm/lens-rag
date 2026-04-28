@@ -12,11 +12,18 @@ export default defineConfig({
     host: true,
     port: 37001,
     strictPort: true,
-    historyApiFallback: true,
     proxy: {
-      '/projects': API_PROXY_TARGET,
-      '/health':   API_PROXY_TARGET,
-      '/samples':  API_PROXY_TARGET,
+      '/projects': {
+        target: API_PROXY_TARGET,
+        // Browser page navigations send Accept: text/html — skip the proxy and
+        // let Vite serve index.html so React Router handles the route.
+        // Axios API calls send Accept: application/json and go straight through.
+        bypass: (req) => {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
+      '/health':  { target: API_PROXY_TARGET },
+      '/samples': { target: API_PROXY_TARGET },
     }
   }
 })
