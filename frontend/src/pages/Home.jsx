@@ -110,6 +110,7 @@ export default function Home() {
                 {projects.map(p => (
                   <Link
                     key={p.id}
+                    data-testid={p.status === 'ready' ? 'project-card' : undefined}
                     to={p.status === 'ready' ? `/projects/${p.id}/search` : '#'}
                     className={`block bg-white rounded-xl border border-gray-200 px-6 py-5
                       hover:border-blue-300 hover:shadow-sm transition-all

@@ -161,6 +161,16 @@ export default function Search() {
               Browse
             </Link>
             <Link
+              to={`/projects/${projectId}/cluster`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname.endsWith('/cluster')
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Cluster
+            </Link>
+            <Link
               to={`/projects/${projectId}/settings`}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 location.pathname.endsWith('/settings')

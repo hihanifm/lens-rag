@@ -63,6 +63,7 @@ export default function Browse() {
               { label: 'Search', path: 'search' },
               { label: 'Evaluate', path: 'evaluate' },
               { label: 'Browse', path: 'browse' },
+              { label: 'Cluster', path: 'cluster' },
               { label: project?.has_pin ? 'Settings 🔒' : 'Settings', path: 'settings' },
             ].map(({ label, path }) => (
               <Link

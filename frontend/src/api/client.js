@@ -131,3 +131,35 @@ export const exportResults = async (projectId, query, mode, k, projectName = '',
   link.click()
   link.remove()
 }
+
+// ── Cluster ───────────────────────────────────────────────────────────────
+
+export const getColumnValues = (projectId, column) =>
+  api.get(`/projects/${projectId}/column-values`, {
+    params: { column },
+    headers: projectHeaders(projectId),
+  }).then(r => r.data)
+
+export const clusterRecords = (projectId, algorithm, k, filterColumn, filterValue) =>
+  api.post(
+    `/projects/${projectId}/cluster`,
+    { algorithm, k: k ?? null, filter_column: filterColumn || null, filter_value: filterValue || null },
+    { headers: projectHeaders(projectId) }
+  ).then(r => r.data)
+
+export const exportCluster = async (projectId, algorithm, k, filterColumn, filterValue, projectName = '') => {
+  const response = await api.post(
+    `/projects/${projectId}/cluster/export`,
+    { algorithm, k: k ?? null, filter_column: filterColumn || null, filter_value: filterValue || null },
+    { responseType: 'blob', headers: projectHeaders(projectId) }
+  )
+  const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  const filename = `${slug}_lens_clusters_${fileDateTime()}.xlsx`
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}

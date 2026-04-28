@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
-from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest
+from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest
 from projects import (
     create_project,
     get_all_projects,
@@ -36,6 +36,7 @@ from projects import (
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
+from clustering import cluster as do_cluster
 
 app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
@@ -461,6 +462,86 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=lens_results.xlsx"}
     )
+
+
+# ── Cluster ───────────────────────────────────────────────────────────────
+
+@app.post("/projects/{project_id}/cluster")
+def cluster_endpoint(project_id: int, req: ClusterRequest, request: Request):
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+    if project_raw["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
+    return do_cluster(
+        schema_name=project_raw["schema_name"],
+        display_columns=project_raw["display_columns"],
+        algorithm=req.algorithm,
+        k=req.k,
+        filter_column=req.filter_column,
+        filter_value=req.filter_value,
+    )
+
+
+@app.post("/projects/{project_id}/cluster/export")
+def cluster_export_endpoint(project_id: int, req: ClusterRequest, request: Request):
+    """Run clustering and return results as an Excel file download."""
+    import io
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+    if project_raw["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
+
+    result = do_cluster(
+        schema_name=project_raw["schema_name"],
+        display_columns=project_raw["display_columns"],
+        algorithm=req.algorithm,
+        k=req.k,
+        filter_column=req.filter_column,
+        filter_value=req.filter_value,
+    )
+
+    rows = []
+    for group in result.groups:
+        for rec in group.records:
+            row = {"cluster": group.label}
+            row.update(rec.display_data)
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+
+    return Response(
+        content=buffer.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=lens_clusters.xlsx"},
+    )
+
+
+@app.get("/projects/{project_id}/column-values")
+def column_values_endpoint(project_id: int, column: str, request: Request):
+    """Return up to 50 distinct values for any column. Used by the Cluster filter picker."""
+    from ingestion import safe_col_name as _safe
+    project_raw = get_project_raw(project_id)
+    if not project_raw:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_pin(project_raw, request)
+    schema = project_raw["schema_name"]
+    safe = f'col_{_safe(column)}'
+    with get_cursor() as (cur, _conn):
+        # Fetch 51 rows — if we get 51 the list is truncated; we return at most 50.
+        cur.execute(
+            f'SELECT DISTINCT "{safe}" FROM {schema}.records '
+            f'WHERE "{safe}" IS NOT NULL ORDER BY 1 LIMIT 51'
+        )
+        rows = [r[safe] for r in cur.fetchall()]
+    truncated = len(rows) > 50
+    return {"column": column, "values": rows[:50], "truncated": truncated}
 
 
 # ── Evaluate ─────────────────────────────────────────────────────────────

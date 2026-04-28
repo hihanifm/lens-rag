@@ -86,6 +86,40 @@ class ProjectUpdate(BaseModel):
     default_k: Optional[int] = None
 
 
+class ClusterRequest(BaseModel):
+    algorithm: str                      # "kmeans" | "dbscan"
+    k: Optional[int] = None             # required for kmeans; ignored for dbscan
+    filter_column: Optional[str] = None # original column name, e.g. "Carrier"
+    filter_value: Optional[str] = None  # ILIKE match, e.g. "MNO"
+
+
+class ClusterResult(BaseModel):
+    display_data: Dict[str, Any]
+    pca_x: float
+    pca_y: float
+
+
+class ClusterGroup(BaseModel):
+    cluster_id: int   # -1 = Unassigned (DBSCAN noise)
+    label: str        # "Cluster 1", "Cluster 2", "Unassigned"
+    count: int
+    records: List[ClusterResult]
+
+
+class ClusterStats(BaseModel):
+    algorithm: str
+    records_loaded: int
+    n_clusters: int
+    ms_fetch: float
+    ms_cluster: float
+    total_ms: float
+
+
+class ClusterResponse(BaseModel):
+    groups: List[ClusterGroup]
+    stats: ClusterStats
+
+
 class EvalCase(BaseModel):
     question: str
     ground_truth: str
