@@ -162,12 +162,18 @@ def ingest(
             logger.error("DB insert failed on row %d/%d — %s: %s", i + 1, total_rows, type(e).__name__, e)
             raise
 
-        # Report progress every 10 rows
+        # Report progress every 10 rows and flush row_count to DB
+        # so the Home page polling sees live progress without a new endpoint.
         if (i + 1) % 10 == 0 or (i + 1) == total_rows:
             elapsed = int((time.monotonic() - t_ingest_start) * 1000)
             rate = (i + 1) / max(elapsed / 1000, 0.001)
             logger.info("ingest() progress %d/%d (%.0f%%) elapsed_ms=%d rate=%.1f rows/s",
                         i + 1, total_rows, ((i + 1) / total_rows) * 100, elapsed, rate)
+            with get_cursor() as (cur, conn):
+                cur.execute(
+                    "UPDATE public.projects SET row_count = %s WHERE id = %s",
+                    [i + 1, project_id]
+                )
             yield {
                 "step": "progress",
                 "processed": i + 1,

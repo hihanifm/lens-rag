@@ -549,6 +549,21 @@ export default function CreateProject() {
                 )}
               </div>
             )}
+
+            {/* Show background CTA only while ingestion is running */}
+            {ingestProgress?.step !== 'complete' && ingestProgress?.step !== 'error' && (
+              <div className="mt-8 pt-6 border-t border-gray-100 text-center">
+                <p className="text-sm text-gray-400 mb-3">
+                  Ingestion runs on the server — safe to leave this page.
+                </p>
+                <button
+                  onClick={() => navigate('/')}
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Continue in background →
+                </button>
+              </div>
+            )}
           </div>
         )}
 
