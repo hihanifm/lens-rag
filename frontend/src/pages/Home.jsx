@@ -81,8 +81,21 @@ export default function Home() {
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <Link to="/" className="text-3xl font-bold text-gray-900 tracking-tight hover:text-gray-700 transition-colors">LENS</Link>
-            <p className="text-gray-500 mt-1">Lightweight ENgineering Search</p>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <Link to="/" className="text-3xl font-bold text-gray-900 tracking-tight hover:text-gray-700 transition-colors">
+                LENS 🚀
+              </Link>
+              <span className="text-gray-500 text-sm">
+                <span className="font-semibold text-gray-700">L</span>ightweight{' '}
+                <span className="font-semibold text-gray-700">E</span>
+                <span className="font-semibold text-gray-700">N</span>gineering{' '}
+                <span className="font-semibold text-gray-700">S</span>earch
+              </span>
+            </div>
+            <p className="text-gray-500 mt-2 max-w-2xl">
+              Turn a spreadsheet knowledge base into a fast loop: retrieve, explore, and validate.
+              Search results, cluster themes, run evals, and export to iterate in minutes. 🔎
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Link

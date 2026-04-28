@@ -60,7 +60,7 @@ export default function Browse() {
           </p>
           <div className="flex gap-1">
             {[
-              { label: 'Search Pro 🚀🔥', path: 'search' },
+              { label: 'Search Pro 🚀', path: 'search' },
               { label: 'Evaluate 🧪', path: 'evaluate' },
               { label: 'Browse 👀', path: 'browse' },
               { label: 'Cluster 🧩', path: 'cluster' },
