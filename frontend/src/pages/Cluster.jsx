@@ -12,6 +12,7 @@ import {
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { saveCluster } from '../utils/history'
+import { subscribeClusterRun, startClusterRun, abortClusterRun } from '../utils/clusterRunManager'
 
 function compactClusterFilters(rows) {
   return rows
@@ -158,7 +159,18 @@ export default function Cluster() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [collapsed, setCollapsed] = useState({})
-  const abortRef = useRef(null)
+  const projectIdStr = String(projectId)
+
+  useEffect(() => {
+    return subscribeClusterRun(projectIdStr, s => {
+      setLoading(!!s.loading)
+      setCurrentStep(s.currentStep ?? null)
+      setStepCounts(s.stepCounts ?? {})
+      setError(s.error ?? '')
+      setResult(s.result ?? null)
+      setCollapsed(s.collapsed ?? {})
+    })
+  }, [projectIdStr])
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -190,92 +202,16 @@ export default function Cluster() {
       return
     }
 
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    setLoading(true)
-    setError('')
-    setResult(null)
-    setCurrentStep(null)
-    setStepCounts({})
-
-    try {
-      const pin = getProjectPin(projectId)
-      const headers = { 'Content-Type': 'application/json' }
-      if (pin) headers['X-Project-Pin'] = pin
-
-      const compact = compactClusterFilters(filters)
-
-      const res = await fetch(`${API_BASE_URL}/projects/${projectId}/cluster`, {
-        method: 'POST',
-        headers,
-        signal: controller.signal,
-        body: JSON.stringify({
-          algorithm,
-          k: k ?? null,
-          filters: compact.map(({ column, values }) => ({ column, values })),
-        }),
-      })
-
-      if (!res.ok) {
-        const msg = res.status === 401 ? 'PIN required or incorrect.' : 'Clustering failed. Please try again.'
-        setError(msg)
-        setLoading(false)
-        return
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const parts = buffer.split('\n\n')
-        buffer = parts.pop()
-        for (const part of parts) {
-          if (!part.startsWith('data: ')) continue
-          const event = JSON.parse(part.slice(6))
-          if (event.step === 'complete') {
-            const data = event.result
-            setResult(data)
-            const initCollapsed = {}
-            data.groups.forEach((g, i) => { initCollapsed[g.label] = i >= 3 })
-            setCollapsed(initCollapsed)
-            setView('table')
-            setCurrentStep(null)
-            saveCluster({
-              project_id: Number(projectId),
-              project_name: project?.name ?? '',
-              algorithm,
-              k: k ?? null,
-              filters: compact.length ? compact : undefined,
-              filter_column: null,
-              filter_value: null,
-              n_clusters: data.stats.n_clusters,
-              records_loaded: data.stats.records_loaded,
-              total_ms: data.stats.total_ms,
-              groups: data.groups,
-              display_columns: project?.display_columns ?? [],
-            })
-          } else if (event.step === 'error') {
-            setError(event.message || 'Clustering failed.')
-          } else if (event.step === 'count') {
-            setStepCounts(prev => ({ ...prev, [event.for_step]: event.count }))
-          } else {
-            setCurrentStep(event.step)
-          }
-        }
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') return
-      setError('Clustering failed. Please try again.')
-    } finally {
-      setLoading(false)
-      setCurrentStep(null)
-    }
+    abortClusterRun(projectIdStr)
+    const compact = compactClusterFilters(filters)
+    await startClusterRun({
+      projectId: projectIdStr,
+      algorithm,
+      k: k ?? null,
+      filters: compact.map(({ column, values }) => ({ column, values })),
+      projectName: project?.name ?? '',
+      displayColumns: project?.display_columns ?? [],
+    })
   }
 
   const handleExport = async () => {
