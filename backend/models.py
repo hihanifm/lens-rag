@@ -28,6 +28,8 @@ class ProjectResponse(BaseModel):
     default_k: int
     status: str
     row_count: Optional[int]
+    total_rows: Optional[int]
+    ingestion_started_at: Optional[datetime]
     created_at: datetime
 
 

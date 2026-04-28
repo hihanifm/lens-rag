@@ -94,12 +94,27 @@ def ingest(
                 project_id, schema_name, stored_columns, content_column, context_columns, id_column)
     t_pipeline_start = time.monotonic()
 
+    # Stamp ingestion start time so the Home page can show elapsed duration
+    with get_cursor() as (cur, conn):
+        cur.execute(
+            "UPDATE public.projects SET ingestion_started_at = NOW() WHERE id = %s",
+            [project_id]
+        )
+
     # Step 1: Read Excel
     yield {"step": "reading", "message": "Reading Excel file..."}
     df, original_columns, sheet_names = read_excel(filepath)
 
     total_rows = len(df)
     logger.info("ingest() rows=%d sheets=%s columns=%s", total_rows, sheet_names, original_columns)
+
+    # Persist total so the Home page can show "10 / 100 records" before completion
+    with get_cursor() as (cur, conn):
+        cur.execute(
+            "UPDATE public.projects SET total_rows = %s WHERE id = %s",
+            [total_rows, project_id]
+        )
+
     yield {
         "step": "read_complete",
         "message": f"Found {total_rows} rows across {len(sheet_names)} sheet(s)",

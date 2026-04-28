@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { getProjects, deleteProject } from '../api/client'
@@ -21,16 +21,34 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+function fmtElapsed(startedAt, now) {
+  if (!startedAt) return null
+  const secs = Math.floor(((now ?? Date.now()) - new Date(startedAt).getTime()) / 1000)
+  if (secs < 0) return null
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
 export default function Home() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [deletingId, setDeletingId] = useState(null)
+  const [now, setNow] = useState(Date.now())
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: getProjects,
     refetchInterval: 3000
   })
+
+  // Tick every second while any project is ingesting so elapsed time stays live
+  const hasIngesting = projects.some(p => p.status === 'ingesting')
+  useEffect(() => {
+    if (!hasIngesting) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [hasIngesting])
 
   const recentHistory = loadHistory().slice(0, 5)
 
@@ -106,11 +124,21 @@ export default function Home() {
                           )}
                         </div>
                         <p className="text-sm text-gray-400 mt-0.5">
-                          {p.row_count ? `${p.row_count.toLocaleString()} records` : 'Processing...'}
-                          {' · '}
-                          {p.status === 'ingesting'
-                            ? 'indexing...'
-                            : new Date(p.created_at).toLocaleDateString()}
+                          {p.status === 'ingesting' ? (
+                            <>
+                              {p.row_count != null
+                                ? `${p.row_count.toLocaleString()} / ${(p.total_rows ?? '?').toLocaleString()} records`
+                                : 'Reading file...'}
+                              {' · '}
+                              {fmtElapsed(p.ingestion_started_at, now) ?? 'starting...'}
+                            </>
+                          ) : (
+                            <>
+                              {p.row_count ? `${p.row_count.toLocaleString()} records` : '—'}
+                              {' · '}
+                              {new Date(p.created_at).toLocaleDateString()}
+                            </>
+                          )}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
