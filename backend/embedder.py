@@ -61,12 +61,27 @@ def _probe_ollama():
 _probe_ollama()
 
 
-def embed(text: str) -> list[float]:
-    logger.debug("embed() → %s model=%s text_len=%d preview=%r",
-                 OLLAMA_BASE_URL, EMBEDDING_MODEL, len(text), text[:80])
+def _get_embed_client(base_url: str | None, api_key: str | None):
+    """Return per-call client when overrides given, else the module singleton."""
+    if base_url:
+        return OpenAI(base_url=base_url, api_key=api_key or "ollama")
+    return _embed_client
+
+
+def embed(
+    text: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> list[float]:
+    client = _get_embed_client(base_url, api_key)
+    eff_model = model or EMBEDDING_MODEL
+    eff_url = base_url or OLLAMA_BASE_URL
+    logger.debug("embed() → %s model=%s text_len=%d preview=%r", eff_url, eff_model, len(text), text[:80])
     t0 = time.monotonic()
     try:
-        response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+        response = client.embeddings.create(model=eff_model, input=text)
         elapsed = int((time.monotonic() - t0) * 1000)
         dims = len(response.data[0].embedding)
         logger.debug("embed() ← OK dims=%d elapsed_ms=%d", dims, elapsed)
@@ -74,22 +89,42 @@ def embed(text: str) -> list[float]:
     except Exception as e:
         elapsed = int((time.monotonic() - t0) * 1000)
         logger.exception("embed() ← FAILED url=%s model=%s elapsed_ms=%d — %s: %s",
-                         OLLAMA_BASE_URL, EMBEDDING_MODEL, elapsed, type(e).__name__, e)
+                         eff_url, eff_model, elapsed, type(e).__name__, e)
         raise
 
 
-def embed_batch(texts: list[str]) -> list[list[float]]:
-    logger.debug("embed_batch() → %s model=%s count=%d", OLLAMA_BASE_URL, EMBEDDING_MODEL, len(texts))
+def embed_batch(
+    texts: list[str],
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> list[list[float]]:
+    client = _get_embed_client(base_url, api_key)
+    eff_model = model or EMBEDDING_MODEL
+    eff_url = base_url or OLLAMA_BASE_URL
+    logger.debug("embed_batch() → %s model=%s count=%d", eff_url, eff_model, len(texts))
     t0 = time.monotonic()
     try:
-        response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+        response = client.embeddings.create(model=eff_model, input=texts)
         elapsed = int((time.monotonic() - t0) * 1000)
         logger.debug("embed_batch() ← OK count=%d elapsed_ms=%d", len(texts), elapsed)
         return [item.embedding for item in response.data]
     except Exception as e:
         elapsed = int((time.monotonic() - t0) * 1000)
         logger.exception("embed_batch() ← FAILED url=%s model=%s count=%d elapsed_ms=%d — %s: %s",
-                         OLLAMA_BASE_URL, EMBEDDING_MODEL, len(texts), elapsed, type(e).__name__, e)
+                         eff_url, eff_model, len(texts), elapsed, type(e).__name__, e)
+        raise
+
+
+def list_models(base_url: str, api_key: str | None = None) -> list[str]:
+    """Fetch available models from an OpenAI-compatible /v1/models endpoint."""
+    client = OpenAI(base_url=base_url, api_key=api_key or "ollama")
+    try:
+        models = client.models.list()
+        return [m.id for m in models.data]
+    except Exception as e:
+        logger.error("list_models() FAILED url=%s — %s: %s", base_url, type(e).__name__, e)
         raise
 
 

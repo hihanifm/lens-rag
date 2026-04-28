@@ -13,6 +13,10 @@ class ProjectCreate(BaseModel):
     default_k: int = 10
     pin: Optional[str] = None
     source_filename: Optional[str] = None
+    embed_url: Optional[str] = None
+    embed_api_key: Optional[str] = None
+    embed_model: Optional[str] = None
+    embed_dims: Optional[int] = None
 
 
 class ProjectResponse(BaseModel):
@@ -31,11 +35,20 @@ class ProjectResponse(BaseModel):
     total_rows: Optional[int]
     ingestion_started_at: Optional[datetime]
     created_at: datetime
+    embed_url: Optional[str] = None
+    embed_model: Optional[str] = None
+    embed_dims: Optional[int] = None
+
+
+class ModelListRequest(BaseModel):
+    url: str
+    api_key: Optional[str] = None
 
 
 class SystemConfigResponse(BaseModel):
     """Read-only server retrieval configuration (for transparency UI)."""
     embedding_provider: str
+    embedding_url: str
     embedding_model: str
     embedding_dims: int
     reranker_enabled: bool

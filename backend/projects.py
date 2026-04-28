@@ -20,8 +20,8 @@ def create_project(data: ProjectCreate) -> dict:
             INSERT INTO public.projects
                 (name, schema_name, stored_columns, content_column, context_columns,
                  id_column, display_columns, has_id_column, default_k, pin,
-                 source_filename, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                 source_filename, embed_url, embed_api_key, embed_model, embed_dims, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
         """, [
             data.name,
@@ -35,6 +35,10 @@ def create_project(data: ProjectCreate) -> dict:
             data.default_k,
             pin,
             data.source_filename or None,
+            data.embed_url or None,
+            data.embed_api_key or None,
+            data.embed_model or None,
+            data.embed_dims or None,
         ])
         project = dict(cur.fetchone())
 

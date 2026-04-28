@@ -17,6 +17,8 @@ from config import (
     EMBEDDING_PROVIDER,
     EMBEDDING_MODEL,
     EMBEDDING_DIMS,
+    OLLAMA_BASE_URL,
+    OPENAI_EMBED_MODEL,
     RERANKER_ENABLED,
     RERANKER_MODEL,
 )
@@ -28,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
-from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, ClusterFilterItem, SystemConfigResponse
+from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, ClusterFilterItem, SystemConfigResponse, ModelListRequest
 from projects import (
     create_project,
     get_all_projects,
@@ -40,6 +42,7 @@ from projects import (
     update_project_status,
     verify_project_pin,
 )
+from embedder import list_models as list_embed_models
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
@@ -243,6 +246,16 @@ def get_system_config(project_id: int, request: Request):
     return _get_system_config_response(request=request, project_id=project_id)
 
 
+@app.get("/models")
+def get_available_models(url: str, api_key: str = None):
+    """Proxy /v1/models from an OpenAI-compatible endpoint. Used by the UI to populate model picker."""
+    try:
+        models = list_embed_models(url, api_key)
+        return {"models": models}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach embedding endpoint: {e}")
+
+
 @app.get("/system-config", response_model=SystemConfigResponse)
 def get_system_config_global():
     """
@@ -302,8 +315,11 @@ def _get_system_config_response(request: Request | None, project_id: int | None)
         "→ merged (RRF or vector-primary) → optional reranker (Ollama cross-encoder) → top-k results."
     )
 
+    embedding_url = OLLAMA_BASE_URL if EMBEDDING_PROVIDER != "openai" else "https://api.openai.com/v1"
+
     return SystemConfigResponse(
         embedding_provider=EMBEDDING_PROVIDER,
+        embedding_url=embedding_url,
         embedding_model=EMBEDDING_MODEL,
         embedding_dims=EMBEDDING_DIMS,
         reranker_enabled=RERANKER_ENABLED,
@@ -421,6 +437,10 @@ async def ingest_project(project_id: int, tmp_path: str):
                 context_columns=project['context_columns'],
                 id_column=project['id_column'],
                 display_columns=project['display_columns'],
+                embed_url=project.get('embed_url'),
+                embed_api_key=project.get('embed_api_key'),
+                embed_model=project.get('embed_model'),
+                embed_dims=project.get('embed_dims'),
             ):
                 _ingest_progress[project_id] = progress
                 if progress.get('step') not in ('progress',):
@@ -541,6 +561,9 @@ def search_stream(
                     use_bm25=p_bm25,
                     use_rrf=p_rrf,
                     use_rerank=p_rerank,
+                    embed_url=project_raw.get('embed_url'),
+                    embed_api_key=project_raw.get('embed_api_key'),
+                    embed_model=project_raw.get('embed_model'),
                 ):
                     if event['step'] == 'complete':
                         payload = _json.dumps({"step": "complete", "results": event['response'].dict()})
@@ -586,6 +609,9 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
         use_rrf=req.use_rrf,
         use_rerank=req.use_rerank,
         legacy_method=req.legacy_method,
+        embed_url=project_raw.get('embed_url'),
+        embed_api_key=project_raw.get('embed_api_key'),
+        embed_model=project_raw.get('embed_model'),
     )
 
     return result
@@ -620,6 +646,9 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         use_rrf=req.use_rrf,
         use_rerank=req.use_rerank,
         legacy_method=req.legacy_method,
+        embed_url=project_raw.get('embed_url'),
+        embed_api_key=project_raw.get('embed_api_key'),
+        embed_model=project_raw.get('embed_model'),
     )
 
     # Convert to DataFrame
@@ -762,6 +791,9 @@ def evaluate_run(project_id: int, req: EvalRequest, request: Request):
             use_bm25=req.use_bm25,
             use_rrf=req.use_rrf,
             use_rerank=req.use_rerank,
+            embed_url=project_raw.get('embed_url'),
+            embed_api_key=project_raw.get('embed_api_key'),
+            embed_model=project_raw.get('embed_model'),
         ),
         media_type="text/event-stream"
     )

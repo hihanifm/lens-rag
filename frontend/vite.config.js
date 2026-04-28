@@ -23,6 +23,7 @@ export default defineConfig({
         },
       },
       '/system-config': { target: API_PROXY_TARGET },
+      '/models': { target: API_PROXY_TARGET },
       '/health':  { target: API_PROXY_TARGET },
       '/samples': { target: API_PROXY_TARGET },
     }

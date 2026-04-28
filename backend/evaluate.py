@@ -13,6 +13,9 @@ def _pipeline_for_eval(
     use_bm25: bool,
     use_rrf: bool,
     use_rerank: bool,
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
 ):
     """
     Single-pass pipeline generator for evaluation.
@@ -28,7 +31,7 @@ def _pipeline_for_eval(
 
     if use_vector:
         yield {"step": "embedding", "message": "Embedding query..."}
-        query_vector = embed(question)
+        query_vector = embed(question, base_url=embed_url, api_key=embed_api_key, model=embed_model)
 
         yield {"step": "vector", "message": "Vector search..."}
         with get_cursor() as (cur, conn):
@@ -88,6 +91,9 @@ def stream_ragas_export(
     use_bm25: bool = True,
     use_rrf: bool = True,
     use_rerank: bool = True,
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
 ):
     """
     Generator — yields SSE-formatted strings.
@@ -109,6 +115,7 @@ def stream_ragas_export(
         gen = _pipeline_for_eval(
             question, schema_name, effective_k,
             use_vector, use_bm25, use_rrf, use_rerank,
+            embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
         )
         contexts = []
         try:

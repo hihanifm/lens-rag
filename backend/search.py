@@ -229,6 +229,9 @@ def topic_search_stream(
     use_bm25: bool = True,
     use_rrf: bool = True,
     use_rerank: bool = True,
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
 ):
     """
     Generator that yields step dicts for SSE streaming, ending with a
@@ -263,7 +266,7 @@ def topic_search_stream(
     if use_vector:
         yield {"step": "embedding", "message": "Embedding query..."}
         t = time.perf_counter()
-        query_vector = embed(query)
+        query_vector = embed(query, base_url=embed_url, api_key=embed_api_key, model=embed_model)
         stats['embedding_ms'] = round((time.perf_counter() - t) * 1000, 1)
         logger.debug("  embed done embedding_ms=%.1f", stats['embedding_ms'])
 
@@ -416,12 +419,16 @@ def topic_search(
     use_bm25: bool = True,
     use_rrf: bool = True,
     use_rerank: bool = True,
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
 ) -> SearchResponse:
     """Synchronous wrapper — collects the final event from the stream generator."""
     for event in topic_search_stream(
         query, schema_name, display_columns, k,
         use_vector=use_vector, use_bm25=use_bm25,
         use_rrf=use_rrf, use_rerank=use_rerank,
+        embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
     ):
         if event['step'] == 'complete':
             return event['response']
@@ -439,6 +446,9 @@ def search(
     use_rrf: bool = True,
     use_rerank: bool = True,
     legacy_method: str | None = None,
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
 ) -> SearchResponse:
     """Main search dispatcher."""
     k = min(k, TOP_K_MAX)
@@ -457,4 +467,5 @@ def search(
             query, schema_name, display_columns, k,
             use_vector=use_vector, use_bm25=use_bm25,
             use_rrf=use_rrf, use_rerank=use_rerank,
+            embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
         )

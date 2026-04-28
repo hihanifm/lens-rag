@@ -61,9 +61,13 @@ def init_db():
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS stored_columns TEXT[] NOT NULL DEFAULT '{}';")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS total_rows INTEGER;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS ingestion_started_at TIMESTAMP;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_url TEXT;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_model TEXT;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_dims INTEGER;")
 
 
-def create_project_schema(schema_name: str, columns: list, id_column: str = None):
+def create_project_schema(schema_name: str, columns: list, id_column: str = None, dims: int = None):
     """
     Create a schema and records table for a project.
     All original Excel columns stored as col_{name}.
@@ -90,7 +94,7 @@ def create_project_schema(schema_name: str, columns: list, id_column: str = None
                 sheet_name          TEXT,
                 {col_defs}
                 contextual_content  TEXT,
-                embedding           vector({EMBEDDING_DIMS}),
+                embedding           vector({dims or EMBEDDING_DIMS}),
                 search_vector       tsvector
                     GENERATED ALWAYS AS ({tsvector_expr}) STORED
             );

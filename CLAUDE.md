@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # LENS — Lightweight ENgineering Search
 
 ## What is LENS?
@@ -134,7 +138,7 @@ CREATE TABLE project_{id}.records (
   -- all original Excel columns stored as col_{name}
   -- e.g. col_product, col_category, col_id, col_description
   contextual_content  TEXT,         -- built by system at ingestion
-  embedding           vector(1024), -- bge-m3 output
+  embedding           vector(N),    -- N = project's embed_dims (defaults to system EMBEDDING_DIMS)
   search_vector       tsvector      -- BM25 index, auto-generated
     GENERATED ALWAYS AS (
       to_tsvector('english', coalesce(contextual_content, '')) ||
@@ -164,6 +168,10 @@ CREATE TABLE public.projects (
   row_count       INTEGER,
   pin             TEXT,                   -- optional; plain text (on-prem only)
   source_filename TEXT,                   -- original uploaded Excel filename
+  embed_url       TEXT,                   -- custom embedding endpoint (null = system default)
+  embed_api_key   TEXT,                   -- custom API key (null = system default; plain text)
+  embed_model     TEXT,                   -- custom model name (null = system default)
+  embed_dims      INTEGER,                -- vector dims for this project (auto-probed at ingestion if null)
   created_at      TIMESTAMP DEFAULT NOW()
 );
 ```
@@ -254,21 +262,28 @@ def rrf_merge(vector_results, bm25_results, k=60):
 ## API Routes
 
 
-| Method | Path                                 | Description                                                      |
-| ------ | ------------------------------------ | ---------------------------------------------------------------- |
-| GET    | `/projects`                          | List all projects                                                |
-| GET    | `/projects/{id}`                     | Get project detail (includes `has_pin`, never returns raw `pin`) |
-| POST   | `/projects`                          | Create project metadata                                          |
-| PATCH  | `/projects/{id}`                     | Update name / display_columns / default_k (no re-ingest)         |
-| GET    | `/projects/{id}/columns`             | All original column names for the project schema                 |
-| GET    | `/projects/{id}/ingest?tmp_path=...` | SSE ingestion stream                                             |
-| POST   | `/projects/{id}/search`              | Search (id or topic mode)                                        |
-| POST   | `/projects/{id}/export`              | Search + return Excel download                                   |
-| GET    | `/projects/{id}/browse`              | First 10 raw records (SELECT * LIMIT 10)                         |
-| POST   | `/projects/{id}/evaluate`            | SSE RAGAS export stream                                          |
-| POST   | `/projects/{id}/verify-pin`          | Verify PIN for a protected project                               |
-| POST   | `/projects/preview`                  | Parse Excel → return columns + row count                         |
-| GET    | `/health`                            | Liveness check                                                   |
+| Method | Path                                    | Description                                                      |
+| ------ | --------------------------------------- | ---------------------------------------------------------------- |
+| GET    | `/projects`                             | List all projects                                                |
+| GET    | `/projects/{id}`                        | Get project detail (includes `has_pin`, never returns raw `pin`) |
+| POST   | `/projects`                             | Create project metadata                                          |
+| PATCH  | `/projects/{id}`                        | Update name / display_columns / default_k (no re-ingest)         |
+| DELETE | `/projects/{id}`                        | Delete project + schema                                          |
+| GET    | `/projects/{id}/columns`                | All original column names for the project schema                 |
+| GET    | `/projects/{id}/ingest?tmp_path=...`    | SSE ingestion stream                                             |
+| GET    | `/projects/{id}/search/stream`          | Streaming search SSE (query params; used by frontend)            |
+| POST   | `/projects/{id}/search`                 | Non-streaming search (id or topic mode)                          |
+| POST   | `/projects/{id}/export`                 | Search + return Excel download                                   |
+| GET    | `/projects/{id}/browse`                 | First 10 raw records (SELECT * LIMIT 10)                         |
+| POST   | `/projects/{id}/evaluate`               | SSE RAGAS export stream                                          |
+| POST   | `/projects/{id}/cluster`                | SSE cluster stream (KMeans/DBSCAN over embeddings)               |
+| POST   | `/projects/{id}/cluster/filter`         | Cluster with column-value filters                                |
+| GET    | `/projects/{id}/system-config`          | Embedding + reranker config locked at ingestion time             |
+| POST   | `/projects/{id}/verify-pin`             | Verify PIN for a protected project                               |
+| POST   | `/projects/preview`                     | Parse Excel → return columns + row count                         |
+| GET    | `/models?url=...&api_key=...`           | Proxy /v1/models from any OpenAI-compatible endpoint             |
+| GET    | `/system-config`                        | Live system config (embedding model, reranker, Ollama URL, etc.) |
+| GET    | `/health`                               | Liveness check                                                   |
 
 
 ### Per-project PIN protection
@@ -285,6 +300,35 @@ Projects can optionally be created with a PIN (`public.projects.pin`, stored as 
   - `POST /projects/{id}/evaluate/run`
 
 To validate a PIN from the UI, call `POST /projects/{id}/verify-pin` with body `{ "pin": "..." }`.
+
+---
+
+## Per-Project Embedding Config
+
+Projects can override the system-level embedding model. The config is locked at creation time and used for both ingestion and every search query.
+
+**Flow:**
+1. User provides `embed_url` + optional `embed_api_key` in the Connection step
+2. Frontend calls `GET /models?url=...&api_key=...` — backend proxies `/v1/models` and returns model IDs
+3. User picks a model; all four fields sent in `POST /projects` payload
+4. At ingestion start, if `embed_url` is set but `embed_dims` is null, a probe `embed("probe")` call determines actual dims and writes them back to `public.projects.embed_dims`
+5. `create_project_schema()` uses the resolved dims for the pgvector `vector(N)` column
+6. Every `embed()` call in ingestion and search passes `base_url`, `api_key`, `model` kwargs; `embedder.py` constructs a fresh OpenAI client for overrides, falls back to the module singleton for nulls
+
+**Fallback:** any null field falls through to the system config (`OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMS`).
+
+**`SystemConfigResponse`** now includes `embedding_url` so the Connection step can pre-fill the URL field and auto-fetch models on arrival.
+
+---
+
+## Cross-tab State — ProjectStateContext
+
+`frontend/src/contexts/ProjectStateContext.jsx` persists search and eval state per project across the tab bar. Without it, switching from Search → Browse → Search would lose in-progress results.
+
+Key points:
+- `startSearch` / `startEval` live in the context, not in page components — this lets eval SSE keep running even when `EvaluateProject` is unmounted.
+- Streaming search uses `fetch` + `ReadableStream` (not `EventSource`) so the PIN header (`X-Project-Pin`) can be sent; `EventSource` does not support custom headers.
+- Each project gets its own search/eval slice keyed by `projectId`.
 
 ---
 
@@ -349,51 +393,66 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 - Recent Activity shows last 5 history entries (search + eval) with quick re-run buttons
 - [+ New Project] button
 
-### Screen 2 — Create Project (multi-step)
+### Screen 2 — Create Project (multi-step, 8 steps)
 
 - Step 1: Project name
 - Step 2: Upload Excel → system reads and shows all columns
-- Step 3: Pick content column (single select)
-- Step 4: Pick context columns (multi-select, excludes content column)
-- Step 5: Pick ID column (optional, single select or None)
-- Step 6: Pick display columns (multi-select, pre-filled with context + id columns)
-- Step 7: Set default K (5/10/20/50, default 10) + optional PIN (password field; blank = open access)
+- Step 3: Store columns — which columns to write to DB (defaults to all)
+- Step 4: Context columns (multi-select; concatenated into embedding input)
+- Step 5: ID column (optional; enables ID search mode)
+- Step 6: Display columns (shown in results; pre-filled with context + id)
+- Step 7: **Connection** — override embedding endpoint URL + API key + model picker (auto-fetches models from the URL; blank = use system default; pre-filled with system defaults on arrival)
+- Step 8: Settings — default K (5/10/20/50) + optional PIN
 - [Create] → SSE progress bar → "Ready!"
 
-### Screen 3 — Search (tab 1 of 4)
+### Screen 3 — Search (tab 1 of 5)
 
-- Project name shown top with [Search] [Evaluate] [Browse] [Settings] tab nav
+- Project name shown top with [Search] [Evaluate] [Browse] [Cluster] [Settings] tab nav
 - Search mode toggle: [ID] [Topic] (ID only shown if has_id_column)
-- Query input
-- K selector: 5 / 10 / 20 / 50
-- [Search] button
-- Results table (display columns only, configured at project creation)
-- Stats panel (timing breakdown)
-- [Export to Excel] button
-- Each search is saved to browser localStorage history
+- Pipeline toggles: vector / BM25 / RRF / rerank (each independently on/off)
+- Query input + K selector (5 / 10 / 20 / 50)
+- Search streams live step-by-step via SSE (uses `fetch` + `ReadableStream`, not `EventSource` — needed for PIN header support)
+- Results table (display columns only) + stats panel (timing breakdown)
+- [Export to Excel] button — each search auto-saved to localStorage history
 
-### Screen 4 — Evaluate (tab 2 of 4)
+### Screen 4 — Evaluate (tab 2 of 5)
 
 - Upload test set CSV (question + ground_truth columns)
-- K selector
+- Pipeline toggles + K selector
 - [Run Evaluation] → SSE live progress → results list
-- [Export RAGAS JSON] button
-- Each completed evaluation is saved to browser localStorage history
+- [Export RAGAS JSON] button; each completed eval auto-saved to localStorage history
 
-### Screen 5 — Browse (tab 3 of 4)
+### Screen 5 — Browse (tab 3 of 5)
 
 - Shows first 10 raw records from Postgres (SELECT * LIMIT 10)
 - Horizontally-scrollable fixed-layout table
 - All DB columns shown (col_* names, contextual_content, sheet_name, truncated embedding)
 - Cells default to 2-line clamp; click row to expand fully
 
-### Screen 6 — Settings (tab 4 of 4)
+### Screen 6 — Cluster (tab 4 of 5) — `/projects/:id/cluster`
+
+- Runs KMeans or DBSCAN clustering over all record embeddings for the project
+- Filter panel: per-column substring filters to restrict which records are clustered
+- Results show groups with representative records per cluster
+- Clustering runs via `POST /projects/{id}/cluster` (streaming SSE) or `POST /projects/{id}/cluster/filter`
+
+### Screen 7 — Settings (tab 5 of 5)
 
 - Left card: read-only ingestion config (content column, context columns, ID column, row count, schema)
 - Right card: editable fields — project name, default k, display columns (multi-select from full column list)
 - Save calls PATCH /projects/{id}; invalidates TanStack Query cache
 
-### Screen 7 — History (/history)
+### Screen 8 — Per-project System Info — `/projects/:id/system`
+
+- Read-only view of the embedding + reranker config that was active when the project was ingested
+- Rendered by `SystemConfig.jsx`; data fetched from `GET /projects/{id}/system-config`
+
+### Screen 9 — Global System Info — `/system`
+
+- Read-only view of the live system config (embedding model, reranker, Ollama URL, etc.)
+- Rendered by `System.jsx`; data fetched from `GET /system-config`
+
+### Screen 10 — History (/history)
 
 - Global view of all past searches and evaluations (stored in browser localStorage)
 - Project filter dropdown
@@ -414,9 +473,10 @@ lens/
     db.py              ← Postgres connection, schema management
     embedder.py        ← Ollama embedding calls
     ingestion.py       ← Excel reading + ingestion pipeline
-    search.py          ← vector + BM25 + RRF + reranker
+    search.py          ← vector + BM25 + RRF + reranker (streaming SSE)
+    clustering.py      ← KMeans/DBSCAN over stored embeddings
     projects.py        ← project CRUD + update_project + get_project_columns
-    models.py          ← Pydantic models (incl. ProjectUpdate)
+    models.py          ← Pydantic models (incl. ProjectUpdate, ClusterRequest, SystemConfigResponse)
     evaluate.py        ← RAGAS export builder + SSE streamer
   frontend/
     src/
@@ -426,7 +486,10 @@ lens/
         Search.jsx
         EvaluateProject.jsx
         Browse.jsx         ← raw record viewer (SELECT * LIMIT 10)
+        Cluster.jsx        ← embedding-space clustering with filter panel
         Settings.jsx       ← project config viewer + editable fields
+        SystemConfig.jsx   ← per-project system/model config (read-only)
+        System.jsx         ← global system config (read-only)
         History.jsx        ← global search/eval history from localStorage
       components/
         ResultsTable.jsx
@@ -434,10 +497,13 @@ lens/
         BottomBar.jsx      ← LENS home link + API status + History link
         Layout.jsx
         PinGate.jsx        ← PIN entry card rendered in place of page content when locked
+      contexts/
+        ProjectStateContext.jsx  ← persists search + eval state across tab navigation; runs eval SSE even when component unmounted
       hooks/
         useProjectPin.js   ← { isLocked, unlockWithPin } — used in Search/Evaluate/Browse/Settings
       utils/
         history.js         ← localStorage history helpers (saveSearch, saveEval, etc.)
+        clusterRunManager.js ← manages cluster job lifecycle
       api/
         client.js          ← ALL axios calls here, nowhere else
       App.jsx
@@ -446,7 +512,7 @@ lens/
     package.json
     vite.config.js         ← base driven by VITE_BASE_PATH env var
     tailwind.config.js
-  docker-compose.yml
+  docker-compose.yml       ← uses --profile dev / --profile prod to switch stacks
   requirements.txt
   Makefile
   CLAUDE.md              ← this file
@@ -525,6 +591,15 @@ python scripts/your_script.py
 **Dev:** Vite dev server (`localhost:37001`) runs separately from FastAPI (`localhost:37002`).
 Vite proxies `/projects`, `/health`, `/samples` to `http://localhost:37002` (CORS is not needed — the browser only ever talks to the Vite origin).
 
+#### Lab setup notes (Linux host, Windows browsers)
+
+In the lab, people often open the UI from Windows machines against a Linux Docker host (e.g. `http://<linux-ip>:37001`). A few gotchas routinely cause "works on host, broken in browser" issues:
+
+- **Prefer single-origin dev**: keep `VITE_API_URL` empty so the browser always calls the Vite origin and Vite proxies API routes to the backend. If `VITE_API_URL` points at `:37002`, you bypass the proxy and can hit CORS / firewall surprises.
+- **Vite proxy is prefix-based**: if you add a new backend route (e.g. `/models`), ensure it’s included in `frontend/vite.config.js` `server.proxy` so browser calls actually reach the API in dev.
+- **Ollama reachability from the API container**: the backend calls Ollama on the Docker host (typically `http://host.docker.internal:11434`). On Linux this depends on Docker `host-gateway` / `extra_hosts` and the host firewall.
+- **Firewall / bind addresses**: Vite is configured with `host: true`, but the Linux host still needs inbound `37001` open from Windows clients (and `37000` in prod if used).
+
 **Prod — single port, FastAPI serves static files:**
 
 1. Build the frontend: `make build-frontend` (sets `VITE_BASE_PATH=/lens-rag/`)
@@ -552,16 +627,27 @@ make prod-up
 
 ### Common Makefile targets
 
+All `up`/`down`/`build`/`logs` commands use `--profile dev` internally. Prod variants use `--profile prod`.
 
-| Command               | What it does                                     |
-| --------------------- | ------------------------------------------------ |
-| `make up`             | Start stack detached                             |
-| `make down`           | Stop stack                                       |
-| `make build`          | Rebuild Docker images                            |
-| `make logs`           | Follow all container logs                        |
-| `make restart`        | Stop + start (no rebuild)                        |
-| `make ps`             | Show container status                            |
-| `make build-frontend` | Build frontend for prod (`/lens-rag/` base path) |
+| Command               | What it does                                                  |
+| --------------------- | ------------------------------------------------------------- |
+| `make up`             | Start dev stack detached (API + Postgres + Vite frontend)     |
+| `make dev-up`         | Same as `up`, also tears down prod stack first                |
+| `make down`           | Stop dev stack                                                |
+| `make build`          | Rebuild dev Docker images                                     |
+| `make logs`           | Follow all container logs                                     |
+| `make logs-split`     | Split logs into 3 tmux panes (requires tmux)                  |
+| `make restart`        | Stop + start dev stack (no rebuild)                           |
+| `make ps`             | Show container status                                         |
+| `make prod-up`        | Build frontend + start prod stack (single port 37000)         |
+| `make prod-down`      | Stop prod stack                                               |
+| `make prod-restart`   | Stop + start prod stack                                       |
+| `make build-frontend` | Build frontend for prod (`/lens-rag/` base path)              |
+| `make clean`          | Remove old pre-rename containers/volumes; prune images        |
+| `make pip-cache`      | Pre-download Linux wheels into `pip-cache/` for offline build |
+| `make e2e-up`         | Start dev stack + build, then run Playwright suite            |
+| `make e2e`            | Run Playwright tests (stack must already be up)               |
+| `make e2e-down`       | Tear down stack after tests                                   |
 
 
 > **IMPORTANT:** Any change to backend Python files requires `make build && make up`.

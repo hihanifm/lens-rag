@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { previewExcel, createProject, API_BASE_URL } from '../api/client'
+import { previewExcel, createProject, fetchModels, getSystemConfig, API_BASE_URL } from '../api/client'
 
-const STEPS = ['Name', 'Upload', 'Store', 'Context', 'ID Column', 'Display', 'Settings']
+const STEPS = ['Name', 'Upload', 'Store', 'Context', 'ID Column', 'Display', 'Connection', 'Settings']
 
 export default function CreateProject() {
   const navigate = useNavigate()
@@ -16,6 +16,12 @@ export default function CreateProject() {
   const [displayColumns, setDisplayColumns] = useState([])
   const [defaultK, setDefaultK] = useState(10)
   const [pin, setPin] = useState('')
+  const [embedUrl, setEmbedUrl] = useState('')
+  const [embedApiKey, setEmbedApiKey] = useState('')
+  const [embedModel, setEmbedModel] = useState('')
+  const [availableModels, setAvailableModels] = useState([])
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelError, setModelError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ingestProgress, setIngestProgress] = useState(null)
@@ -54,7 +60,8 @@ export default function CreateProject() {
         (step === 3) ||
         (step === 4) ||
         (step === 5 && displayColumns.length > 0) ||
-        (step === 6 && !loading)
+        (step === 6) ||
+        (step === 7 && !loading)
 
       if (!canProceed) return
       e.preventDefault()
@@ -72,7 +79,8 @@ export default function CreateProject() {
         return next()
       }
       if (step === 5) return next()
-      if (step === 6) return handleCreate()
+      if (step === 6) return next()
+      if (step === 7) return handleCreate()
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -121,6 +129,55 @@ export default function CreateProject() {
     }
   }
 
+  // Pre-fill Connection step with system defaults on first visit
+  const connectionPrefilled = useRef(false)
+  useEffect(() => {
+    if (step !== 6 || connectionPrefilled.current) return
+    connectionPrefilled.current = true
+    getSystemConfig().then(cfg => {
+      const url = cfg.embedding_url || ''
+      setEmbedUrl(url)
+      if (url) {
+        // OpenAI model listing requires an API key; don't auto-fetch on arrival.
+        if (cfg.embedding_provider === 'openai') {
+          setAvailableModels([])
+          setEmbedModel(cfg.embedding_model || '')
+          setModelError('OpenAI endpoints require an API key to list models. Enter key, then click “Fetch available models”.')
+          return
+        }
+        setModelLoading(true)
+        setModelError('')
+        fetchModels(url, null)
+          .then(models => {
+            const list = Array.isArray(models) ? models : []
+            setAvailableModels(list)
+            const def = cfg.embedding_model
+            setEmbedModel(list.includes(def) ? def : (list[0] || ''))
+          })
+          .catch(() => setModelError('Could not reach the system endpoint to list models.'))
+          .finally(() => setModelLoading(false))
+      }
+    }).catch(() => {})
+  }, [step])
+
+  const handleFetchModels = async () => {
+    if (!embedUrl.trim()) return
+    setModelLoading(true)
+    setModelError('')
+    setAvailableModels([])
+    setEmbedModel('')
+    try {
+      const raw = await fetchModels(embedUrl.trim(), embedApiKey.trim() || null)
+      const models = Array.isArray(raw) ? raw : []
+      setAvailableModels(models)
+      if (models.length > 0) setEmbedModel(models[0])
+    } catch (e) {
+      setModelError('Could not reach the endpoint. Check the URL and try again.')
+    } finally {
+      setModelLoading(false)
+    }
+  }
+
   const handleCreate = async () => {
     setLoading(true)
     setError('')
@@ -135,6 +192,10 @@ export default function CreateProject() {
         default_k: defaultK,
         pin: pin || null,
         source_filename: file?.name || null,
+        embed_url: embedUrl.trim() || null,
+        embed_api_key: embedApiKey.trim() || null,
+        embed_model: embedModel || null,
+        embed_dims: null,
       })
 
       // Start ingestion via SSE
@@ -467,8 +528,84 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 6: Settings ── */}
+        {/* ── Step 6: Connection (embedding model) ── */}
         {step === 6 && (
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Embedding Model</h2>
+            <p className="text-gray-500 mb-8">
+              Override the default embedding model for this project. Leave blank to use the system default.
+              The chosen model will be used for ingestion and all searches.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Endpoint URL <span className="text-gray-400 font-normal">(OpenAI-compatible)</span>
+                </label>
+                <input
+                  type="text"
+                  value={embedUrl}
+                  onChange={e => { setEmbedUrl(e.target.value); setAvailableModels([]); setEmbedModel(''); setModelError('') }}
+                  placeholder="e.g. http://192.168.1.10:11434/v1"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  API Key <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="password"
+                  value={embedApiKey}
+                  onChange={e => setEmbedApiKey(e.target.value)}
+                  placeholder="Leave blank for Ollama (no key needed)"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleFetchModels}
+                disabled={!embedUrl.trim() || modelLoading}
+                className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                {modelLoading ? 'Fetching models...' : 'Fetch available models'}
+              </button>
+
+              {modelError && (
+                <p className="text-sm text-red-600">{modelError}</p>
+              )}
+
+              {availableModels.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                  <select
+                    value={embedModel}
+                    onChange={e => setEmbedModel(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {availableModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!embedUrl.trim() && (
+                <p className="text-sm text-gray-400">System default will be used (configured by the server admin).</p>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
+              <button onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 7: Settings ── */}
+        {step === 7 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
             <p className="text-gray-500 mb-8">Default number of results to show per search.</p>
@@ -506,6 +643,8 @@ export default function CreateProject() {
               <p><span className="font-medium">ID column:</span> {idColumn || 'None'}</p>
               <p><span className="font-medium">Results columns:</span> {displayColumns.join(', ')}</p>
               <p><span className="font-medium">Records:</span> {preview?.row_count?.toLocaleString()}</p>
+              <p><span className="font-medium">Embedding model:</span> {embedModel || <span className="text-gray-400">system default</span>}</p>
+              {embedUrl && <p><span className="font-medium">Endpoint:</span> {embedUrl}</p>}
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>

@@ -78,11 +78,11 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       {/* Fixed header */}
       <div className="fixed top-0 left-0 right-0 z-20 bg-blue-600 border-b border-blue-700">
-        <div className="w-[90%] mx-auto py-6">
+        <div className="w-[90%] mx-auto py-4">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex-1 min-w-0 pr-6">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <Link to="/" className="text-3xl font-bold text-white tracking-tight hover:text-blue-100 transition-colors">
+                <Link to="/" className="text-2xl font-bold text-white tracking-tight hover:text-blue-100 transition-colors">
                   LENS 🔍
                 </Link>
                 <span className="text-blue-100 text-sm">
@@ -92,7 +92,7 @@ export default function Home() {
                   <span className="font-semibold text-white">S</span>earch
                 </span>
               </div>
-              <p className="text-blue-100 mt-2 max-w-2xl">
+              <p className="text-blue-100 mt-1 max-w-none">
                 Turn a spreadsheet knowledge base into a fast loop: retrieve, explore, and validate. Search results,
                 cluster themes, run evals, and export to iterate in minutes. 🔎 Type it the way you’d say it - free
                 form; the system matches meaning, not just exact keywords!
@@ -101,14 +101,14 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <Link
                 to="/system"
-                className="border border-blue-200 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-blue-500 transition-colors"
+                className="border border-blue-200 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-500 transition-colors"
               >
                 System 🛠️
               </Link>
               <Link
                 to="/projects/new"
                 data-testid="new-project"
-                className="bg-white text-blue-700 px-5 py-2.5 rounded-lg font-medium hover:bg-blue-50 transition-colors"
+                className="bg-white text-blue-700 px-4 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors"
               >
                 + New Project
               </Link>
@@ -117,7 +117,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="w-[90%] mx-auto py-12 pt-36">
+      <div className="w-[90%] mx-auto py-12 pt-28">
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
 

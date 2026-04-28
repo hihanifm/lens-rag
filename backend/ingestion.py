@@ -84,6 +84,10 @@ def ingest(
     context_columns: list[str],
     id_column: str | None,
     display_columns: list[str],
+    embed_url: str | None = None,
+    embed_api_key: str | None = None,
+    embed_model: str | None = None,
+    embed_dims: int | None = None,
 ) -> Generator[dict, None, None]:
     """
     Full ingestion pipeline with progress reporting.
@@ -116,9 +120,26 @@ def ingest(
     }
 
     # Step 2: Create schema and table — only for stored_columns
+    # Probe actual embedding dims when a custom model is in use and dims weren't supplied.
+    resolved_dims = embed_dims
+    if embed_url and not resolved_dims:
+        try:
+            probe = embed("probe", base_url=embed_url, api_key=embed_api_key, model=embed_model)
+            resolved_dims = len(probe)
+            logger.info("ingest() probed embed dims=%d from %s model=%s", resolved_dims, embed_url, embed_model)
+            # Persist the resolved dims so search can read them
+            with get_cursor() as (cur, conn):
+                cur.execute(
+                    "UPDATE public.projects SET embed_dims = %s WHERE id = %s",
+                    [resolved_dims, project_id]
+                )
+        except Exception as e:
+            logger.error("ingest() embed probe failed — %s: %s", type(e).__name__, e)
+            raise
+
     yield {"step": "schema", "message": "Creating database schema..."}
     logger.debug("ingest() creating schema %s with stored_columns=%s", schema_name, stored_columns)
-    create_project_schema(schema_name, stored_columns, id_column)
+    create_project_schema(schema_name, stored_columns, id_column, dims=resolved_dims)
     logger.debug("ingest() schema created")
     yield {"step": "schema_complete", "message": "Database ready"}
 
@@ -141,7 +162,7 @@ def ingest(
 
         # Embed
         try:
-            vector = embed(contextual_content)
+            vector = embed(contextual_content, base_url=embed_url, api_key=embed_api_key, model=embed_model)
         except Exception as e:
             logger.error("embed failed on row %d/%d — %s: %s", i + 1, total_rows, type(e).__name__, e)
             raise

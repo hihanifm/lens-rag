@@ -59,11 +59,14 @@ export const deleteProject = (id) =>
 export const getProjectColumns = (id) =>
   api.get(`/projects/${id}/columns`, { headers: projectHeaders(id) }).then(r => r.data)
 
-export const getProjectSystemConfig = (id) =>
-  api.get(`/projects/${id}/system-config`, { headers: projectHeaders(id) }).then(r => r.data)
-
 export const getSystemConfig = () =>
   api.get('/system-config').then(r => r.data)
+
+export const fetchModels = (url, apiKey) => {
+  const params = new URLSearchParams({ url })
+  if (apiKey) params.set('api_key', apiKey)
+  return api.get(`/models?${params}`).then(r => r.data.models)
+}
 
 export const browseProject = (id) =>
   api.get(`/projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)

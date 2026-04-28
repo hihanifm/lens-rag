@@ -185,16 +185,6 @@ export default function Search() {
               Cluster 🧩
             </Link>
             <Link
-              to={`/projects/${projectId}/system`}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                location.pathname.endsWith('/system')
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              System 🛠️
-            </Link>
-            <Link
               to={`/projects/${projectId}/settings`}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 location.pathname.endsWith('/settings')
