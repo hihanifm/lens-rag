@@ -1,22 +1,22 @@
 services:
 
-  lens-postgres:
+  lens-rag-postgres:
     image: pgvector/pgvector:pg16
-    container_name: lens-postgres
+    container_name: lens-rag-postgres
     restart: always
     environment:
       POSTGRES_DB: lens
       POSTGRES_USER: lens_user
       POSTGRES_PASSWORD: changeme
     volumes:
-      - lens-postgres-data:/var/lib/postgresql/data
+      - lens-rag-postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lens_user -d lens"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  lens-api:
+  lens-rag-api:
     profiles: ["dev"]
     build:
       context: .
@@ -25,15 +25,15 @@ services:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
-    container_name: lens-api
+    container_name: lens-rag-api
     restart: unless-stopped
     ports:
       - "37000:8000"
     depends_on:
-      lens-postgres:
+      lens-rag-postgres:
         condition: service_healthy
     environment:
-      DB_HOST: lens-postgres
+      DB_HOST: lens-rag-postgres
       DB_PORT: 5432
       DB_NAME: lens
       DB_USER: lens_user
@@ -49,11 +49,11 @@ services:
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
       RERANKER_MODEL: ${RERANKER_MODEL:-bge-reranker-base}
     volumes:
-      - lens-uploads:/data/projects
+      - lens-rag-uploads:/data/projects
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
-  frontend:
+  lens-rag-frontend:
     profiles: ["dev"]
     build:
       context: .
@@ -62,7 +62,7 @@ services:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
-    container_name: lens-frontend
+    container_name: lens-rag-frontend
     restart: unless-stopped
     ports:
       - "37001:37001"
@@ -73,9 +73,9 @@ services:
       - ./frontend:/app
       - /app/node_modules
     depends_on:
-      - lens-api
+      - lens-rag-api
 
-  lens-api-prod:
+  lens-rag-api-prod:
     profiles: ["prod"]
     build:
       context: .
@@ -84,15 +84,15 @@ services:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-}
-    container_name: lens-api-prod
+    container_name: lens-rag-api-prod
     restart: always
     ports:
       - "37000:8000"
     depends_on:
-      lens-postgres:
+      lens-rag-postgres:
         condition: service_healthy
     environment:
-      DB_HOST: lens-postgres
+      DB_HOST: lens-rag-postgres
       DB_PORT: 5432
       DB_NAME: lens
       DB_USER: lens_user
@@ -109,11 +109,11 @@ services:
       SERVE_FRONTEND: "true"
       FRONTEND_DIST_DIR: /app/frontend/dist
     volumes:
-      - lens-uploads:/data/projects
+      - lens-rag-uploads:/data/projects
       - ./frontend/dist:/app/frontend/dist:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
 volumes:
-  lens-postgres-data:
-  lens-uploads:
+  lens-rag-postgres-data:
+  lens-rag-uploads:
