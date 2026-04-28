@@ -110,8 +110,10 @@ class ProjectUpdate(BaseModel):
 
 
 class ClusterFilterItem(BaseModel):
+    """One column: one or more substring predicates OR’d together (ILIKE)."""
     column: str
-    value: str
+    value: Optional[str] = None              # legacy single-value
+    values: Optional[List[str]] = None        # preferred; OR within column
 
 
 class ClusterRequest(BaseModel):

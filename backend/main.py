@@ -28,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
-from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, SystemConfigResponse
+from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, ClusterFilterItem, SystemConfigResponse
 from projects import (
     create_project,
     get_all_projects,
@@ -97,32 +97,52 @@ def _check_pin(project_raw: dict, request: Request):
 
 
 MAX_CLUSTER_FILTERS = 10
+MAX_CLUSTER_SUBSTRING_TOTAL = 100  # cap OR predicates across all columns
 
 
-def _normalize_cluster_filters(project_raw: dict, req: ClusterRequest) -> list[tuple[str, str]]:
+def _cluster_item_values(item: ClusterFilterItem) -> list[str]:
+    """Coalesce legacy single `value` and `values`; strip, dedupe, preserve order."""
+    if item.values:
+        raw = item.values
+    elif item.value is not None and str(item.value).strip():
+        raw = [item.value]
+    else:
+        raw = []
+    vals = [str(v).strip() for v in raw if v is not None and str(v).strip()]
+    return list(dict.fromkeys(vals))
+
+
+def _normalize_cluster_filters(project_raw: dict, req: ClusterRequest) -> list[tuple[str, list[str]]]:
     """Merge legacy filter_column/filter_value + filters[]; duplicate columns → last wins.
-    Validates column names against this project's columns.
+    Per column, multiple values are OR’d in SQL (substring ILIKE).
     """
-    raw: list[tuple[str, str]] = []
+    raw: list[tuple[str, list[str]]] = []
     if req.filter_column and req.filter_value is not None:
         fc = (req.filter_column or "").strip()
         fv = str(req.filter_value).strip()
         if fc and fv:
-            raw.append((fc, fv))
+            raw.append((fc, [fv]))
     for item in req.filters or []:
         fc = (item.column or "").strip()
-        fv = (item.value or "").strip()
-        if fc and fv:
-            raw.append((fc, fv))
+        vals = _cluster_item_values(item)
+        if fc and vals:
+            raw.append((fc, vals))
 
-    merged: dict[str, str] = {}
-    for col, val in raw:
-        merged[col] = val
+    merged: dict[str, list[str]] = {}
+    for col, vals in raw:
+        merged[col] = vals
 
     if len(merged) > MAX_CLUSTER_FILTERS:
         raise HTTPException(
             status_code=422,
             detail=f"At most {MAX_CLUSTER_FILTERS} distinct filter columns allowed",
+        )
+
+    total_sub = sum(len(v) for v in merged.values())
+    if total_sub > MAX_CLUSTER_SUBSTRING_TOTAL:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_CLUSTER_SUBSTRING_TOTAL} substring values across all filters",
         )
 
     allowed = set(get_project_columns(project_raw))

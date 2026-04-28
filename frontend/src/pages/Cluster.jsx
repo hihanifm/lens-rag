@@ -15,8 +15,14 @@ import { saveCluster } from '../utils/history'
 
 function compactClusterFilters(rows) {
   return rows
-    .map(({ column, value }) => ({ column: (column || '').trim(), value: (value || '').trim() }))
-    .filter(({ column, value }) => column && value)
+    .map(({ column, values }) => {
+      const col = (column || '').trim()
+      const vals = Array.isArray(values)
+        ? values.map(v => String(v).trim()).filter(Boolean)
+        : []
+      return { column: col, values: [...new Set(vals)] }
+    })
+    .filter(({ column, values }) => column && values.length > 0)
 }
 // 20-color Tableau-inspired palette; noise (-1) uses gray
 const PALETTE = [
@@ -208,7 +214,7 @@ export default function Cluster() {
         body: JSON.stringify({
           algorithm,
           k: k ?? null,
-          filters: compact.map(({ column, value }) => ({ column, value })),
+          filters: compact.map(({ column, values }) => ({ column, values })),
         }),
       })
 
@@ -377,7 +383,7 @@ export default function Cluster() {
               <span className="text-sm text-gray-600">Filters (AND)</span>
               <button
                 type="button"
-                onClick={() => setFilters(prev => [...prev, { column: '', value: '' }])}
+                onClick={() => setFilters(prev => [...prev, { column: '', values: [] }])}
                 className="text-sm px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
               >
                 Add filter
@@ -393,12 +399,11 @@ export default function Cluster() {
               )}
             </div>
             <p className="text-xs text-gray-500 max-w-[40rem] leading-relaxed">
-              Each rule matches rows where that column{' '}
-              <span className="font-medium text-gray-600">contains your text</span> (substring, case-insensitive —
-              PostgreSQL ILIKE).
-              Regex is not supported. Multiple rows combine with{' '}
-              <span className="font-medium text-gray-600">AND</span> (every rule must match). Value dropdowns are{' '}
-              <span className="font-medium text-gray-600">single-select</span> — choose one option per rule; add another rule for a different column.
+              Each column rule uses <span className="font-medium text-gray-600">substring</span> matching
+              (case-insensitive ILIKE). Regex is not supported. Within one column you can pick{' '}
+              <span className="font-medium text-gray-600">several values</span> — rows match if{' '}
+              <span className="font-medium text-gray-600">any</span> of those substrings appear (<span className="font-medium text-gray-600">OR</span>).
+              Different filter rows combine with <span className="font-medium text-gray-600">AND</span>.
             </p>
 
             {filters.map((row, idx) => {
@@ -411,7 +416,7 @@ export default function Cluster() {
                     value={row.column}
                     onChange={e => {
                       const col = e.target.value
-                      setFilters(prev => prev.map((r, i) => (i === idx ? { column: col, value: '' } : r)))
+                      setFilters(prev => prev.map((r, i) => (i === idx ? { column: col, values: [] } : r)))
                     }}
                     className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[10rem]"
                   >
@@ -424,14 +429,16 @@ export default function Cluster() {
                   {row.column && valuesData && !valuesData.truncated && (
                     <select
                       {...(idx === 0 ? { 'data-testid': 'cluster-filter-value' } : {})}
-                      value={row.value}
+                      multiple
+                      value={row.values ?? []}
                       onChange={e => {
-                        const v = e.target.value
-                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                        const sel = [...e.target.selectedOptions].map(o => o.value)
+                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, values: sel } : r)))
                       }}
+                      size={Math.min(Math.max((valuesData.values?.length || 0), 3), 10)}
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
+                      title="Hold Cmd (Mac) or Ctrl (Windows) to select multiple values"
                     >
-                      <option value="">Choose value…</option>
                       {valuesData.values.map(v => (
                         <option key={v} value={v}>{v}</option>
                       ))}
@@ -442,12 +449,12 @@ export default function Cluster() {
                     <input
                       {...(idx === 0 ? { 'data-testid': 'cluster-filter-value-input' } : {})}
                       type="text"
-                      value={row.value}
+                      value={(row.values ?? []).join(', ')}
                       onChange={e => {
-                        const v = e.target.value
-                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                        const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, values: parts } : r)))
                       }}
-                      placeholder="Substring match…"
+                      placeholder="Comma-separated substrings…"
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
                     />
                   )}

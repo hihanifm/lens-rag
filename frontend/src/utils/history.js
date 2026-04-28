@@ -105,7 +105,11 @@ export function exportHistoryCSV() {
       : e.type === 'cluster'
         ? (() => {
             const tail = e.filters?.length
-              ? e.filters.map(f => `${f.column}=${f.value}`).join(' & ')
+              ? e.filters.map(f => {
+                  if (f.values?.length) return `${f.column}=(${f.values.join(' | ')})`
+                  if (f.value != null && f.value !== '') return `${f.column}=${f.value}`
+                  return ''
+                }).filter(Boolean).join(' & ')
               : (e.filter_column ? `${e.filter_column}=${e.filter_value}` : '')
             return `${e.algorithm}${e.k ? ` k=${e.k}` : ''}${tail ? ` [${tail}]` : ''}`
           })()

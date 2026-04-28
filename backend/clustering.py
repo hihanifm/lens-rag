@@ -22,11 +22,12 @@ def _parse_embedding(s: str) -> list[float]:
 def fetch_embeddings(
     schema_name: str,
     display_columns: list[str],
-    filters: list[tuple[str, str]],
+    filters: list[tuple[str, list[str]]],
 ) -> tuple[list[int], np.ndarray, list[dict]]:
     """
     Fetch all record embeddings and display-column values for the project.
-    `filters` — list of (original column name, substring) ANDed with ILIKE %% on each col_*.
+    `filters` — list of (original column name, list of substrings). For each column,
+    rows match if ANY substring matches (OR); across columns, all groups must match (AND).
     Returns (ids, float32 matrix [N, dims], list of display dicts).
 
     pgvector.psycopg2.register_vector is never called in this codebase so
@@ -39,12 +40,15 @@ def fetch_embeddings(
     where_clause = ""
     params: list = []
     if filters:
-        clauses = []
-        for col, substr in filters:
+        outer = []
+        for col, substrs in filters:
             safe_fc = f'col_{safe_col_name(col)}'
-            clauses.append(f'"{safe_fc}" ILIKE %s')
-            params.append(f"%{substr}%")
-        where_clause = "WHERE " + " AND ".join(clauses)
+            inner = []
+            for _ in substrs:
+                inner.append(f'"{safe_fc}" ILIKE %s')
+            outer.append('(' + ' OR '.join(inner) + ')')
+            params.extend(f"%{s}%" for s in substrs)
+        where_clause = "WHERE " + " AND ".join(outer)
 
     with get_cursor() as (cur, _conn):
         cur.execute(
@@ -97,7 +101,7 @@ def stream_cluster(
     display_columns: list[str],
     algorithm: str,
     k: int | None,
-    filters: list[tuple[str, str]],
+    filters: list[tuple[str, list[str]]],
 ):
     """
     Generator that yields step dicts for SSE streaming, ending with a
@@ -221,7 +225,7 @@ def cluster(
     display_columns: list[str],
     algorithm: str,
     k: int | None,
-    filters: list[tuple[str, str]],
+    filters: list[tuple[str, list[str]]],
 ) -> ClusterResponse:
     """Synchronous wrapper — used by the export endpoint."""
     for event in stream_cluster(schema_name, display_columns, algorithm, k, filters):

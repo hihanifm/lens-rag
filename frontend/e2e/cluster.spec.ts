@@ -76,11 +76,12 @@ test.describe.serial('cluster tab', () => {
     const valueSelect = page.getByTestId('cluster-filter-value')
     await expect(valueSelect).toBeVisible({ timeout: 10_000 })
 
-    // Pick the first non-placeholder option (any category)
+    // Pick the first category value (multi-select; one value is enough)
     const options = await valueSelect.locator('option').all()
-    const firstValue = await options[1]?.textContent() // index 0 = "Choose value…"
+    const firstValue = (await options[0]?.getAttribute('value'))?.trim()
+      || (await options[0]?.textContent())?.trim()
     if (firstValue) {
-      await valueSelect.selectOption(firstValue.trim())
+      await valueSelect.selectOption([firstValue])
     }
 
     // Run clustering again with filter applied
