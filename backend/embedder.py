@@ -25,19 +25,37 @@ logger.info("Reranker: enabled=%s model=%s base_url=%s", RERANKER_ENABLED, RERAN
 
 def _probe_ollama():
     """Fire a tiny embed request at startup to verify Ollama is reachable and the model is loaded."""
-    logger.info("Probing Ollama at %s with model=%s ...", OLLAMA_BASE_URL, EMBEDDING_MODEL)
+    logger.info("Probing embed model — url=%s model=%s", OLLAMA_BASE_URL, EMBEDDING_MODEL)
     t0 = time.monotonic()
     try:
         resp = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input="ping")
         elapsed = int((time.monotonic() - t0) * 1000)
-        logger.info("Ollama probe OK — dims=%d elapsed_ms=%d", len(resp.data[0].embedding), elapsed)
+        logger.info("Embed probe OK — dims=%d elapsed_ms=%d", len(resp.data[0].embedding), elapsed)
     except Exception as e:
         logger.error(
-            "Ollama probe FAILED — url=%s model=%s — %s: %s\n"
+            "Embed probe FAILED — url=%s model=%s — %s: %s\n"
             "  Is Ollama running on the host? Try: curl %s/models",
             OLLAMA_BASE_URL, EMBEDDING_MODEL, type(e).__name__, e, OLLAMA_BASE_URL,
             exc_info=True,
         )
+
+    if RERANKER_ENABLED:
+        logger.info("Probing reranker model — url=%s model=%s", OLLAMA_BASE_URL, RERANKER_MODEL)
+        t0 = time.monotonic()
+        try:
+            resp = _rerank_client.embeddings.create(model=RERANKER_MODEL, input="ping [SEP] pong")
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.info("Reranker probe OK — score_dims=%d elapsed_ms=%d",
+                        len(resp.data[0].embedding), elapsed)
+        except Exception as e:
+            logger.error(
+                "Reranker probe FAILED — url=%s model=%s — %s: %s\n"
+                "  Try: ollama pull %s",
+                OLLAMA_BASE_URL, RERANKER_MODEL, type(e).__name__, e, RERANKER_MODEL,
+                exc_info=True,
+            )
+    else:
+        logger.info("Reranker disabled — skipping probe")
 
 
 _probe_ollama()
