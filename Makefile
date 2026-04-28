@@ -1,4 +1,4 @@
-.PHONY: up down build logs logs-split restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
+.PHONY: up down build logs logs-split restart prod-restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
 
 up:
 	docker compose --profile dev up -d
@@ -23,6 +23,9 @@ logs-split:
 
 restart:
 	docker compose --profile dev down && docker compose --profile dev up -d
+
+prod-restart:
+	docker compose --profile prod down && docker compose --profile prod up -d
 
 ps:
 	docker compose ps
