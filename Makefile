@@ -44,7 +44,7 @@ prod-logs:
 # Build frontend for production under /lens-rag sub-path.
 # Output goes to frontend/dist/ — copy or mount into the FastAPI container.
 build-frontend:
-	cd frontend && npm install && VITE_BASE_PATH=${VITE_BASE_PATH:-/} npm run build
+	cd frontend && npm install && VITE_BASE_PATH=${ROOT_PATH:-/} npm run build
 
 e2e-up:
 	docker compose --profile dev up -d --build
