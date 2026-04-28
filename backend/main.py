@@ -44,7 +44,9 @@ app.add_middleware(
 def startup():
     init_db()
 
-app.mount("/samples", StaticFiles(directory="samples"), name="samples")
+_SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
+if os.path.isdir(_SAMPLES_DIR):
+    app.mount("/samples", StaticFiles(directory=_SAMPLES_DIR), name="samples")
 
 # Tracks live ingestion progress keyed by project_id.
 # Written by background ingestion threads; read by SSE polling loop.
