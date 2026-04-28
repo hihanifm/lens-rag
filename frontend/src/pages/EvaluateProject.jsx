@@ -68,8 +68,16 @@ export default function EvaluateProject() {
   const handleRun = () => {
     if (!ev.testCases?.length) return
     const pin = localStorage.getItem(`pin_${projectId}`) ?? undefined
-    startEval(projectId, ev.testCases, ev.k, project?.name ?? '', pin)
+    const pipeline = {
+      use_vector: ev.use_vector ?? true,
+      use_bm25:   ev.use_bm25   ?? true,
+      use_rrf:    ev.use_rrf    ?? true,
+      use_rerank: ev.use_rerank ?? true,
+    }
+    startEval(projectId, ev.testCases, ev.k, project?.name ?? '', pin, pipeline)
   }
+
+  const retrieversOk = (ev.use_vector ?? true) || (ev.use_bm25 ?? true)
 
   const handleExport = () => {
     if (!ev.results) return
@@ -184,11 +192,40 @@ export default function EvaluateProject() {
             ))}
           </div>
 
+          {/* Pipeline toggles */}
+          <div className="mb-6 pt-4 border-t border-gray-100">
+            <div className="flex flex-wrap items-center gap-4">
+              <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">Pipeline</span>
+              {[
+                { key: 'use_vector', label: 'Vector (embedding)', disabledWhen: !(ev.use_bm25 ?? true) },
+                { key: 'use_bm25',   label: 'BM25 (keyword)',     disabledWhen: !(ev.use_vector ?? true) },
+                { key: 'use_rrf',    label: 'RRF merge',          disabledWhen: false },
+                { key: 'use_rerank', label: 'Rerank',             disabledWhen: false },
+              ].map(({ key, label, disabledWhen }) => (
+                <label
+                  key={key}
+                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none ${disabledWhen ? 'opacity-40 pointer-events-none' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ev[key] ?? true}
+                    onChange={e => setEval(projectId, { [key]: e.target.checked })}
+                    className="w-3.5 h-3.5 rounded accent-blue-600"
+                  />
+                  <span className="text-xs text-gray-600">{label}</span>
+                </label>
+              ))}
+            </div>
+            {!retrieversOk && (
+              <p className="mt-2 text-xs text-red-500">Enable at least one retriever (Vector or BM25).</p>
+            )}
+          </div>
+
           {/* Action buttons */}
           <div className="flex gap-3">
             <button
               onClick={handleRun}
-              disabled={!ev.testCases || ev.loading}
+              disabled={!ev.testCases || ev.loading || !retrieversOk}
               className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
               {ev.loading ? 'Running...' : 'Run Evaluation'}

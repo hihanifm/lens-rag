@@ -8,12 +8,27 @@ import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { useProjectState } from '../contexts/ProjectStateContext'
 
-const STEP_LABELS = {
-  embedding:  'Embedding query',
-  vector:     'Vector search',
-  bm25:       'Keyword search',
-  rrf:        'Merging results',
-  reranking:  'Reranking',
+// All possible SSE steps in order; only render pills for enabled stages
+const ALL_STEPS = [
+  { key: 'embedding',  label: 'Embedding query', needs: s => s.use_vector },
+  { key: 'vector',     label: 'Vector search',   needs: s => s.use_vector },
+  { key: 'bm25',       label: 'Keyword search',  needs: s => s.use_bm25 },
+  { key: 'rrf',        label: 'Merging results', needs: () => true },
+  { key: 'reranking',  label: 'Reranking',       needs: s => s.use_rerank },
+]
+
+function PipelineToggle({ label, checked, onChange, disabled }) {
+  return (
+    <label className={`inline-flex items-center gap-1.5 cursor-pointer select-none ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={e => onChange(e.target.checked)}
+        className="w-3.5 h-3.5 rounded accent-blue-600"
+      />
+      <span className="text-xs text-gray-600">{label}</span>
+    </label>
+  )
 }
 
 export default function Search() {
@@ -29,7 +44,7 @@ export default function Search() {
 
   const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
 
-  // Seed query/mode/k from router navigation state (e.g. re-run from History)
+  // Seed query/mode/k/pipeline from router navigation state (e.g. re-run from History)
   useEffect(() => {
     if (!location.state) return
     const patch = {}
@@ -39,23 +54,40 @@ export default function Search() {
       patch.mode = (location.state.mode === 'id' && project && !project.has_id_column)
         ? 'topic' : location.state.mode
     }
+    for (const f of ['use_vector', 'use_bm25', 'use_rrf', 'use_rerank']) {
+      if (location.state[f] != null) patch[f] = location.state[f]
+    }
     if (Object.keys(patch).length) setSearch(projectId, patch)
   }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const effectiveMode = s.mode
   const effectiveK    = s.k || project?.default_k || 10
 
+  // At least one retriever must be on
+  const retrieversOk = s.use_vector || s.use_bm25
+
+  const pipeline = {
+    use_vector: s.use_vector,
+    use_bm25:   s.use_bm25,
+    use_rrf:    s.use_rrf,
+    use_rerank: s.use_rerank,
+  }
+
   const handleSearch = (e) => {
     e?.preventDefault()
-    if (!s.query.trim()) return
-    startSearch(projectId, s.query, effectiveMode, effectiveK, project?.name ?? '', project?.display_columns ?? [])
+    if (!s.query.trim() || !retrieversOk) return
+    startSearch(
+      projectId, s.query, effectiveMode, effectiveK,
+      project?.name ?? '', project?.display_columns ?? [],
+      pipeline,
+    )
   }
 
   const handleExport = async () => {
     if (!s.query.trim()) return
     try {
-      await exportResults(projectId, s.query, effectiveMode, effectiveK, project?.name)
-    } catch (e) {
+      await exportResults(projectId, s.query, effectiveMode, effectiveK, project?.name, pipeline)
+    } catch {
       setSearch(projectId, { error: 'Export failed.' })
     }
   }
@@ -66,6 +98,11 @@ export default function Search() {
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
   if (isLocked) return <PinGate onUnlock={unlockWithPin} />
+
+  // Steps to show as pills — only for stages the current pipeline will run
+  const activeStepDefs = effectiveMode === 'topic'
+    ? ALL_STEPS.filter(step => step.needs(s))
+    : []
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -187,7 +224,7 @@ export default function Search() {
             <button
               onClick={handleSearch}
               data-testid="search-submit"
-              disabled={s.loading || !s.query.trim()}
+              disabled={s.loading || !s.query.trim() || !retrieversOk}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
             >
               {s.loading ? 'Searching...' : 'Search'}
@@ -211,6 +248,40 @@ export default function Search() {
               </button>
             ))}
           </div>
+
+          {/* Pipeline toggles — topic mode only */}
+          {effectiveMode === 'topic' && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">Pipeline</span>
+                <PipelineToggle
+                  label="Vector (embedding)"
+                  checked={s.use_vector}
+                  onChange={v => setSearch(projectId, { use_vector: v })}
+                  disabled={!s.use_bm25}
+                />
+                <PipelineToggle
+                  label="BM25 (keyword)"
+                  checked={s.use_bm25}
+                  onChange={v => setSearch(projectId, { use_bm25: v })}
+                  disabled={!s.use_vector}
+                />
+                <PipelineToggle
+                  label="RRF merge"
+                  checked={s.use_rrf}
+                  onChange={v => setSearch(projectId, { use_rrf: v })}
+                />
+                <PipelineToggle
+                  label="Rerank"
+                  checked={s.use_rerank}
+                  onChange={v => setSearch(projectId, { use_rerank: v })}
+                />
+              </div>
+              {!retrieversOk && (
+                <p className="mt-2 text-xs text-red-500">Enable at least one retriever (Vector or BM25).</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Error */}
@@ -220,11 +291,11 @@ export default function Search() {
           </div>
         )}
 
-        {/* Live pipeline steps */}
-        {s.loading && (
+        {/* Live pipeline steps — only enabled stages */}
+        {s.loading && activeStepDefs.length > 0 && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
-            {Object.entries(STEP_LABELS).map(([key, label]) => {
-              const done = s.doneSteps.includes(key)
+            {activeStepDefs.map(({ key, label }) => {
+              const done   = s.doneSteps.includes(key)
               const active = s.currentStep === key
               return (
                 <span

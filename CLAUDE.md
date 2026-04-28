@@ -1,6 +1,7 @@
 # LENS — Lightweight ENgineering Search
 
 ## What is LENS?
+
 A generic, on-premise RAG search portal for any Excel-based knowledge base.
 Not a chatbot. Not a reasoning engine. Just smart search — fast and accurate.
 
@@ -11,6 +12,7 @@ Works for any domain, any Excel structure.
 ## Interaction Protocol (NEVER skip this)
 
 Before writing any code or plan, Claude MUST:
+
 1. Ask clarifying questions to fully understand the requirements
 2. Wait for the user to respond
 3. Only proceed to coding after the user confirms you have enough context
@@ -20,6 +22,7 @@ Do NOT jump straight into code. Always converse first.
 ---
 
 ## Best Practices
+
 See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React, FastAPI, Git, and general rules.
 
 ---
@@ -50,6 +53,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 ## Tech Stack
 
 ### Backend
+
 - Python + FastAPI
 - PostgreSQL + pgvector extension
 - pandas + openpyxl (Excel reading)
@@ -57,6 +61,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 - psycopg2 (Postgres connection)
 
 ### Frontend
+
 - React + Vite
 - TanStack Table (results table)
 - TanStack Query (data fetching)
@@ -64,6 +69,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 - Axios (API calls)
 
 ### Infrastructure
+
 - Docker Compose: lens-api (FastAPI) + lens-postgres (pgvector) + frontend (Vite dev server)
 - Ollama: runs on host, outside Docker
 - Communication: FastAPI → Ollama via host.docker.internal:11434
@@ -104,9 +110,11 @@ ROOT_PATH=          # e.g. /lens-rag  (empty = serve at root)
 ```
 
 ### Switching to OpenAI (e.g. testing from home)
+
 ```bash
 EMBEDDING_PROVIDER=openai OPENAI_API_KEY=sk-... EMBEDDING_DIMS=1536 RERANKER_ENABLED=false make up
 ```
+
 Or set in a local `.env` file (never commit it).
 
 ---
@@ -165,6 +173,7 @@ CREATE TABLE public.projects (
 ## Excel Ingestion
 
 ### Reading strategy (KISS — no cleaning, no judging data)
+
 ```python
 import pandas as pd
 
@@ -180,6 +189,7 @@ def read_excel(filepath):
 ```
 
 ### Contextual content builder
+
 ```python
 def build_contextual_content(row, context_columns, sheet_name, content_column):
     parts = []
@@ -193,6 +203,7 @@ def build_contextual_content(row, context_columns, sheet_name, content_column):
 ```
 
 ### Ingestion pipeline
+
 1. Read Excel → all sheets → ffill → dropna(how='all')
 2. Show user all columns → user picks content, context, id, display columns
 3. For each row: build contextual_content → embed via bge-m3 → store
@@ -206,6 +217,7 @@ def build_contextual_content(row, context_columns, sheet_name, content_column):
 ### Two modes only (v1)
 
 **Mode 1 — ID Search** (shown only if id_column configured)
+
 ```python
 # ILIKE — flexible, works for partial IDs too
 # e.g. "1042" matches "PROD-1042"
@@ -215,6 +227,7 @@ LIMIT k
 ```
 
 **Mode 2 — Topic / Keyword Search**
+
 ```
 Step 1: embed query → bge-m3 (GPU ~50ms)
 Step 2: vector search → top 50 candidates (pgvector)
@@ -225,6 +238,7 @@ Step 6: return results + stats
 ```
 
 ### RRF merge
+
 ```python
 def rrf_merge(vector_results, bm25_results, k=60):
     scores = {}
@@ -239,21 +253,23 @@ def rrf_merge(vector_results, bm25_results, k=60):
 
 ## API Routes
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/projects` | List all projects |
-| GET | `/projects/{id}` | Get project detail (includes `has_pin`, never returns raw `pin`) |
-| POST | `/projects` | Create project metadata |
-| PATCH | `/projects/{id}` | Update name / display_columns / default_k (no re-ingest) |
-| GET | `/projects/{id}/columns` | All original column names for the project schema |
-| GET | `/projects/{id}/ingest?tmp_path=...` | SSE ingestion stream |
-| POST | `/projects/{id}/search` | Search (id or topic mode) |
-| POST | `/projects/{id}/export` | Search + return Excel download |
-| GET | `/projects/{id}/browse` | First 10 raw records (SELECT * LIMIT 10) |
-| POST | `/projects/{id}/evaluate` | SSE RAGAS export stream |
-| POST | `/projects/{id}/verify-pin` | Verify PIN for a protected project |
-| POST | `/projects/preview` | Parse Excel → return columns + row count |
-| GET | `/health` | Liveness check |
+
+| Method | Path                                 | Description                                                      |
+| ------ | ------------------------------------ | ---------------------------------------------------------------- |
+| GET    | `/projects`                          | List all projects                                                |
+| GET    | `/projects/{id}`                     | Get project detail (includes `has_pin`, never returns raw `pin`) |
+| POST   | `/projects`                          | Create project metadata                                          |
+| PATCH  | `/projects/{id}`                     | Update name / display_columns / default_k (no re-ingest)         |
+| GET    | `/projects/{id}/columns`             | All original column names for the project schema                 |
+| GET    | `/projects/{id}/ingest?tmp_path=...` | SSE ingestion stream                                             |
+| POST   | `/projects/{id}/search`              | Search (id or topic mode)                                        |
+| POST   | `/projects/{id}/export`              | Search + return Excel download                                   |
+| GET    | `/projects/{id}/browse`              | First 10 raw records (SELECT * LIMIT 10)                         |
+| POST   | `/projects/{id}/evaluate`            | SSE RAGAS export stream                                          |
+| POST   | `/projects/{id}/verify-pin`          | Verify PIN for a protected project                               |
+| POST   | `/projects/preview`                  | Parse Excel → return columns + row count                         |
+| GET    | `/health`                            | Liveness check                                                   |
+
 
 ### Per-project PIN protection
 
@@ -288,12 +304,14 @@ All search and evaluation history is stored **client-side** in `localStorage` un
 All client-side file exports follow the pattern `{project-name}_lens_{descriptor}_{YYYY-MM-DD}.ext`.
 Project names are slugified: lowercase, spaces → hyphens, special chars stripped.
 
-| Export | Filename |
-|---|---|
-| Search → Excel | `{project-name}_lens_results_{date}.xlsx` |
-| Evaluate → RAGAS JSON | `{project-name}_lens_ragas_{date}.json` |
-| History row → JSON | `{project-name}_lens_ragas_{date}.json` (date from session timestamp) |
-| History → CSV | `lens_history_{date}.csv` |
+
+| Export                | Filename                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| Search → Excel        | `{project-name}_lens_results_{date}.xlsx`                             |
+| Evaluate → RAGAS JSON | `{project-name}_lens_ragas_{date}.json`                               |
+| History row → JSON    | `{project-name}_lens_ragas_{date}.json` (date from session timestamp) |
+| History → CSV         | `lens_history_{date}.csv`                                             |
+
 
 ---
 
@@ -326,11 +344,13 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 ## Frontend Screens
 
 ### Screen 1 — Home
+
 - Two-column layout: Projects list (left) + Recent Activity panel (right)
 - Recent Activity shows last 5 history entries (search + eval) with quick re-run buttons
 - [+ New Project] button
 
 ### Screen 2 — Create Project (multi-step)
+
 - Step 1: Project name
 - Step 2: Upload Excel → system reads and shows all columns
 - Step 3: Pick content column (single select)
@@ -341,6 +361,7 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 - [Create] → SSE progress bar → "Ready!"
 
 ### Screen 3 — Search (tab 1 of 4)
+
 - Project name shown top with [Search] [Evaluate] [Browse] [Settings] tab nav
 - Search mode toggle: [ID] [Topic] (ID only shown if has_id_column)
 - Query input
@@ -352,6 +373,7 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 - Each search is saved to browser localStorage history
 
 ### Screen 4 — Evaluate (tab 2 of 4)
+
 - Upload test set CSV (question + ground_truth columns)
 - K selector
 - [Run Evaluation] → SSE live progress → results list
@@ -359,17 +381,20 @@ Project names are slugified: lowercase, spaces → hyphens, special chars stripp
 - Each completed evaluation is saved to browser localStorage history
 
 ### Screen 5 — Browse (tab 3 of 4)
+
 - Shows first 10 raw records from Postgres (SELECT * LIMIT 10)
 - Horizontally-scrollable fixed-layout table
 - All DB columns shown (col_* names, contextual_content, sheet_name, truncated embedding)
 - Cells default to 2-line clamp; click row to expand fully
 
 ### Screen 6 — Settings (tab 4 of 4)
+
 - Left card: read-only ingestion config (content column, context columns, ID column, row count, schema)
 - Right card: editable fields — project name, default k, display columns (multi-select from full column list)
 - Save calls PATCH /projects/{id}; invalidates TanStack Query cache
 
 ### Screen 7 — History (/history)
+
 - Global view of all past searches and evaluations (stored in browser localStorage)
 - Project filter dropdown
 - Table with type badge (Search / Evaluate), project, query/session, mode, k, results, latency, time ago
@@ -444,6 +469,7 @@ lens/
 ## Design Decisions
 
 Key choices made during design:
+
 - pgvector vs dedicated vector DB — pgvector wins at this scale
 - HNSW vs IVFFlat vs exact search — exact search sufficient at current scale
 - Hybrid BM25 + vector + RRF + reranker pipeline
@@ -455,14 +481,16 @@ Key choices made during design:
 ## Dev Setup
 
 ### Prerequisites
+
 1. Docker + Docker Compose installed
 2. Ollama running on the host with GPU access:
-   ```bash
- ollama pull bge-m3
- ollama pull bbjson/bge-reranker-base:latest
-   ```
+  ```bash
+  llama pull bge-m3
+  llama pull bbjson/bge-reranker-base:latest
+  ```
 
 ### Running the stack
+
 ```bash
 make up       # start Postgres + API + frontend (dev) in background
 make logs     # tail logs
@@ -498,6 +526,7 @@ python scripts/your_script.py
 Vite proxies `/projects`, `/health`, `/samples` to `http://localhost:37002` (CORS is not needed — the browser only ever talks to the Vite origin).
 
 **Prod — single port, FastAPI serves static files:**
+
 1. Build the frontend: `make build-frontend` (sets `VITE_BASE_PATH=/lens-rag/`)
 2. Mount `frontend/dist/` in FastAPI via `StaticFiles`
 3. Set `ROOT_PATH=/lens-rag` on the `lens-api` Docker service
@@ -515,21 +544,25 @@ your.server {
 API calls from the browser go to `/lens-rag/projects/...` → Caddy strips the prefix → FastAPI sees `/projects/...`. React Router uses `basename=/lens-rag/` so all client-side routes resolve correctly.
 
 To run prod via Docker Compose (single port `37000`), use:
+
 ```bash
 make prod-up
 # then open http://localhost:37000/lens-rag/
 ```
 
 ### Common Makefile targets
-| Command | What it does |
-|---|---|
-| `make up` | Start stack detached |
-| `make down` | Stop stack |
-| `make build` | Rebuild Docker images |
-| `make logs` | Follow all container logs |
-| `make restart` | Stop + start (no rebuild) |
-| `make ps` | Show container status |
+
+
+| Command               | What it does                                     |
+| --------------------- | ------------------------------------------------ |
+| `make up`             | Start stack detached                             |
+| `make down`           | Stop stack                                       |
+| `make build`          | Rebuild Docker images                            |
+| `make logs`           | Follow all container logs                        |
+| `make restart`        | Stop + start (no rebuild)                        |
+| `make ps`             | Show container status                            |
 | `make build-frontend` | Build frontend for prod (`/lens-rag/` base path) |
+
 
 > **IMPORTANT:** Any change to backend Python files requires `make build && make up`.
 > `make restart` alone does NOT pick up code changes — it only recreates containers from the existing image.
@@ -549,7 +582,9 @@ npm run e2e:ui    # Playwright interactive UI mode
 ```
 
 Test files live in `frontend/e2e/`:
+
 - `smoke.spec.ts` — basic liveness checks
 - `create_ingest.spec.ts` — project creation + ingestion flow
 - `search_export.spec.ts` — search, export to Excel
 - `major_flows.spec.ts` — end-to-end user journeys
+

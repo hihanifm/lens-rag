@@ -16,12 +16,14 @@ const ProjectStateContext = createContext(null)
 
 const defaultSearch = {
   query: '', mode: 'topic', k: null,
+  use_vector: true, use_bm25: true, use_rrf: true, use_rerank: true,
   loading: false, currentStep: null, doneSteps: [],
   results: null, stats: null, error: '',
 }
 
 const defaultEval = {
   testCases: null, k: 10,
+  use_vector: true, use_bm25: true, use_rrf: true, use_rerank: true,
   loading: false, progress: null,
   results: null, error: '',
 }
@@ -46,13 +48,19 @@ export function ProjectStateProvider({ children }) {
       [pid]: { ...(prev[pid] ?? defaultSearch), ...(typeof patch === 'function' ? patch(prev[pid] ?? defaultSearch) : patch) },
     })), [])
 
-  const startSearch = useCallback((pid, query, mode, k, projectName, displayColumns) => {
+  const startSearch = useCallback((pid, query, mode, k, projectName, displayColumns, pipeline) => {
     // Close any existing stream for this project
     searchEvtRefs.current[pid]?.close()
 
-    setSearch(pid, { loading: true, error: '', results: null, stats: null, currentStep: null, doneSteps: [], query, mode, k })
+    const { use_vector, use_bm25, use_rrf, use_rerank } = pipeline
 
-    const params = new URLSearchParams({ query, mode, k })
+    setSearch(pid, {
+      loading: true, error: '', results: null, stats: null,
+      currentStep: null, doneSteps: [],
+      query, mode, k, use_vector, use_bm25, use_rrf, use_rerank,
+    })
+
+    const params = new URLSearchParams({ query, mode, k, use_vector, use_bm25, use_rrf, use_rerank })
     const url = `${API_BASE_URL}/projects/${pid}/search/stream?${params}`
     const evtSource = new EventSource(url)
     searchEvtRefs.current[pid] = evtSource
@@ -64,9 +72,12 @@ export function ProjectStateProvider({ children }) {
         delete searchEvtRefs.current[pid]
         const data = event.results
         setSearch(pid, { loading: false, results: data.results, stats: data.stats, currentStep: null, doneSteps: [] })
-        saveSearch({ project_id: Number(pid), project_name: projectName, query, mode, k,
+        saveSearch({
+          project_id: Number(pid), project_name: projectName, query, mode, k,
           results_returned: data.results.length, total_ms: data.stats?.total_ms,
-          display_columns: displayColumns, results: data.results })
+          display_columns: displayColumns, results: data.results,
+          use_vector, use_bm25, use_rrf, use_rerank,
+        })
       } else if (event.step === 'error') {
         evtSource.close()
         delete searchEvtRefs.current[pid]
@@ -98,9 +109,11 @@ export function ProjectStateProvider({ children }) {
       [pid]: { ...(prev[pid] ?? defaultEval), ...(typeof patch === 'function' ? patch(prev[pid] ?? defaultEval) : patch) },
     })), [])
 
-  const startEval = useCallback((pid, testCases, k, projectName, pin) => {
+  const startEval = useCallback((pid, testCases, k, projectName, pin, pipeline) => {
     // Cancel any existing eval for this project
     evalReaderRefs.current[pid]?.cancel()
+
+    const { use_vector, use_bm25, use_rrf, use_rerank } = pipeline
 
     setEval(pid, { loading: true, progress: null, results: null, error: '' })
 
@@ -110,7 +123,7 @@ export function ProjectStateProvider({ children }) {
     fetch(`${API_BASE_URL}/projects/${pid}/evaluate`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ test_cases: testCases, k }),
+      body: JSON.stringify({ test_cases: testCases, k, use_vector, use_bm25, use_rrf, use_rerank }),
     }).then(async (res) => {
       const reader = res.body.getReader()
       evalReaderRefs.current[pid] = reader
@@ -128,14 +141,17 @@ export function ProjectStateProvider({ children }) {
           if (event.type === 'complete') {
             delete evalReaderRefs.current[pid]
             setEval(pid, { loading: false, results: event.results, progress: null })
-            saveEval({ project_id: Number(pid), project_name: projectName,
-              test_case_count: event.results.length, k, results: event.results })
+            saveEval({
+              project_id: Number(pid), project_name: projectName,
+              test_case_count: event.results.length, k, results: event.results,
+              use_vector, use_bm25, use_rrf, use_rerank,
+            })
           } else {
             setEval(pid, { progress: event })
           }
         }
       }
-    }).catch((err) => {
+    }).catch(() => {
       delete evalReaderRefs.current[pid]
       setEval(pid, { loading: false, error: 'Evaluation failed. Please try again.', progress: null })
     })

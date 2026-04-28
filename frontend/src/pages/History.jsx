@@ -100,7 +100,16 @@ export default function History() {
 
   const handleRerun = (entry) => {
     navigate(`/projects/${entry.project_id}/search`, {
-      state: { query: entry.query, mode: entry.mode, k: entry.k },
+      state: {
+        query: entry.query,
+        mode: entry.mode,
+        k: entry.k,
+        // backward compat: entries without flags default to true
+        use_vector: entry.use_vector ?? true,
+        use_bm25:   entry.use_bm25   ?? true,
+        use_rrf:    entry.use_rrf    ?? true,
+        use_rerank: entry.use_rerank ?? true,
+      },
     })
   }
 

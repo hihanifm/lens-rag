@@ -18,7 +18,7 @@ function append(entry) {
   save(entries)
 }
 
-export function saveSearch({ project_id, project_name, query, mode, k, results_returned, total_ms, display_columns, results }) {
+export function saveSearch({ project_id, project_name, query, mode, k, results_returned, total_ms, display_columns, results, use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true }) {
   append({
     id: Date.now(),
     type: 'search',
@@ -31,11 +31,15 @@ export function saveSearch({ project_id, project_name, query, mode, k, results_r
     total_ms,
     display_columns: display_columns ?? [],
     results: results ?? [],
+    use_vector,
+    use_bm25,
+    use_rrf,
+    use_rerank,
     at: new Date().toISOString(),
   })
 }
 
-export function saveEval({ project_id, project_name, test_case_count, k, results }) {
+export function saveEval({ project_id, project_name, test_case_count, k, results, use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true }) {
   append({
     id: Date.now(),
     type: 'evaluate',
@@ -44,6 +48,10 @@ export function saveEval({ project_id, project_name, test_case_count, k, results
     test_case_count,
     k,
     results: results ?? [],
+    use_vector,
+    use_bm25,
+    use_rrf,
+    use_rerank,
     at: new Date().toISOString(),
   })
 }

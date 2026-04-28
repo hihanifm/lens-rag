@@ -39,6 +39,11 @@ class SearchRequest(BaseModel):
     query: str
     mode: str          # "id" or "topic"
     k: Optional[int] = None
+    # topic pipeline toggles (per-request; defaults preserve current behavior)
+    use_vector: Optional[bool] = True
+    use_bm25: Optional[bool] = True
+    use_rrf: Optional[bool] = True
+    use_rerank: Optional[bool] = True
 
 
 class SearchResult(BaseModel):
@@ -51,6 +56,11 @@ class SearchStats(BaseModel):
     total_ms: float
     candidates_retrieved: Optional[int] = None
     results_returned: int
+    # applied topic pipeline toggles (echoed back for transparency/history)
+    use_vector: Optional[bool] = None
+    use_bm25: Optional[bool] = None
+    use_rrf: Optional[bool] = None
+    use_rerank: Optional[bool] = None
     # topic mode timings
     embedding_ms: Optional[float] = None
     vector_search_ms: Optional[float] = None
@@ -80,3 +90,8 @@ class EvalCase(BaseModel):
 class EvalRequest(BaseModel):
     test_cases: List[EvalCase]
     k: int = 10
+    # same pipeline toggles as topic search (defaults preserve current behavior)
+    use_vector: Optional[bool] = True
+    use_bm25: Optional[bool] = True
+    use_rrf: Optional[bool] = True
+    use_rerank: Optional[bool] = True

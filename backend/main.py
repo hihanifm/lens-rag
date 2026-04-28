@@ -282,12 +282,38 @@ async def ingest_project(project_id: int, tmp_path: str):
 
 # ── Search ────────────────────────────────────────────────────────────────
 
+def _parse_bool_param(val: str | None, default: bool = True) -> bool:
+    """Parse a query-string boolean param ('true'/'false'/'1'/'0')."""
+    if val is None:
+        return default
+    return val.lower() not in ("false", "0", "no")
+
+
+def _validate_topic_pipeline(use_vector: bool, use_bm25: bool):
+    if not use_vector and not use_bm25:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one retriever must be enabled: set use_vector=true and/or use_bm25=true."
+        )
+
+
 @app.get("/projects/{project_id}/search/stream")
-def search_stream(project_id: int, query: str, mode: str = "topic", k: int = None, request: Request = None):
+def search_stream(
+    project_id: int,
+    query: str,
+    mode: str = "topic",
+    k: int = None,
+    use_vector: str = None,
+    use_bm25: str = None,
+    use_rrf: str = None,
+    use_rerank: str = None,
+    request: Request = None,
+):
     """
     SSE stream of search pipeline steps for the UI.
     Events: embedding → vector → bm25 → rrf → reranking → complete (with results+stats JSON).
     ID search falls back to a single complete event (it's instant).
+    Topic pipeline flags (query params, default true): use_vector, use_bm25, use_rrf, use_rerank.
     """
     project_raw = get_project_raw(project_id)
     if not project_raw:
@@ -298,6 +324,13 @@ def search_stream(project_id: int, query: str, mode: str = "topic", k: int = Non
         raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
 
     effective_k = min(k or project_raw['default_k'], 50)
+    p_vector  = _parse_bool_param(use_vector)
+    p_bm25    = _parse_bool_param(use_bm25)
+    p_rrf     = _parse_bool_param(use_rrf)
+    p_rerank  = _parse_bool_param(use_rerank)
+
+    if mode != "id":
+        _validate_topic_pipeline(p_vector, p_bm25)
 
     def event_stream():
         import json as _json
@@ -318,6 +351,10 @@ def search_stream(project_id: int, query: str, mode: str = "topic", k: int = Non
                     schema_name=project_raw['schema_name'],
                     display_columns=project_raw['display_columns'],
                     k=effective_k,
+                    use_vector=p_vector,
+                    use_bm25=p_bm25,
+                    use_rrf=p_rrf,
+                    use_rerank=p_rerank,
                 ):
                     if event['step'] == 'complete':
                         payload = _json.dumps({"step": "complete", "results": event['response'].dict()})
@@ -344,6 +381,9 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
     if req.mode == "id" and not project_raw['has_id_column']:
         raise HTTPException(status_code=400, detail="This project has no ID column configured")
 
+    if req.mode != "id":
+        _validate_topic_pipeline(req.use_vector, req.use_bm25)
+
     k = req.k or project_raw['default_k']
 
     result = do_search(
@@ -352,7 +392,11 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
         schema_name=project_raw['schema_name'],
         id_column=project_raw['id_column'],
         display_columns=project_raw['display_columns'],
-        k=k
+        k=k,
+        use_vector=req.use_vector,
+        use_bm25=req.use_bm25,
+        use_rrf=req.use_rrf,
+        use_rerank=req.use_rerank,
     )
 
     return result
@@ -371,6 +415,9 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         raise HTTPException(status_code=404, detail="Project not found")
     _check_pin(project_raw, request)
 
+    if req.mode != "id":
+        _validate_topic_pipeline(req.use_vector, req.use_bm25)
+
     k = req.k or project_raw['default_k']
     result = do_search(
         query=req.query,
@@ -378,7 +425,11 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         schema_name=project_raw['schema_name'],
         id_column=project_raw['id_column'],
         display_columns=project_raw['display_columns'],
-        k=k
+        k=k,
+        use_vector=req.use_vector,
+        use_bm25=req.use_bm25,
+        use_rrf=req.use_rrf,
+        use_rerank=req.use_rerank,
     )
 
     # Convert to DataFrame
@@ -407,9 +458,19 @@ def evaluate_run(project_id: int, req: EvalRequest, request: Request):
         raise HTTPException(status_code=404, detail="Project not found")
     _check_pin(project_raw, request)
 
+    _validate_topic_pipeline(req.use_vector, req.use_bm25)
+
     test_cases = [{"question": c.question, "ground_truth": c.ground_truth} for c in req.test_cases]
     return StreamingResponse(
-        stream_ragas_export(test_cases, project_raw['schema_name'], req.k),
+        stream_ragas_export(
+            test_cases,
+            project_raw['schema_name'],
+            req.k,
+            use_vector=req.use_vector,
+            use_bm25=req.use_bm25,
+            use_rrf=req.use_rrf,
+            use_rerank=req.use_rerank,
+        ),
         media_type="text/event-stream"
     )
 
