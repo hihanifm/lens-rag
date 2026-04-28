@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -109,12 +109,17 @@ class ProjectUpdate(BaseModel):
     default_k: Optional[int] = None
 
 
-class ClusterRequest(BaseModel):
-    algorithm: str                      # "kmeans" | "dbscan"
-    k: Optional[int] = None             # required for kmeans; ignored for dbscan
-    filter_column: Optional[str] = None # original column name, e.g. "Carrier"
-    filter_value: Optional[str] = None  # ILIKE match, e.g. "MNO"
+class ClusterFilterItem(BaseModel):
+    column: str
+    value: str
 
+
+class ClusterRequest(BaseModel):
+    algorithm: str                              # "kmeans" | "dbscan"
+    k: Optional[int] = None                     # required for kmeans; ignored for dbscan
+    filter_column: Optional[str] = None          # legacy: single predicate
+    filter_value: Optional[str] = None
+    filters: List[ClusterFilterItem] = Field(default_factory=list)  # combined with legacy; dup columns: last wins
 
 class ClusterResult(BaseModel):
     display_data: Dict[str, Any]

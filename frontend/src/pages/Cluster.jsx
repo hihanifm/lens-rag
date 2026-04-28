@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   getProject,
   getProjectColumns,
@@ -13,6 +13,11 @@ import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { saveCluster } from '../utils/history'
 
+function compactClusterFilters(rows) {
+  return rows
+    .map(({ column, value }) => ({ column: (column || '').trim(), value: (value || '').trim() }))
+    .filter(({ column, value }) => column && value)
+}
 // 20-color Tableau-inspired palette; noise (-1) uses gray
 const PALETTE = [
   '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
@@ -139,8 +144,7 @@ export default function Cluster() {
 
   const [algorithm, setAlgorithm] = useState('kmeans')
   const [kInput, setKInput] = useState('8')
-  const [filterColumn, setFilterColumn] = useState('')
-  const [filterValue, setFilterValue] = useState('')
+  const [filters, setFilters] = useState([])
   const [view, setView] = useState('table')
   const [loading, setLoading] = useState(false)
   const [currentStep, setCurrentStep] = useState(null)
@@ -163,10 +167,12 @@ export default function Cluster() {
     enabled: !!project && !isLocked,
   })
 
-  const { data: valuesData } = useQuery({
-    queryKey: ['column-values', projectId, filterColumn],
-    queryFn: () => getColumnValues(projectId, filterColumn),
-    enabled: !!filterColumn && !isLocked,
+  const columnValuesQueries = useQueries({
+    queries: filters.map(f => ({
+      queryKey: ['column-values', projectId, f.column],
+      queryFn: () => getColumnValues(projectId, f.column),
+      enabled: !!(f.column && projectId && !isLocked),
+    })),
   })
 
   const allColumns = columnsData?.columns ?? []
@@ -193,6 +199,8 @@ export default function Cluster() {
       const headers = { 'Content-Type': 'application/json' }
       if (pin) headers['X-Project-Pin'] = pin
 
+      const compact = compactClusterFilters(filters)
+
       const res = await fetch(`${API_BASE_URL}/projects/${projectId}/cluster`, {
         method: 'POST',
         headers,
@@ -200,8 +208,7 @@ export default function Cluster() {
         body: JSON.stringify({
           algorithm,
           k: k ?? null,
-          filter_column: filterColumn || null,
-          filter_value: filterValue || null,
+          filters: compact.map(({ column, value }) => ({ column, value })),
         }),
       })
 
@@ -238,8 +245,9 @@ export default function Cluster() {
               project_name: project?.name ?? '',
               algorithm,
               k: k ?? null,
-              filter_column: filterColumn || null,
-              filter_value: filterValue || null,
+              filters: compact.length ? compact : undefined,
+              filter_column: null,
+              filter_value: null,
               n_clusters: data.stats.n_clusters,
               records_loaded: data.stats.records_loaded,
               total_ms: data.stats.total_ms,
@@ -266,11 +274,11 @@ export default function Cluster() {
 
   const handleExport = async () => {
     const k = algorithm === 'kmeans' ? parseInt(kInput, 10) : null
+    const compact = compactClusterFilters(filters)
     try {
       await exportCluster(
         projectId, algorithm, k,
-        filterColumn || null,
-        filterValue || null,
+        compact,
         project?.name,
       )
     } catch {
@@ -363,47 +371,94 @@ export default function Cluster() {
             </div>
           )}
 
-          {/* Filter row */}
-          <div className="flex items-center gap-3 mb-5 flex-wrap">
-            <label className="text-sm text-gray-600">Filter:</label>
-            <select
-              data-testid="cluster-filter-column"
-              value={filterColumn}
-              onChange={e => { setFilterColumn(e.target.value); setFilterValue('') }}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">No filter</option>
-              {allColumns.map(col => (
-                <option key={col} value={col}>{col}</option>
-              ))}
-            </select>
-
-            {filterColumn && valuesData && !valuesData.truncated && (
-              <select
-                value={filterValue}
-                onChange={e => setFilterValue(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          {/* Filters — AND semantics; multiple Excel grouping columns */}
+          <div className="mb-5 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-gray-600">Filters (AND)</span>
+              <button
+                type="button"
+                onClick={() => setFilters(prev => [...prev, { column: '', value: '' }])}
+                className="text-sm px-3 py-1 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
               >
-                <option value="">All values</option>
-                {valuesData.values.map(v => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-            )}
+                Add filter
+              </button>
+              {filters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilters([])}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
 
-            {filterColumn && valuesData?.truncated && (
-              <input
-                type="text"
-                value={filterValue}
-                onChange={e => setFilterValue(e.target.value)}
-                placeholder="Type to filter…"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            )}
+            {filters.map((row, idx) => {
+              const valuesData = columnValuesQueries[idx]?.data
+              const pending = !!(row.column && columnValuesQueries[idx]?.isFetching)
+              return (
+                <div key={idx} className="flex flex-wrap items-center gap-3">
+                  <select
+                    {...(idx === 0 ? { 'data-testid': 'cluster-filter-column' } : {})}
+                    value={row.column}
+                    onChange={e => {
+                      const col = e.target.value
+                      setFilters(prev => prev.map((r, i) => (i === idx ? { column: col, value: '' } : r)))
+                    }}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[10rem]"
+                  >
+                    <option value="">Column…</option>
+                    {allColumns.map(col => (
+                      <option key={col} value={col}>{col}</option>
+                    ))}
+                  </select>
 
-            {filterColumn && !valuesData && (
-              <span className="text-xs text-gray-400">Loading values…</span>
-            )}
+                  {row.column && valuesData && !valuesData.truncated && (
+                    <select
+                      {...(idx === 0 ? { 'data-testid': 'cluster-filter-value' } : {})}
+                      value={row.value}
+                      onChange={e => {
+                        const v = e.target.value
+                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                      }}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
+                    >
+                      <option value="">Choose value…</option>
+                      {valuesData.values.map(v => (
+                        <option key={v} value={v}>{v}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {row.column && valuesData?.truncated && (
+                    <input
+                      {...(idx === 0 ? { 'data-testid': 'cluster-filter-value-input' } : {})}
+                      type="text"
+                      value={row.value}
+                      onChange={e => {
+                        const v = e.target.value
+                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, value: v } : r)))
+                      }}
+                      placeholder="Substring match…"
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
+                    />
+                  )}
+
+                  {row.column && pending && !valuesData && (
+                    <span className="text-xs text-gray-400">Loading values…</span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setFilters(prev => prev.filter((_, i) => i !== idx))}
+                    className="text-sm text-red-600 hover:text-red-700 px-2"
+                    title="Remove filter"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )
+            })}
           </div>
 
           {/* Run button */}

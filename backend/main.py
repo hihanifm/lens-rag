@@ -96,6 +96,43 @@ def _check_pin(project_raw: dict, request: Request):
         raise HTTPException(status_code=401, detail="PIN required")
 
 
+MAX_CLUSTER_FILTERS = 10
+
+
+def _normalize_cluster_filters(project_raw: dict, req: ClusterRequest) -> list[tuple[str, str]]:
+    """Merge legacy filter_column/filter_value + filters[]; duplicate columns → last wins.
+    Validates column names against this project's columns.
+    """
+    raw: list[tuple[str, str]] = []
+    if req.filter_column and req.filter_value is not None:
+        fc = (req.filter_column or "").strip()
+        fv = str(req.filter_value).strip()
+        if fc and fv:
+            raw.append((fc, fv))
+    for item in req.filters or []:
+        fc = (item.column or "").strip()
+        fv = (item.value or "").strip()
+        if fc and fv:
+            raw.append((fc, fv))
+
+    merged: dict[str, str] = {}
+    for col, val in raw:
+        merged[col] = val
+
+    if len(merged) > MAX_CLUSTER_FILTERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_CLUSTER_FILTERS} distinct filter columns allowed",
+        )
+
+    allowed = set(get_project_columns(project_raw))
+    for col in merged:
+        if col not in allowed:
+            raise HTTPException(status_code=422, detail=f"Unknown filter column: {col!r}")
+
+    return [(c, merged[c]) for c in merged]
+
+
 @app.get("/projects")
 def list_projects():
     return get_all_projects()
@@ -554,6 +591,8 @@ def cluster_endpoint(project_id: int, req: ClusterRequest, request: Request):
     if project_raw["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
 
+    filters = _normalize_cluster_filters(project_raw, req)
+
     def event_stream():
         import json as _json
         try:
@@ -562,8 +601,7 @@ def cluster_endpoint(project_id: int, req: ClusterRequest, request: Request):
                 display_columns=project_raw["display_columns"],
                 algorithm=req.algorithm,
                 k=req.k,
-                filter_column=req.filter_column,
-                filter_value=req.filter_value,
+                filters=filters,
             ):
                 if event["step"] == "complete":
                     payload = _json.dumps({"step": "complete", "result": event["result"].dict()})
@@ -592,13 +630,14 @@ def cluster_export_endpoint(project_id: int, req: ClusterRequest, request: Reque
     if project_raw["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
 
+    filters = _normalize_cluster_filters(project_raw, req)
+
     result = do_cluster(
         schema_name=project_raw["schema_name"],
         display_columns=project_raw["display_columns"],
         algorithm=req.algorithm,
         k=req.k,
-        filter_column=req.filter_column,
-        filter_value=req.filter_value,
+        filters=filters,
     )
 
     rows = []

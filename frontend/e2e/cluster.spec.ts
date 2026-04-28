@@ -69,15 +69,16 @@ test.describe.serial('cluster tab', () => {
     expect(count).toBeGreaterThan(0)
 
     // ── Column filter ────────────────────────────────────────────────────
+    await page.getByRole('button', { name: 'Add filter' }).click()
     // Select the Category column — expect a value dropdown to appear
     await page.getByTestId('cluster-filter-column').selectOption('Category')
     // Wait for the value dropdown to populate
-    const valueSelect = page.locator('select').nth(1)
+    const valueSelect = page.getByTestId('cluster-filter-value')
     await expect(valueSelect).toBeVisible({ timeout: 10_000 })
 
-    // Pick the first non-empty option (any category)
+    // Pick the first non-placeholder option (any category)
     const options = await valueSelect.locator('option').all()
-    const firstValue = await options[1]?.textContent() // index 0 = "All values"
+    const firstValue = await options[1]?.textContent() // index 0 = "Choose value…"
     if (firstValue) {
       await valueSelect.selectOption(firstValue.trim())
     }

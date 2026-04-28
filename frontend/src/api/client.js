@@ -143,17 +143,25 @@ export const getColumnValues = (projectId, column) =>
     headers: projectHeaders(projectId),
   }).then(r => r.data)
 
-export const clusterRecords = (projectId, algorithm, k, filterColumn, filterValue) =>
+export const clusterRecords = (projectId, algorithm, k, filters) =>
   api.post(
     `/projects/${projectId}/cluster`,
-    { algorithm, k: k ?? null, filter_column: filterColumn || null, filter_value: filterValue || null },
+    {
+      algorithm,
+      k: k ?? null,
+      filters: filters ?? [],
+    },
     { headers: projectHeaders(projectId) }
   ).then(r => r.data)
 
-export const exportCluster = async (projectId, algorithm, k, filterColumn, filterValue, projectName = '') => {
+export const exportCluster = async (projectId, algorithm, k, filters, projectName = '') => {
   const response = await api.post(
     `/projects/${projectId}/cluster/export`,
-    { algorithm, k: k ?? null, filter_column: filterColumn || null, filter_value: filterValue || null },
+    {
+      algorithm,
+      k: k ?? null,
+      filters: filters ?? [],
+    },
     { responseType: 'blob', headers: projectHeaders(projectId) }
   )
   const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')

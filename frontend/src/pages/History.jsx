@@ -255,7 +255,13 @@ export default function History() {
                       ? entry.groups?.length > 0
                       : entry.results?.length > 0
                     const clusterSummary = entry.type === 'cluster'
-                      ? `${entry.algorithm === 'kmeans' ? `K-Means k=${entry.k}` : 'DBSCAN'}${entry.filter_column ? ` · ${entry.filter_column}=${entry.filter_value}` : ''}`
+                      ? `${entry.algorithm === 'kmeans' ? `K-Means k=${entry.k}` : 'DBSCAN'}${
+                        entry.filters?.length
+                          ? ` · ${entry.filters.map(f => `${f.column}=${f.value}`).join(' & ')}`
+                          : entry.filter_column
+                            ? ` · ${entry.filter_column}=${entry.filter_value}`
+                            : ''
+                      }`
                       : null
                     return (
                       <>

@@ -62,7 +62,9 @@ export function saveEval({ project_id, project_name, test_case_count, k, results
   })
 }
 
-export function saveCluster({ project_id, project_name, algorithm, k, filter_column, filter_value, n_clusters, records_loaded, total_ms, groups, display_columns }) {
+export function saveCluster({
+  project_id, project_name, algorithm, k, filters, filter_column, filter_value, n_clusters, records_loaded, total_ms, groups, display_columns,
+}) {
   append({
     id: Date.now(),
     type: 'cluster',
@@ -70,6 +72,7 @@ export function saveCluster({ project_id, project_name, algorithm, k, filter_col
     project_name,
     algorithm,
     k: k ?? null,
+    filters: filters ?? undefined,
     filter_column: filter_column ?? null,
     filter_value: filter_value ?? null,
     n_clusters,
@@ -100,7 +103,12 @@ export function exportHistoryCSV() {
     e.type === 'search'
       ? e.query
       : e.type === 'cluster'
-        ? `${e.algorithm}${e.k ? ` k=${e.k}` : ''}${e.filter_column ? ` [${e.filter_column}=${e.filter_value}]` : ''}`
+        ? (() => {
+            const tail = e.filters?.length
+              ? e.filters.map(f => `${f.column}=${f.value}`).join(' & ')
+              : (e.filter_column ? `${e.filter_column}=${e.filter_value}` : '')
+            return `${e.algorithm}${e.k ? ` k=${e.k}` : ''}${tail ? ` [${tail}]` : ''}`
+          })()
         : `${e.test_case_count} questions`,
     e.mode ?? '',
     e.k ?? '',

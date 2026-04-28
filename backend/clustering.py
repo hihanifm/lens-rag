@@ -22,11 +22,11 @@ def _parse_embedding(s: str) -> list[float]:
 def fetch_embeddings(
     schema_name: str,
     display_columns: list[str],
-    filter_column: str | None,
-    filter_value: str | None,
+    filters: list[tuple[str, str]],
 ) -> tuple[list[int], np.ndarray, list[dict]]:
     """
     Fetch all record embeddings and display-column values for the project.
+    `filters` — list of (original column name, substring) ANDed with ILIKE %% on each col_*.
     Returns (ids, float32 matrix [N, dims], list of display dicts).
 
     pgvector.psycopg2.register_vector is never called in this codebase so
@@ -38,10 +38,13 @@ def fetch_embeddings(
 
     where_clause = ""
     params: list = []
-    if filter_column and filter_value:
-        safe_fc = f'col_{safe_col_name(filter_column)}'
-        where_clause = f'WHERE "{safe_fc}" ILIKE %s'
-        params = [f"%{filter_value}%"]
+    if filters:
+        clauses = []
+        for col, substr in filters:
+            safe_fc = f'col_{safe_col_name(col)}'
+            clauses.append(f'"{safe_fc}" ILIKE %s')
+            params.append(f"%{substr}%")
+        where_clause = "WHERE " + " AND ".join(clauses)
 
     with get_cursor() as (cur, _conn):
         cur.execute(
@@ -94,8 +97,7 @@ def stream_cluster(
     display_columns: list[str],
     algorithm: str,
     k: int | None,
-    filter_column: str | None,
-    filter_value: str | None,
+    filters: list[tuple[str, str]],
 ):
     """
     Generator that yields step dicts for SSE streaming, ending with a
@@ -119,14 +121,15 @@ def stream_cluster(
     yield {"step": "fetch", "message": "Loading embeddings…"}
     t = time.perf_counter()
     ids, embeddings, display_rows = fetch_embeddings(
-        schema_name, display_columns, filter_column, filter_value
+        schema_name, display_columns, filters
     )
     ms_fetch = round((time.perf_counter() - t) * 1000, 1)
 
     n = len(ids)
+    filt_desc = repr(filters) if filters else "none"
     logger.info(
-        "cluster() schema=%s algorithm=%s k=%s filter=%s=%s records=%d fetch_ms=%.1f",
-        schema_name, algorithm, k, filter_column, filter_value, n, ms_fetch,
+        "cluster() schema=%s algorithm=%s k=%s filters=%s records=%d fetch_ms=%.1f",
+        schema_name, algorithm, k, filt_desc, n, ms_fetch,
     )
     yield {"step": "count", "for_step": "fetch", "count": n}
 
@@ -218,10 +221,9 @@ def cluster(
     display_columns: list[str],
     algorithm: str,
     k: int | None,
-    filter_column: str | None,
-    filter_value: str | None,
+    filters: list[tuple[str, str]],
 ) -> ClusterResponse:
     """Synchronous wrapper — used by the export endpoint."""
-    for event in stream_cluster(schema_name, display_columns, algorithm, k, filter_column, filter_value):
+    for event in stream_cluster(schema_name, display_columns, algorithm, k, filters):
         if event["step"] == "complete":
             return event["result"]
