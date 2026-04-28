@@ -230,6 +230,32 @@ export default function Settings() {
               <ReadOnlyField label="Schema">
                 <span className="text-sm text-gray-400 font-mono">{project.schema_name}</span>
               </ReadOnlyField>
+              <ReadOnlyField label="Embedding connection">
+                <div className="flex flex-col gap-1">
+                  {project.embed_model ? (
+                    <div className="text-sm text-gray-700">
+                      <span className="text-gray-500">Model:</span>{' '}
+                      <span className="font-mono">{project.embed_model}</span>
+                      {project.embed_dims ? (
+                        <span className="text-gray-400">{' '}({project.embed_dims} dims)</span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-400">Model: system default</div>
+                  )}
+                  {project.embed_url ? (
+                    <div className="text-sm text-gray-700">
+                      <span className="text-gray-500">URL:</span>{' '}
+                      <span className="font-mono break-all">{project.embed_url}</span>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-400">URL: system default</div>
+                  )}
+                  <div className="text-xs text-gray-400">
+                    API key is never shown. To change embedding settings, create a new project.
+                  </div>
+                </div>
+              </ReadOnlyField>
             </div>
             <p className="mt-5 text-xs text-gray-400">
               Changing content or context columns requires re-ingestion — create a new project to change these.

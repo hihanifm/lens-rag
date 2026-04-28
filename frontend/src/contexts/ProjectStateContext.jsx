@@ -138,7 +138,7 @@ export function ProjectStateProvider({ children }) {
       [pid]: { ...(prev[pid] ?? defaultEval), ...(typeof patch === 'function' ? patch(prev[pid] ?? defaultEval) : patch) },
     })), [])
 
-  const startEval = useCallback((pid, testCases, k, projectName, pin, pipeline) => {
+  const startEval = useCallback((pid, testCases, k, projectName, pipeline) => {
     // Cancel any existing eval for this project
     evalReaderRefs.current[pid]?.cancel()
 
@@ -147,6 +147,7 @@ export function ProjectStateProvider({ children }) {
     setEval(pid, { loading: true, progress: null, results: null, error: '' })
 
     const headers = { 'Content-Type': 'application/json' }
+    const pin = getProjectPin(pid)
     if (pin) headers['X-Project-Pin'] = pin
 
     fetch(`${API_BASE_URL}/projects/${pid}/evaluate`, {
@@ -154,6 +155,17 @@ export function ProjectStateProvider({ children }) {
       headers,
       body: JSON.stringify({ test_cases: testCases, k, use_vector, use_bm25, use_rrf, use_rerank }),
     }).then(async (res) => {
+      if (!res.ok) {
+        const msg = res.status === 401 ? 'PIN required or incorrect.' : 'Evaluation failed. Please try again.'
+        delete evalReaderRefs.current[pid]
+        setEval(pid, { loading: false, error: msg, progress: null })
+        return
+      }
+      if (!res.body) {
+        delete evalReaderRefs.current[pid]
+        setEval(pid, { loading: false, error: 'Evaluation failed (empty response).', progress: null })
+        return
+      }
       const reader = res.body.getReader()
       evalReaderRefs.current[pid] = reader
       const decoder = new TextDecoder()

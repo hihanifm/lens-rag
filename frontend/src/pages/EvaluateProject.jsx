@@ -68,14 +68,13 @@ export default function EvaluateProject() {
 
   const handleRun = () => {
     if (!ev.testCases?.length) return
-    const pin = localStorage.getItem(`pin_${projectId}`) ?? undefined
     const pipeline = {
       use_vector: ev.use_vector ?? true,
       use_bm25:   ev.use_bm25   ?? true,
       use_rrf:    ev.use_rrf    ?? true,
       use_rerank: ev.use_rerank ?? true,
     }
-    startEval(projectId, ev.testCases, ev.k, project?.name ?? '', pin, pipeline)
+    startEval(projectId, ev.testCases, ev.k, project?.name ?? '', pipeline)
   }
 
   const retrieversOk = (ev.use_vector ?? true) || (ev.use_bm25 ?? true)
