@@ -125,6 +125,7 @@ class ClusterRequest(BaseModel):
 
 class ClusterResult(BaseModel):
     display_data: Dict[str, Any]
+    contextual_content: Optional[str] = None
     pca_x: float
     pca_y: float
 

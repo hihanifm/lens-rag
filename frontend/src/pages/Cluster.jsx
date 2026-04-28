@@ -95,6 +95,14 @@ function ClusterScatter({ groups, displayColumns }) {
                 {hovered.record.display_data?.[col] ?? '—'}
               </p>
             ))}
+            {hovered.record.contextual_content && (
+              <p className="text-gray-600 mt-1">
+                <span className="text-gray-400">Context:</span>{' '}
+                <span className="truncate inline-block max-w-[18rem] align-bottom">
+                  {hovered.record.contextual_content}
+                </span>
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -159,7 +167,17 @@ export default function Cluster() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [collapsed, setCollapsed] = useState({})
+  const [expandedRows, setExpandedRows] = useState(new Set())
   const projectIdStr = String(projectId)
+
+  const toggleExpandedRow = (groupLabel, rowIdx) => {
+    const key = `${groupLabel}::${rowIdx}`
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
 
   useEffect(() => {
     return subscribeClusterRun(projectIdStr, s => {
@@ -609,7 +627,7 @@ export default function Cluster() {
                         <table className="min-w-full divide-y divide-gray-100">
                           <thead className="bg-gray-50">
                             <tr>
-                              {project.display_columns.map(col => (
+                              {[...project.display_columns, 'Context'].map(col => (
                                 <th
                                   key={col}
                                   className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
@@ -620,18 +638,36 @@ export default function Cluster() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
-                            {group.records.map((rec, i) => (
-                              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                                {project.display_columns.map(col => (
+                            {group.records.map((rec, i) => {
+                              const rowKey = `${group.label}::${i}`
+                              const expanded = expandedRows.has(rowKey)
+                              return (
+                              <tr
+                                key={i}
+                                onClick={() => toggleExpandedRow(group.label, i)}
+                                className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
+                                title="Click to expand/collapse row"
+                              >
+                                {[...project.display_columns, 'Context'].map(col => (
                                   <td
                                     key={col}
                                     className="px-4 py-3 text-sm text-gray-700 max-w-xs align-top"
                                   >
-                                    {rec.display_data?.[col] ?? ''}
+                                    <span
+                                      className={`block whitespace-pre-wrap break-words ${
+                                        expanded ? '' : 'line-clamp-5'
+                                      }`}
+                                    >
+                                      {col === 'Context'
+                                        ? (rec.contextual_content ?? '')
+                                        : (rec.display_data?.[col] ?? '')
+                                      }
+                                    </span>
                                   </td>
                                 ))}
                               </tr>
-                            ))}
+                              )
+                            })}
                           </tbody>
                         </table>
                       </div>

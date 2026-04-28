@@ -23,7 +23,7 @@ def fetch_embeddings(
     schema_name: str,
     display_columns: list[str],
     filters: list[tuple[str, list[str]]],
-) -> tuple[list[int], np.ndarray, list[dict]]:
+) -> tuple[list[int], np.ndarray, list[dict], list[str | None]]:
     """
     Fetch all record embeddings and display-column values for the project.
     `filters` — list of (original column name, list of substrings). For each column,
@@ -53,7 +53,7 @@ def fetch_embeddings(
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            SELECT id, {select_cols}, embedding::text AS embedding_text
+            SELECT id, {select_cols}, contextual_content, embedding::text AS embedding_text
             FROM {schema_name}.records
             {where_clause}
             ORDER BY id
@@ -63,7 +63,7 @@ def fetch_embeddings(
         rows = cur.fetchall()
 
     if not rows:
-        return [], np.empty((0, 0), dtype=np.float32), []
+        return [], np.empty((0, 0), dtype=np.float32), [], []
 
     ids = [r["id"] for r in rows]
 
@@ -75,7 +75,9 @@ def fetch_embeddings(
         for r in rows
     ]
 
-    return ids, embeddings, display_rows
+    contextual_rows = [r.get("contextual_content") for r in rows]
+
+    return ids, embeddings, display_rows, contextual_rows
 
 
 def _pca_reduce(normed: np.ndarray) -> np.ndarray:
@@ -124,7 +126,7 @@ def stream_cluster(
     # ── Fetch ──────────────────────────────────────────────────────────────
     yield {"step": "fetch", "message": "Loading embeddings…"}
     t = time.perf_counter()
-    ids, embeddings, display_rows = fetch_embeddings(
+    ids, embeddings, display_rows, contextual_rows = fetch_embeddings(
         schema_name, display_columns, filters
     )
     ms_fetch = round((time.perf_counter() - t) * 1000, 1)
@@ -178,9 +180,9 @@ def stream_cluster(
     coords = _pca_reduce(normed)
 
     # ── Build groups ───────────────────────────────────────────────────────
-    buckets: dict[int, list[tuple[dict, float, float]]] = defaultdict(list)
-    for lbl, display_data, (px, py) in zip(labels.tolist(), display_rows, coords.tolist()):
-        buckets[int(lbl)].append((display_data, px, py))
+    buckets: dict[int, list[tuple[dict, str | None, float, float]]] = defaultdict(list)
+    for lbl, display_data, ctx, (px, py) in zip(labels.tolist(), display_rows, contextual_rows, coords.tolist()):
+        buckets[int(lbl)].append((display_data, ctx, px, py))
 
     groups: list[ClusterGroup] = []
     # Normal clusters sorted by id; DBSCAN noise (-1) always last
@@ -193,8 +195,8 @@ def stream_cluster(
                 label=label,
                 count=len(items),
                 records=[
-                    ClusterResult(display_data=d, pca_x=px, pca_y=py)
-                    for d, px, py in items
+                    ClusterResult(display_data=d, contextual_content=ctx, pca_x=px, pca_y=py)
+                    for d, ctx, px, py in items
                 ],
             )
         )
