@@ -93,8 +93,9 @@ export default function Home() {
               </span>
             </div>
             <p className="text-gray-500 mt-2 max-w-2xl">
-              Turn a spreadsheet knowledge base into a fast loop: retrieve, explore, and validate.
-              Search results, cluster themes, run evals, and export to iterate in minutes. 🔎
+              <span className="font-semibold text-gray-700">Free-form search</span>
+              {' '}across your spreadsheet knowledge base—then explore results, cluster themes, and run evals with exports so you can iterate fast.
+              Type it the way you’d say it; the system matches meaning, not just exact keywords. 🔎
             </p>
           </div>
           <div className="flex items-center gap-2">
