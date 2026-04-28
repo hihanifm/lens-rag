@@ -263,32 +263,45 @@ export default function EvaluateProject() {
                 <p className="text-xs text-gray-400 mb-2">Showing 10 of {results.length} — export the JSON for the full dataset.</p>
               )}
               <p className="text-xs text-gray-500">
-                Export the JSON and run <code className="bg-gray-200 px-1 rounded">ragas evaluate</code> locally to get precision and recall scores.
+                Export the JSON and upload it to the Lens RAGAS portal to get precision and recall scores.
               </p>
             </div>
           </div>
         )}
 
-        {/* How to evaluate */}
-        <div className="mt-6 max-w-2xl">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">How to evaluate locally</h3>
-          <pre className="bg-white border border-gray-200 rounded-xl p-4 text-xs text-gray-600 overflow-x-auto leading-relaxed shadow-sm">{`pip install ragas datasets langchain-openai
-
-from datasets import Dataset
-from ragas import evaluate
-from ragas.metrics import context_precision, context_recall
-import json
-
-with open("lens_ragas_export.json") as f:
-    data = json.load(f)
-
-dataset = Dataset.from_list(data)
-results = evaluate(dataset, metrics=[context_precision, context_recall])
-print(results)
-
-# save scores to CSV
-results.to_pandas().to_csv("ragas_scores.csv", index=False)`}</pre>
-        </div>
+        {/* RAGAS portal / evaluation instructions */}
+        {(() => {
+          const portalUrl = import.meta.env.VITE_RAGAS_PORTAL_URL
+          if (portalUrl) {
+            return (
+              <div className="mt-6 max-w-2xl bg-white rounded-2xl border border-blue-100 shadow-sm p-6">
+                <h3 className="text-base font-semibold text-gray-900 mb-1">Run RAGAS Evaluation</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Export the RAGAS JSON above, then upload it to the Lens RAGAS portal to compute
+                  precision, recall and other scores.
+                </p>
+                <a
+                  href={portalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Open Lens RAGAS Portal ↗
+                </a>
+                <p className="mt-3 text-xs text-gray-400 font-mono break-all">{portalUrl}</p>
+              </div>
+            )
+          }
+          return (
+            <div className="mt-6 max-w-2xl bg-gray-50 rounded-2xl border border-gray-200 p-5">
+              <p className="text-xs text-gray-400">
+                No RAGAS portal configured. Set{' '}
+                <code className="bg-gray-200 px-1 rounded">VITE_RAGAS_PORTAL_URL</code>{' '}
+                in your <code className="bg-gray-200 px-1 rounded">.env</code> to add a direct link.
+              </p>
+            </div>
+          )
+        })()}
 
       </div>
     </div>
