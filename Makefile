@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
+.PHONY: up down build logs logs-split restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
 
 up:
 	docker compose --profile dev up -d
@@ -11,6 +11,15 @@ build:
 
 logs:
 	docker compose logs -f
+
+# Split logs into 3 tmux panes (API / frontend / postgres).
+# Requires tmux installed.
+logs-split:
+	tmux new-session -d -s lens-logs "docker compose --profile dev logs -f lens-rag-api" \; \
+	  split-window -h "docker compose --profile dev logs -f lens-rag-frontend" \; \
+	  split-window -v "docker compose --profile dev logs -f lens-rag-postgres" \; \
+	  select-pane -t 0 \; \
+	  attach -t lens-logs
 
 restart:
 	docker compose --profile dev down && docker compose --profile dev up -d
