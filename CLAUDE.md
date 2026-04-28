@@ -90,7 +90,7 @@ EMBEDDING_DIMS=1536   # override when switching to OpenAI
 
 # Reranker — always Ollama, no OpenAI equivalent
 RERANKER_ENABLED=true           # set false to skip reranking
-RERANKER_MODEL=bge-reranker-base
+RERANKER_MODEL=bbjson/bge-reranker-base:latest
 
 # Database
 DB_HOST=lens-postgres
@@ -458,8 +458,8 @@ Key choices made during design:
 1. Docker + Docker Compose installed
 2. Ollama running on the host with GPU access:
    ```bash
-   ollama pull bge-m3
-   ollama pull bge-reranker-base
+ ollama pull bge-m3
+ ollama pull bbjson/bge-reranker-base:latest
    ```
 
 ### Running the stack

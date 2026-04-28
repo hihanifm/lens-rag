@@ -24,7 +24,7 @@ else:
 # ── Reranker ───────────────────────────────────────────────────────────────
 # Reranker always runs via Ollama (no OpenAI equivalent)
 RERANKER_ENABLED   = os.environ.get("RERANKER_ENABLED", "true").lower() == "true"
-RERANKER_MODEL     = os.environ.get("RERANKER_MODEL", "bge-reranker-base")
+RERANKER_MODEL     = os.environ.get("RERANKER_MODEL", "bbjson/bge-reranker-base:latest")
 
 # ── Search ─────────────────────────────────────────────────────────────────
 TOP_K_RETRIEVAL    = 50    # internal candidate pool size
