@@ -83,6 +83,7 @@ export default function EvaluateProject() {
   const handleExport = () => {
     if (!ev.results) return
     const slug = (project?.name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const ts = fileDateTime()
     const payload = {
       results: ev.results,
       _lens: {
@@ -93,14 +94,14 @@ export default function EvaluateProject() {
           rerank:  ev.use_rerank  ?? true,
         },
         k: ev.k,
-        exported_at: fileDateTime(),
+        exported_at: ts,
       },
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `${slug}_lens_ragas_${fileDateTime()}.json`)
+    link.setAttribute('download', `${slug}_lens_ragas_${ts}.json`)
     document.body.appendChild(link)
     link.click()
     link.remove()
