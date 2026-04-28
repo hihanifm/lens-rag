@@ -79,10 +79,10 @@ export const previewExcel = (file) => {
 
 // ── Search ────────────────────────────────────────────────────────────────
 
-export const searchProject = (projectId, query, mode, k) =>
+export const searchProject = (projectId, query, mode, k, legacy_method) =>
   api.post(
     `/projects/${projectId}/search`,
-    { query, mode, k },
+    { query, mode, k, legacy_method },
     { headers: projectHeaders(projectId) }
   ).then(r => r.data)
 
@@ -118,10 +118,13 @@ export const streamEvaluation = (projectId, testCases, k, onProgress, onComplete
 // ── Export ────────────────────────────────────────────────────────────────
 
 export const exportResults = async (projectId, query, mode, k, projectName = '', pipeline = {}) => {
-  const { use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true } = pipeline
+  const {
+    use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true,
+    legacy_method,
+  } = pipeline
   const response = await api.post(
     `/projects/${projectId}/export`,
-    { query, mode, k, use_vector, use_bm25, use_rrf, use_rerank },
+    { query, mode, legacy_method, k, use_vector, use_bm25, use_rrf, use_rerank },
     { responseType: 'blob', headers: projectHeaders(projectId) }
   )
   const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')

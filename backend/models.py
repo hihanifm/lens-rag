@@ -61,7 +61,8 @@ class ColumnInfo(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    mode: str          # "id" or "topic"
+    mode: str          # "id" | "topic" | "legacy"
+    legacy_method: Optional[str] = None  # "bm25" | "ilike" (only used when mode="legacy")
     k: Optional[int] = None
     # topic pipeline toggles (per-request; defaults preserve current behavior)
     use_vector: Optional[bool] = True
@@ -77,6 +78,7 @@ class SearchResult(BaseModel):
 
 class SearchStats(BaseModel):
     mode: str
+    legacy_method: Optional[str] = None
     total_ms: float
     candidates_retrieved: Optional[int] = None
     results_returned: int

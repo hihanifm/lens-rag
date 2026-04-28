@@ -24,7 +24,11 @@ function append(entry) {
   save(entries)
 }
 
-export function saveSearch({ project_id, project_name, query, mode, k, results_returned, total_ms, display_columns, results, use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true }) {
+export function saveSearch({
+  project_id, project_name, query, mode, legacy_method, k,
+  results_returned, total_ms, display_columns, results,
+  use_vector = true, use_bm25 = true, use_rrf = true, use_rerank = true,
+}) {
   append({
     id: Date.now(),
     type: 'search',
@@ -32,6 +36,7 @@ export function saveSearch({ project_id, project_name, query, mode, k, results_r
     project_name,
     query,
     mode,
+    legacy_method: legacy_method ?? null,
     k,
     results_returned,
     total_ms,

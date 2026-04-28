@@ -15,7 +15,7 @@ import { saveSearch, saveEval } from '../utils/history'
 const ProjectStateContext = createContext(null)
 
 const defaultSearch = {
-  query: '', mode: 'topic', k: null,
+  query: '', mode: 'topic', legacy_method: 'bm25', k: null,
   use_vector: true, use_bm25: true, use_rrf: true, use_rerank: true,
   loading: false, currentStep: null, doneSteps: [], stepCounts: {},
   results: null, stats: null, error: '',
@@ -52,15 +52,15 @@ export function ProjectStateProvider({ children }) {
     // Abort any existing stream for this project
     searchEvtRefs.current[pid]?.abort()
 
-    const { use_vector, use_bm25, use_rrf, use_rerank } = pipeline
+    const { use_vector, use_bm25, use_rrf, use_rerank, legacy_method } = pipeline
 
     setSearch(pid, {
       loading: true, error: '', results: null, stats: null,
       currentStep: null, doneSteps: [], stepCounts: {},
-      query, mode, k, use_vector, use_bm25, use_rrf, use_rerank,
+      query, mode, legacy_method, k, use_vector, use_bm25, use_rrf, use_rerank,
     })
 
-    const params = new URLSearchParams({ query, mode, k, use_vector, use_bm25, use_rrf, use_rerank })
+    const params = new URLSearchParams({ query, mode, legacy_method, k, use_vector, use_bm25, use_rrf, use_rerank })
     const url = `${API_BASE_URL}/projects/${pid}/search/stream?${params}`
 
     // Use fetch instead of EventSource so we can include the PIN header.
@@ -99,6 +99,7 @@ export function ProjectStateProvider({ children }) {
                 project_id: Number(pid), project_name: projectName, query, mode, k,
                 results_returned: data.results.length, total_ms: data.stats?.total_ms,
                 display_columns: displayColumns, results: data.results,
+                legacy_method,
                 use_vector, use_bm25, use_rrf, use_rerank,
               })
             } else if (event.step === 'error') {

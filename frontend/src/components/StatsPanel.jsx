@@ -2,6 +2,7 @@ export default function StatsPanel({ stats }) {
   if (!stats) return null
 
   const isId = stats.mode === 'id'
+  const isLegacy = stats.mode === 'legacy'
 
   const rows = isId
     ? [{ label: 'SQL lookup', ms: stats.sql_lookup_ms }]
@@ -23,6 +24,11 @@ export default function StatsPanel({ stats }) {
           <span className="text-sm text-gray-500">{stats.results_returned} results</span>
           {stats.candidates_retrieved && (
             <span className="text-sm text-gray-400"> · from {stats.candidates_retrieved} candidates</span>
+          )}
+          {isLegacy && (
+            <span className="text-sm text-gray-400">
+              {' '}· legacy {stats.legacy_method || 'bm25'}
+            </span>
           )}
           <span className="ml-3 text-sm font-semibold text-gray-800">{stats.total_ms}ms total</span>
         </div>

@@ -457,6 +457,7 @@ def search_stream(
     use_bm25: str = None,
     use_rrf: str = None,
     use_rerank: str = None,
+    legacy_method: str = None,
     request: Request = None,
 ):
     """
@@ -479,7 +480,7 @@ def search_stream(
     p_rrf     = _parse_bool_param(use_rrf)
     p_rerank  = _parse_bool_param(use_rerank)
 
-    if mode != "id":
+    if mode not in ("id", "legacy"):
         _validate_topic_pipeline(p_vector, p_bm25)
 
     def event_stream():
@@ -492,6 +493,23 @@ def search_stream(
                     id_column=project_raw['id_column'],
                     display_columns=project_raw['display_columns'],
                     k=effective_k,
+                )
+                payload = _json.dumps({"step": "complete", "results": result.dict()})
+                yield f"data: {payload}\n\n"
+            elif mode == "legacy":
+                # Legacy mode: return a single complete event (no multi-step SSE).
+                result = do_search(
+                    query=query,
+                    mode="legacy",
+                    schema_name=project_raw['schema_name'],
+                    id_column=project_raw['id_column'] if project_raw.get("has_id_column") else None,
+                    display_columns=project_raw['display_columns'],
+                    k=effective_k,
+                    legacy_method=legacy_method,
+                    use_vector=False,
+                    use_bm25=False,
+                    use_rrf=False,
+                    use_rerank=False,
                 )
                 payload = _json.dumps({"step": "complete", "results": result.dict()})
                 yield f"data: {payload}\n\n"
@@ -533,7 +551,7 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
     if req.mode == "id" and not project_raw['has_id_column']:
         raise HTTPException(status_code=400, detail="This project has no ID column configured")
 
-    if req.mode != "id":
+    if req.mode not in ("id", "legacy"):
         _validate_topic_pipeline(req.use_vector, req.use_bm25)
 
     k = req.k or project_raw['default_k']
@@ -549,6 +567,7 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
         use_bm25=req.use_bm25,
         use_rrf=req.use_rrf,
         use_rerank=req.use_rerank,
+        legacy_method=req.legacy_method,
     )
 
     return result
@@ -567,7 +586,7 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         raise HTTPException(status_code=404, detail="Project not found")
     _check_pin(project_raw, request)
 
-    if req.mode != "id":
+    if req.mode not in ("id", "legacy"):
         _validate_topic_pipeline(req.use_vector, req.use_bm25)
 
     k = req.k or project_raw['default_k']
@@ -582,6 +601,7 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         use_bm25=req.use_bm25,
         use_rrf=req.use_rrf,
         use_rerank=req.use_rerank,
+        legacy_method=req.legacy_method,
     )
 
     # Convert to DataFrame

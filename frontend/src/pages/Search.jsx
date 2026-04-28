@@ -62,15 +62,17 @@ export default function Search() {
 
   const effectiveMode = s.mode
   const effectiveK    = s.k || project?.default_k || 10
+  const legacyMethod  = s.legacy_method || 'bm25'
 
-  // At least one retriever must be on
-  const retrieversOk = s.use_vector || s.use_bm25
+  // At least one retriever must be on (topic mode only)
+  const retrieversOk = effectiveMode !== 'topic' ? true : (s.use_vector || s.use_bm25)
 
   const pipeline = {
     use_vector: s.use_vector,
     use_bm25:   s.use_bm25,
     use_rrf:    s.use_rrf,
     use_rerank: s.use_rerank,
+    legacy_method: legacyMethod,
   }
 
   const handleSearch = (e) => {
@@ -211,6 +213,17 @@ export default function Search() {
             >
               Topic / Keyword
             </button>
+            <button
+              onClick={() => setSearch(projectId, { mode: 'legacy' })}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                effectiveMode === 'legacy'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title="Lexical baseline (no embeddings)"
+            >
+              Legacy keyword
+            </button>
             {project.has_id_column && (
               <button
                 onClick={() => setSearch(projectId, { mode: 'id' })}
@@ -225,6 +238,42 @@ export default function Search() {
             )}
           </div>
 
+          {/* Legacy method selector */}
+          {effectiveMode === 'legacy' && (
+            <div className="mb-4 flex items-center gap-3">
+              <span className="text-sm text-gray-500">Method:</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSearch(projectId, { legacy_method: 'bm25' })}
+                  className={`text-sm px-3 py-1 rounded-lg transition-colors ${
+                    legacyMethod === 'bm25'
+                      ? 'bg-blue-100 text-blue-700 font-medium'
+                      : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  BM25 index
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearch(projectId, { legacy_method: 'ilike' })}
+                  className={`text-sm px-3 py-1 rounded-lg transition-colors ${
+                    legacyMethod === 'ilike'
+                      ? 'bg-blue-100 text-blue-700 font-medium'
+                      : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  ILIKE substring
+                </button>
+              </div>
+              <span className="text-xs text-gray-400">
+                {legacyMethod === 'bm25'
+                  ? 'Uses the full-text index only.'
+                  : `Substring match against contextual content${project.has_id_column ? ` + ${project.id_column}` : ''}.`}
+              </span>
+            </div>
+          )}
+
           {/* Query input */}
           <div className="flex gap-3">
             <input
@@ -236,6 +285,8 @@ export default function Search() {
               placeholder={
                 effectiveMode === 'id'
                   ? `Search by ${project.id_column}...`
+                  : effectiveMode === 'legacy'
+                    ? 'Keyword query (legacy baseline)...'
                   : 'Describe what you\'re looking for...'
               }
               className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"

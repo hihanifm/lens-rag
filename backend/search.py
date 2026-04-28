@@ -96,6 +96,130 @@ def id_search(
     )
 
 
+def legacy_bm25_search(
+    query: str,
+    schema_name: str,
+    display_columns: list[str],
+    k: int,
+) -> SearchResponse:
+    """
+    Legacy baseline: BM25-only search using the precomputed tsvector index.
+    No embeddings, no merge, no reranker.
+    """
+    logger.info("legacy_bm25_search schema=%s query=%r k=%d", schema_name, query, k)
+    total_start = time.perf_counter()
+
+    safe_display = [f'col_{safe_col_name(c)}' for c in display_columns]
+    select_cols = ', '.join([f'"{c}"' for c in safe_display])
+
+    t = time.perf_counter()
+    with get_cursor() as (cur, conn):
+        cur.execute(f"""
+            SELECT id, {select_cols},
+                   ts_rank(search_vector, plainto_tsquery('english', %s)) AS score
+            FROM {schema_name}.records
+            WHERE search_vector @@ plainto_tsquery('english', %s)
+            ORDER BY score DESC
+            LIMIT %s
+        """, [query, query, TOP_K_RETRIEVAL])
+        rows = cur.fetchall()
+    bm25_ms = round((time.perf_counter() - t) * 1000, 1)
+
+    results: list[SearchResult] = []
+    for row in rows[:k]:
+        display_data = {}
+        for col in display_columns:
+            safe = f'col_{safe_col_name(col)}'
+            display_data[col] = row.get(safe)
+        score = row.get("score")
+        results.append(SearchResult(
+            display_data=display_data,
+            score=round(float(score), 4) if score is not None else None
+        ))
+
+    total_ms = round((time.perf_counter() - total_start) * 1000, 1)
+    return SearchResponse(
+        results=results,
+        stats=SearchStats(
+            mode="legacy",
+            legacy_method="bm25",
+            use_vector=False,
+            use_bm25=True,
+            use_rrf=False,
+            use_rerank=False,
+            bm25_search_ms=bm25_ms,
+            bm25_candidates=len(rows),
+            candidates_retrieved=len(rows),
+            total_ms=total_ms,
+            results_returned=len(results),
+        ),
+    )
+
+
+def legacy_ilike_search(
+    query: str,
+    schema_name: str,
+    id_column: str | None,
+    display_columns: list[str],
+    k: int,
+) -> SearchResponse:
+    """
+    Legacy baseline: plain substring ILIKE search.
+    Searches contextual_content, plus the configured ID column when present.
+    """
+    logger.info("legacy_ilike_search schema=%s id_column=%r query=%r k=%d", schema_name, id_column, query, k)
+    total_start = time.perf_counter()
+
+    safe_display = [f'col_{safe_col_name(c)}' for c in display_columns]
+    select_cols = ', '.join([f'"{c}"' for c in safe_display])
+
+    where_parts = ['contextual_content ILIKE %s']
+    params: list = [f'%{query}%']
+    if id_column:
+        safe_id = f'col_{safe_col_name(id_column)}'
+        where_parts.append(f'"{safe_id}" ILIKE %s')
+        params.append(f'%{query}%')
+
+    where_clause = " OR ".join(where_parts)
+
+    t = time.perf_counter()
+    with get_cursor() as (cur, conn):
+        cur.execute(f"""
+            SELECT {select_cols}
+            FROM {schema_name}.records
+            WHERE {where_clause}
+            ORDER BY id
+            LIMIT %s
+        """, params + [k])
+        rows = cur.fetchall()
+    sql_ms = round((time.perf_counter() - t) * 1000, 1)
+
+    results: list[SearchResult] = []
+    for row in rows:
+        display_data = {}
+        for col in display_columns:
+            safe = f'col_{safe_col_name(col)}'
+            display_data[col] = row.get(safe)
+        results.append(SearchResult(display_data=display_data, score=None))
+
+    total_ms = round((time.perf_counter() - total_start) * 1000, 1)
+    return SearchResponse(
+        results=results,
+        stats=SearchStats(
+            mode="legacy",
+            legacy_method="ilike",
+            use_vector=False,
+            use_bm25=False,
+            use_rrf=False,
+            use_rerank=False,
+            sql_lookup_ms=sql_ms,
+            candidates_retrieved=len(results),
+            total_ms=total_ms,
+            results_returned=len(results),
+        ),
+    )
+
+
 def topic_search_stream(
     query: str,
     schema_name: str,
@@ -314,12 +438,20 @@ def search(
     use_bm25: bool = True,
     use_rrf: bool = True,
     use_rerank: bool = True,
+    legacy_method: str | None = None,
 ) -> SearchResponse:
     """Main search dispatcher."""
     k = min(k, TOP_K_MAX)
 
     if mode == "id" and id_column:
         return id_search(query, schema_name, id_column, display_columns, k)
+    if mode == "legacy":
+        method = (legacy_method or "bm25").lower().strip()
+        if method == "bm25":
+            return legacy_bm25_search(query, schema_name, display_columns, k)
+        if method == "ilike":
+            return legacy_ilike_search(query, schema_name, id_column, display_columns, k)
+        raise ValueError(f"Unknown legacy_method: {legacy_method!r}")
     else:
         return topic_search(
             query, schema_name, display_columns, k,
