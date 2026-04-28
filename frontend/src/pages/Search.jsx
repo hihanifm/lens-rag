@@ -209,7 +209,7 @@ export default function Search() {
             </Link>
           </div>
           <p className="text-sm text-gray-500 mt-4 max-w-3xl">
-            Quickly surface the right rows: semantic search with a keyword backbone. Click a row to expand details.
+            Quickly surface the right rows: free-form (semantic) search with a keyword backbone. Click a row to expand details.
           </p>
         </div>
 
@@ -292,7 +292,7 @@ export default function Search() {
           {effectiveMode === 'legacy' && (
             <p className="mb-4 text-xs text-gray-500 leading-relaxed">
               This is a <span className="font-medium text-gray-600">standard database-style</span> keyword search baseline.
-              Use it to compare results against <span className="font-medium text-gray-600">Topic / Keyword</span> (semantic) search.
+              Use it to compare results against <span className="font-medium text-gray-600">Topic / Keyword</span> (free-form / semantic) search.
             </p>
           )}
 
