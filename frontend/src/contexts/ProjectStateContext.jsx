@@ -9,7 +9,7 @@
  * EvaluateProject component is unmounted.
  */
 import { createContext, useContext, useState, useRef, useCallback } from 'react'
-import { API_BASE_URL } from '../api/client'
+import { API_BASE_URL, getProjectPin } from '../api/client'
 import { saveSearch, saveEval } from '../utils/history'
 
 const ProjectStateContext = createContext(null)
@@ -49,8 +49,8 @@ export function ProjectStateProvider({ children }) {
     })), [])
 
   const startSearch = useCallback((pid, query, mode, k, projectName, displayColumns, pipeline) => {
-    // Close any existing stream for this project
-    searchEvtRefs.current[pid]?.close()
+    // Abort any existing stream for this project
+    searchEvtRefs.current[pid]?.abort()
 
     const { use_vector, use_bm25, use_rrf, use_rerank } = pipeline
 
@@ -62,40 +62,63 @@ export function ProjectStateProvider({ children }) {
 
     const params = new URLSearchParams({ query, mode, k, use_vector, use_bm25, use_rrf, use_rerank })
     const url = `${API_BASE_URL}/projects/${pid}/search/stream?${params}`
-    const evtSource = new EventSource(url)
-    searchEvtRefs.current[pid] = evtSource
 
-    evtSource.onmessage = (e) => {
-      const event = JSON.parse(e.data)
-      if (event.step === 'complete') {
-        evtSource.close()
-        delete searchEvtRefs.current[pid]
-        const data = event.results
-        setSearch(pid, { loading: false, results: data.results, stats: data.stats, currentStep: null, doneSteps: [] })
-        saveSearch({
-          project_id: Number(pid), project_name: projectName, query, mode, k,
-          results_returned: data.results.length, total_ms: data.stats?.total_ms,
-          display_columns: displayColumns, results: data.results,
-          use_vector, use_bm25, use_rrf, use_rerank,
-        })
-      } else if (event.step === 'error') {
-        evtSource.close()
-        delete searchEvtRefs.current[pid]
-        setSearch(pid, { loading: false, error: event.message || 'Search failed.', currentStep: null, doneSteps: [] })
-      } else {
-        setSearch(pid, s => ({
-          ...s,
-          doneSteps: s.currentStep ? [...s.doneSteps, s.currentStep] : s.doneSteps,
-          currentStep: event.step,
-        }))
-      }
-    }
+    // Use fetch instead of EventSource so we can include the PIN header.
+    // EventSource does not support custom headers.
+    const controller = new AbortController()
+    searchEvtRefs.current[pid] = controller
 
-    evtSource.onerror = () => {
-      evtSource.close()
-      delete searchEvtRefs.current[pid]
-      setSearch(pid, { loading: false, error: 'Search failed. Please try again.', currentStep: null, doneSteps: [] })
-    }
+    const pin = getProjectPin(pid)
+    const headers = {}
+    if (pin) headers['X-Project-Pin'] = pin
+
+    fetch(url, { headers, signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          const msg = res.status === 401 ? 'PIN required or incorrect.' : 'Search failed. Please try again.'
+          setSearch(pid, { loading: false, error: msg, currentStep: null, doneSteps: [] })
+          return
+        }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop()
+          for (const part of parts) {
+            if (!part.startsWith('data: ')) continue
+            const event = JSON.parse(part.slice(6))
+            if (event.step === 'complete') {
+              delete searchEvtRefs.current[pid]
+              const data = event.results
+              setSearch(pid, { loading: false, results: data.results, stats: data.stats, currentStep: null, doneSteps: [] })
+              saveSearch({
+                project_id: Number(pid), project_name: projectName, query, mode, k,
+                results_returned: data.results.length, total_ms: data.stats?.total_ms,
+                display_columns: displayColumns, results: data.results,
+                use_vector, use_bm25, use_rrf, use_rerank,
+              })
+            } else if (event.step === 'error') {
+              delete searchEvtRefs.current[pid]
+              setSearch(pid, { loading: false, error: event.message || 'Search failed.', currentStep: null, doneSteps: [] })
+            } else {
+              setSearch(pid, s => ({
+                ...s,
+                doneSteps: s.currentStep ? [...s.doneSteps, s.currentStep] : s.doneSteps,
+                currentStep: event.step,
+              }))
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return
+        delete searchEvtRefs.current[pid]
+        setSearch(pid, { loading: false, error: 'Search failed. Please try again.', currentStep: null, doneSteps: [] })
+      })
   }, [setSearch])
 
   // ── Eval helpers ────────────────────────────────────────────────────────
