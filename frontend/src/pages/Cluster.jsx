@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   getProject,
   getProjectColumns,
   getColumnValues,
-  clusterRecords,
   exportCluster,
+  API_BASE_URL,
+  getProjectPin,
 } from '../api/client'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
+import { saveCluster } from '../utils/history'
 
 // 20-color Tableau-inspired palette; noise (-1) uses gray
 const PALETTE = [
@@ -141,9 +143,12 @@ export default function Cluster() {
   const [filterValue, setFilterValue] = useState('')
   const [view, setView] = useState('table')
   const [loading, setLoading] = useState(false)
+  const [currentStep, setCurrentStep] = useState(null)
+  const [stepCounts, setStepCounts] = useState({})
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [collapsed, setCollapsed] = useState({})
+  const abortRef = useRef(null)
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -172,24 +177,90 @@ export default function Cluster() {
       setError('K must be a whole number between 2 and 50.')
       return
     }
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setLoading(true)
     setError('')
     setResult(null)
+    setCurrentStep(null)
+    setStepCounts({})
+
     try {
-      const data = await clusterRecords(
-        projectId, algorithm, k,
-        filterColumn || null,
-        filterValue || null,
-      )
-      setResult(data)
-      const initCollapsed = {}
-      data.groups.forEach((g, i) => { initCollapsed[g.label] = i >= 3 })
-      setCollapsed(initCollapsed)
-      setView('table')
+      const pin = getProjectPin(projectId)
+      const headers = { 'Content-Type': 'application/json' }
+      if (pin) headers['X-Project-Pin'] = pin
+
+      const res = await fetch(`${API_BASE_URL}/projects/${projectId}/cluster`, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          algorithm,
+          k: k ?? null,
+          filter_column: filterColumn || null,
+          filter_value: filterValue || null,
+        }),
+      })
+
+      if (!res.ok) {
+        const msg = res.status === 401 ? 'PIN required or incorrect.' : 'Clustering failed. Please try again.'
+        setError(msg)
+        setLoading(false)
+        return
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop()
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue
+          const event = JSON.parse(part.slice(6))
+          if (event.step === 'complete') {
+            const data = event.result
+            setResult(data)
+            const initCollapsed = {}
+            data.groups.forEach((g, i) => { initCollapsed[g.label] = i >= 3 })
+            setCollapsed(initCollapsed)
+            setView('table')
+            setCurrentStep(null)
+            saveCluster({
+              project_id: Number(projectId),
+              project_name: project?.name ?? '',
+              algorithm,
+              k: k ?? null,
+              filter_column: filterColumn || null,
+              filter_value: filterValue || null,
+              n_clusters: data.stats.n_clusters,
+              records_loaded: data.stats.records_loaded,
+              total_ms: data.stats.total_ms,
+              groups: data.groups,
+              display_columns: project?.display_columns ?? [],
+            })
+          } else if (event.step === 'error') {
+            setError(event.message || 'Clustering failed.')
+          } else if (event.step === 'count') {
+            setStepCounts(prev => ({ ...prev, [event.for_step]: event.count }))
+          } else {
+            setCurrentStep(event.step)
+          }
+        }
+      }
     } catch (err) {
-      setError(err.response?.data?.detail ?? 'Clustering failed. Please try again.')
+      if (err.name === 'AbortError') return
+      setError('Clustering failed. Please try again.')
     } finally {
       setLoading(false)
+      setCurrentStep(null)
     }
   }
 
@@ -206,6 +277,12 @@ export default function Cluster() {
       setError('Export failed.')
     }
   }
+
+  const CLUSTER_STEPS = [
+    { key: 'fetch',   label: 'Loading embeddings' },
+    { key: 'cluster', label: algorithm === 'kmeans' ? `K-Means (k=${kInput})` : 'DBSCAN' },
+    { key: 'pca',     label: 'Scatter layout' },
+  ]
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
   if (isLocked) return <PinGate onUnlock={unlockWithPin} />
@@ -338,6 +415,36 @@ export default function Cluster() {
             {loading ? 'Clustering…' : 'Run Clustering'}
           </button>
         </div>
+
+        {/* Live step pills */}
+        {loading && (
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            {CLUSTER_STEPS.map(({ key, label }, idx) => {
+              const activeIdx = CLUSTER_STEPS.findIndex(s => s.key === currentStep)
+              const count = stepCounts[key]
+              const isActive = currentStep === key
+              const isDone = activeIdx > idx || (activeIdx === -1 && count != null)
+              return (
+                <span
+                  key={key}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    isDone   ? 'bg-emerald-50 text-emerald-600' :
+                    isActive ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-200' :
+                               'bg-gray-100 text-gray-400'
+                  }`}
+                >
+                  {isDone   ? '✓' :
+                   isActive ? <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> :
+                              <span className="inline-block w-2 h-2 rounded-full bg-gray-300" />}
+                  {label}
+                  {count != null && (
+                    <span className="opacity-60 tabular-nums">· {count}</span>
+                  )}
+                </span>
+              )
+            })}
+          </div>
+        )}
 
         {/* Error */}
         {error && (

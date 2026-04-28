@@ -36,7 +36,7 @@ from projects import (
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
-from clustering import cluster as do_cluster
+from clustering import cluster as do_cluster, stream_cluster
 
 app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
@@ -476,14 +476,32 @@ def cluster_endpoint(project_id: int, req: ClusterRequest, request: Request):
     _check_pin(project_raw, request)
     if project_raw["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
-    return do_cluster(
-        schema_name=project_raw["schema_name"],
-        display_columns=project_raw["display_columns"],
-        algorithm=req.algorithm,
-        k=req.k,
-        filter_column=req.filter_column,
-        filter_value=req.filter_value,
-    )
+
+    def event_stream():
+        import json as _json
+        try:
+            for event in stream_cluster(
+                schema_name=project_raw["schema_name"],
+                display_columns=project_raw["display_columns"],
+                algorithm=req.algorithm,
+                k=req.k,
+                filter_column=req.filter_column,
+                filter_value=req.filter_value,
+            ):
+                if event["step"] == "complete":
+                    payload = _json.dumps({"step": "complete", "result": event["result"].dict()})
+                elif event["step"] == "count":
+                    payload = _json.dumps({"step": "count", "for_step": event["for_step"], "count": event["count"]})
+                else:
+                    payload = _json.dumps({"step": event["step"], "message": event["message"]})
+                yield f"data: {payload}\n\n"
+        except HTTPException as e:
+            yield f"data: {_json.dumps({'step': 'error', 'message': e.detail})}\n\n"
+        except Exception as e:
+            logger.exception("cluster_stream error project=%d", project_id)
+            yield f"data: {_json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/projects/{project_id}/cluster/export")

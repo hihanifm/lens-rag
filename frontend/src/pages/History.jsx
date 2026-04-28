@@ -91,6 +91,64 @@ function SearchExpansion({ entry }) {
   )
 }
 
+function ClusterExpansion({ entry }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    const s = {}
+    entry.groups?.forEach((g, i) => { s[g.label] = i >= 3 })
+    return s
+  })
+
+  if (!entry.groups?.length) {
+    return <p className="px-5 pb-4 text-sm text-gray-400">No saved results for this session.</p>
+  }
+
+  return (
+    <div className="px-5 pb-5 space-y-2">
+      {entry.groups.map(group => (
+        <div key={group.label} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <button
+            onClick={() => setCollapsed(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
+            className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-gray-50 transition-colors"
+          >
+            <span className="text-sm font-medium text-gray-800">
+              {group.label}
+              <span className="ml-2 text-xs text-gray-400 font-normal">{group.count} record{group.count !== 1 ? 's' : ''}</span>
+            </span>
+            <span className="text-gray-400 text-xs">{collapsed[group.label] ? '▶' : '▼'}</span>
+          </button>
+          {!collapsed[group.label] && (
+            <div className="overflow-x-auto border-t border-gray-100">
+              <table className="min-w-full divide-y divide-gray-100 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {entry.display_columns?.map(col => (
+                      <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {group.records.slice(0, 20).map((rec, i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                      {entry.display_columns?.map(col => (
+                        <td key={col} className="px-4 py-2 text-gray-700 max-w-xs truncate">{rec.display_data?.[col] ?? ''}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {group.records.length > 20 && (
+                <p className="px-4 py-2 text-xs text-gray-400 bg-gray-50 border-t border-gray-100">
+                  Showing 20 of {group.records.length} — export from the Cluster tab for the full set.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function History() {
   const navigate = useNavigate()
   const [entries, setEntries] = useState(() => loadHistory())
@@ -136,12 +194,12 @@ export default function History() {
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
           <h1 className="text-2xl font-bold text-gray-900 mt-1">History</h1>
-          <p className="text-sm text-gray-400">Last {entries.length} search and evaluation sessions</p>
+          <p className="text-sm text-gray-400">Last {entries.length} search, evaluation, and clustering sessions</p>
         </div>
 
         {entries.length === 0 ? (
           <div className="text-center py-24 text-gray-400">
-            No history yet. Run a search or evaluation to see it here.
+            No history yet. Run a search, evaluation, or clustering to see it here.
           </div>
         ) : (
           <>
@@ -193,7 +251,12 @@ export default function History() {
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map(entry => {
                     const isExpanded = expandedId === entry.id
-                    const hasResults = entry.results?.length > 0
+                    const hasExpansion = entry.type === 'cluster'
+                      ? entry.groups?.length > 0
+                      : entry.results?.length > 0
+                    const clusterSummary = entry.type === 'cluster'
+                      ? `${entry.algorithm === 'kmeans' ? `K-Means k=${entry.k}` : 'DBSCAN'}${entry.filter_column ? ` · ${entry.filter_column}=${entry.filter_value}` : ''}`
+                      : null
                     return (
                       <>
                         <tr
@@ -203,35 +266,39 @@ export default function History() {
                         >
                           <td className="px-5 py-3">
                             {entry.type === 'search' ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-                                Search
-                              </span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">Search</span>
+                            ) : entry.type === 'cluster' ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">Cluster</span>
                             ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                                Evaluate
-                              </span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">Evaluate</span>
                             )}
                           </td>
                           <td className="px-5 py-3 text-gray-600">{entry.project_name}</td>
                           <td className="px-5 py-3 text-gray-900 max-w-xs truncate">
                             {entry.type === 'search'
                               ? entry.query
-                              : `${entry.test_case_count} question${entry.test_case_count !== 1 ? 's' : ''}`}
+                              : entry.type === 'cluster'
+                                ? clusterSummary
+                                : `${entry.test_case_count} question${entry.test_case_count !== 1 ? 's' : ''}`}
                           </td>
                           <td className="px-5 py-3 text-gray-500">{entry.mode ?? '—'}</td>
-                          <td className="px-5 py-3 text-gray-500">{entry.k}</td>
+                          <td className="px-5 py-3 text-gray-500">{entry.k ?? '—'}</td>
                           <td className="px-5 py-3 text-gray-500">
-                            {entry.type === 'search' ? entry.results_returned : '—'}
+                            {entry.type === 'search'
+                              ? entry.results_returned
+                              : entry.type === 'cluster'
+                                ? `${entry.n_clusters} cluster${entry.n_clusters !== 1 ? 's' : ''}`
+                                : '—'}
                           </td>
                           <td className="px-5 py-3 text-gray-500">
-                            {entry.type === 'search' && entry.total_ms != null
+                            {(entry.type === 'search' || entry.type === 'cluster') && entry.total_ms != null
                               ? `${Math.round(entry.total_ms)}ms`
                               : '—'}
                           </td>
                           <td className="px-5 py-3 text-gray-400 whitespace-nowrap">{timeAgo(entry.at)}</td>
                           <td className="px-5 py-3 text-right whitespace-nowrap">
                             <span className="text-xs text-gray-400 mr-3">
-                              {hasResults ? (isExpanded ? '▲' : '▼') : ''}
+                              {hasExpansion ? (isExpanded ? '▲' : '▼') : ''}
                             </span>
                             {entry.type === 'search' && (
                               <button
@@ -248,7 +315,9 @@ export default function History() {
                             <td colSpan={9} className="bg-gray-50 border-t border-gray-100">
                               {entry.type === 'search'
                                 ? <SearchExpansion entry={entry} />
-                                : <EvalExpansion entry={entry} />}
+                                : entry.type === 'cluster'
+                                  ? <ClusterExpansion entry={entry} />
+                                  : <EvalExpansion entry={entry} />}
                             </td>
                           </tr>
                         )}

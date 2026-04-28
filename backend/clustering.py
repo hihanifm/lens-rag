@@ -89,14 +89,25 @@ def _pca_reduce(normed: np.ndarray) -> np.ndarray:
     return coords
 
 
-def cluster(
+def stream_cluster(
     schema_name: str,
     display_columns: list[str],
     algorithm: str,
     k: int | None,
     filter_column: str | None,
     filter_value: str | None,
-) -> ClusterResponse:
+):
+    """
+    Generator that yields step dicts for SSE streaming, ending with a
+    'complete' event containing the ClusterResponse.
+
+    Steps yielded (in order):
+      {"step": "fetch",   "message": "..."}
+      {"step": "count",   "for_step": "fetch", "count": N}
+      {"step": "cluster", "message": "..."}
+      {"step": "pca",     "message": "Computing scatter layout..."}
+      {"step": "complete","result": <ClusterResponse>}
+    """
     total_start = time.perf_counter()
 
     if algorithm not in ("kmeans", "dbscan"):
@@ -105,6 +116,7 @@ def cluster(
         raise HTTPException(status_code=400, detail="k is required for K-Means")
 
     # ── Fetch ──────────────────────────────────────────────────────────────
+    yield {"step": "fetch", "message": "Loading embeddings…"}
     t = time.perf_counter()
     ids, embeddings, display_rows = fetch_embeddings(
         schema_name, display_columns, filter_column, filter_value
@@ -116,16 +128,18 @@ def cluster(
         "cluster() schema=%s algorithm=%s k=%s filter=%s=%s records=%d fetch_ms=%.1f",
         schema_name, algorithm, k, filter_column, filter_value, n, ms_fetch,
     )
+    yield {"step": "count", "for_step": "fetch", "count": n}
 
     if n == 0:
-        return ClusterResponse(
+        yield {"step": "complete", "result": ClusterResponse(
             groups=[],
             stats=ClusterStats(
                 algorithm=algorithm, records_loaded=0, n_clusters=0,
                 ms_fetch=ms_fetch, ms_cluster=0.0,
                 total_ms=round((time.perf_counter() - total_start) * 1000, 1),
             ),
-        )
+        )}
+        return
 
     if algorithm == "kmeans":
         max_k = min(50, n - 1) if n > 1 else 1
@@ -135,13 +149,14 @@ def cluster(
                 detail=f"k must be between 2 and {max_k} for this dataset ({n} records)",
             )
 
-    # ── Normalise ──────────────────────────────────────────────────────────
     # L2 normalisation makes Euclidean distance equivalent to cosine distance
     # on the unit sphere — required because sklearn KMeans is Euclidean-only
     # while the project's embeddings are indexed under cosine distance in pgvector.
     normed = normalize(embeddings, norm="l2")
 
     # ── Cluster ────────────────────────────────────────────────────────────
+    algo_label = f"K-Means (k={k})" if algorithm == "kmeans" else "DBSCAN"
+    yield {"step": "cluster", "message": f"Running {algo_label}…"}
     t = time.perf_counter()
     if algorithm == "kmeans":
         labels = KMeans(n_clusters=k, random_state=42, n_init="auto").fit_predict(normed)
@@ -152,6 +167,7 @@ def cluster(
     ms_cluster = round((time.perf_counter() - t) * 1000, 1)
 
     # ── PCA for scatter ────────────────────────────────────────────────────
+    yield {"step": "pca", "message": "Computing scatter layout…"}
     coords = _pca_reduce(normed)
 
     # ── Build groups ───────────────────────────────────────────────────────
@@ -184,7 +200,7 @@ def cluster(
         n_clusters, n, ms_fetch, ms_cluster, total_ms,
     )
 
-    return ClusterResponse(
+    yield {"step": "complete", "result": ClusterResponse(
         groups=groups,
         stats=ClusterStats(
             algorithm=algorithm,
@@ -194,4 +210,18 @@ def cluster(
             ms_cluster=ms_cluster,
             total_ms=total_ms,
         ),
-    )
+    )}
+
+
+def cluster(
+    schema_name: str,
+    display_columns: list[str],
+    algorithm: str,
+    k: int | None,
+    filter_column: str | None,
+    filter_value: str | None,
+) -> ClusterResponse:
+    """Synchronous wrapper — used by the export endpoint."""
+    for event in stream_cluster(schema_name, display_columns, algorithm, k, filter_column, filter_value):
+        if event["step"] == "complete":
+            return event["result"]
