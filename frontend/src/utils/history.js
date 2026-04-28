@@ -1,6 +1,12 @@
 const KEY = 'lens_history'
 const MAX_ENTRIES = 100
 
+/** Returns a filesystem-safe datetime string: YYYY-MM-DD_HH-MM */
+export function fileDateTime(date = new Date()) {
+  const pad = n => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}`
+}
+
 function load() {
   try {
     return JSON.parse(localStorage.getItem(KEY) || '[]')
@@ -88,7 +94,7 @@ export function exportHistoryCSV() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `lens_history_${new Date().toISOString().slice(0, 10)}.csv`
+  a.download = `lens_history_${fileDateTime()}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }

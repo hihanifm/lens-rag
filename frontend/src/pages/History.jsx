@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { loadHistory, clearHistory, exportHistoryCSV } from '../utils/history'
+import { loadHistory, clearHistory, exportHistoryCSV, fileDateTime } from '../utils/history'
 import ResultsTable from '../components/ResultsTable'
 
 function timeAgo(iso) {
@@ -37,8 +37,7 @@ function EvalExpansion({ entry }) {
           <button
             onClick={() => {
               const slug = (entry.project_name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-              const date = new Date(entry.ts).toISOString().slice(0, 10)
-              downloadJSON(entry.results, `${slug}_lens_ragas_${date}.json`)
+              downloadJSON(entry.results, `${slug}_lens_ragas_${fileDateTime(new Date(entry.ts))}.json`)
             }}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium"
           >

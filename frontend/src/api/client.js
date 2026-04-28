@@ -1,5 +1,6 @@
 // api/client.js — ALL API calls live here. Never call axios directly in components.
 import axios from 'axios'
+import { fileDateTime } from '../utils/history'
 
 // Dev:
 // - Leave VITE_API_URL empty so the browser uses same-origin calls (Vite proxy handles API).
@@ -119,8 +120,7 @@ export const exportResults = async (projectId, query, mode, k, projectName = '',
     { responseType: 'blob', headers: projectHeaders(projectId) }
   )
   const slug = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-  const date = new Date().toISOString().slice(0, 10)
-  const filename = `${slug}_lens_results_${date}.xlsx`
+  const filename = `${slug}_lens_results_${fileDateTime()}.xlsx`
   const url = window.URL.createObjectURL(new Blob([response.data]))
   const link = document.createElement('a')
   link.href = url

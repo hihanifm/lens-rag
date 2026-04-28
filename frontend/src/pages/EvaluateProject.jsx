@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getProject } from '../api/client'
 import { API_BASE_URL } from '../api/client'
+import { fileDateTime } from '../utils/history'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { useProjectState } from '../contexts/ProjectStateContext'
@@ -82,12 +83,11 @@ export default function EvaluateProject() {
   const handleExport = () => {
     if (!ev.results) return
     const slug = (project?.name ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    const date = new Date().toISOString().slice(0, 10)
     const blob = new Blob([JSON.stringify(ev.results, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `${slug}_lens_ragas_${date}.json`)
+    link.setAttribute('download', `${slug}_lens_ragas_${fileDateTime()}.json`)
     document.body.appendChild(link)
     link.click()
     link.remove()
