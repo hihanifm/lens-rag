@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { createPortal } from 'react-dom'
 import { getHealth } from '../api/client'
 
 export default function BottomBar() {
@@ -25,10 +26,14 @@ export default function BottomBar() {
     return `${secs}s`
   }
 
-  return (
-    <div className="fixed bottom-0 left-0 right-0 h-8 bg-gray-100 border-t border-gray-200 flex items-center justify-between px-4 text-xs text-gray-500">
-      <div className="flex items-center gap-3">
+  const bar = (
+    <div className="fixed bottom-0 left-0 right-0 z-30 h-8 bg-gray-100 border-t border-gray-200 px-4 text-xs text-gray-500">
+      <div className="relative h-full flex items-center justify-between">
+        <div className="flex items-center gap-3">
         <Link to="/" className="font-semibold text-gray-700 hover:text-gray-900 tracking-tight transition-colors">LENS</Link>
+        <span className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 font-medium tracking-wide">
+          BETA
+        </span>
         <span className="text-gray-300">·</span>
         <span className={`px-2 py-0.5 rounded-full border font-medium tracking-wide
           ${mode === 'PROD' ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-sky-50 border-sky-200 text-sky-700'}`}>
@@ -42,7 +47,12 @@ export default function BottomBar() {
         <span className="text-gray-300">·</span>
         <span>v{version}</span>
       </div>
-      <div className="flex items-center gap-4">
+
+      <div className="absolute left-1/2 -translate-x-1/2 italic whitespace-nowrap pointer-events-none">
+        Excel + Lens = Excellence!
+      </div>
+
+        <div className="flex items-center gap-4">
         <Link to="/history" className="hover:text-gray-700 transition-colors">
           History
         </Link>
@@ -55,6 +65,11 @@ export default function BottomBar() {
           GitHub ↗
         </a>
       </div>
+      </div>
     </div>
   )
+
+  // Render into document.body so `position: fixed` is truly viewport-fixed,
+  // even if any ancestor creates a new containing block (e.g. via transform).
+  return createPortal(bar, document.body)
 }
