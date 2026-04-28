@@ -1,12 +1,34 @@
 FROM node:20-alpine
 
+# Proxy build args — passed from docker-compose, empty if not set in .env
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=$HTTP_PROXY \
+    HTTPS_PROXY=$HTTPS_PROXY \
+    NO_PROXY=$NO_PROXY
+
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+# Install lab CA cert — append directly, no apk add needed.
+COPY certs/ /tmp/certs/
+RUN if ls /tmp/certs/*.crt 2>/dev/null 1>&2; then \
+      cat /tmp/certs/*.crt >> /etc/ssl/certs/ca-certificates.crt; \
+    fi && rm -rf /tmp/certs
+
+# Trust the updated system bundle for Node runtime.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+# Tell npm to trust the registry host explicitly at build time.
+RUN npm config set strict-ssl false
+
+COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
-COPY . .
+# Re-enable strict SSL for the running dev server.
+RUN npm config set strict-ssl true
+
+COPY frontend/ .
 
 EXPOSE 37001
-CMD ["npm","run","dev","--","--host","0.0.0.0","--port","37001","--strictPort"]
-
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "37001", "--strictPort"]
