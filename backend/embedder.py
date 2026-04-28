@@ -23,37 +23,61 @@ _rerank_client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 logger.info("Reranker: enabled=%s model=%s base_url=%s", RERANKER_ENABLED, RERANKER_MODEL, OLLAMA_BASE_URL)
 
 
+def _probe_ollama():
+    """Fire a tiny embed request at startup to verify Ollama is reachable and the model is loaded."""
+    logger.info("Probing Ollama at %s with model=%s ...", OLLAMA_BASE_URL, EMBEDDING_MODEL)
+    t0 = time.monotonic()
+    try:
+        resp = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input="ping")
+        elapsed = int((time.monotonic() - t0) * 1000)
+        logger.info("Ollama probe OK — dims=%d elapsed_ms=%d", len(resp.data[0].embedding), elapsed)
+    except Exception as e:
+        logger.error(
+            "Ollama probe FAILED — url=%s model=%s — %s: %s\n"
+            "  Is Ollama running on the host? Try: curl %s/models",
+            OLLAMA_BASE_URL, EMBEDDING_MODEL, type(e).__name__, e, OLLAMA_BASE_URL,
+            exc_info=True,
+        )
+
+
+_probe_ollama()
+
+
 def embed(text: str) -> list[float]:
-    logger.debug("embed() text_len=%d", len(text))
+    logger.debug("embed() → %s model=%s text_len=%d preview=%r",
+                 OLLAMA_BASE_URL, EMBEDDING_MODEL, len(text), text[:80])
     t0 = time.monotonic()
     try:
         response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
         elapsed = int((time.monotonic() - t0) * 1000)
-        logger.debug("embed() done dims=%d elapsed_ms=%d", len(response.data[0].embedding), elapsed)
+        dims = len(response.data[0].embedding)
+        logger.debug("embed() ← OK dims=%d elapsed_ms=%d", dims, elapsed)
         return response.data[0].embedding
     except Exception as e:
-        logger.error("embed() FAILED after %dms — %s: %s",
-                     int((time.monotonic() - t0) * 1000), type(e).__name__, e)
+        elapsed = int((time.monotonic() - t0) * 1000)
+        logger.exception("embed() ← FAILED url=%s model=%s elapsed_ms=%d — %s: %s",
+                         OLLAMA_BASE_URL, EMBEDDING_MODEL, elapsed, type(e).__name__, e)
         raise
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    logger.debug("embed_batch() count=%d", len(texts))
+    logger.debug("embed_batch() → %s model=%s count=%d", OLLAMA_BASE_URL, EMBEDDING_MODEL, len(texts))
     t0 = time.monotonic()
     try:
         response = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
         elapsed = int((time.monotonic() - t0) * 1000)
-        logger.debug("embed_batch() done count=%d elapsed_ms=%d", len(texts), elapsed)
+        logger.debug("embed_batch() ← OK count=%d elapsed_ms=%d", len(texts), elapsed)
         return [item.embedding for item in response.data]
     except Exception as e:
-        logger.error("embed_batch() FAILED after %dms — %s: %s",
-                     int((time.monotonic() - t0) * 1000), type(e).__name__, e)
+        elapsed = int((time.monotonic() - t0) * 1000)
+        logger.exception("embed_batch() ← FAILED url=%s model=%s count=%d elapsed_ms=%d — %s: %s",
+                         OLLAMA_BASE_URL, EMBEDDING_MODEL, len(texts), elapsed, type(e).__name__, e)
         raise
 
 
 def rerank(query: str, candidates: list[str]) -> list[float]:
     """Score each candidate against the query. Returns scores in same order."""
-    logger.debug("rerank() candidates=%d", len(candidates))
+    logger.debug("rerank() → %s model=%s candidates=%d", OLLAMA_BASE_URL, RERANKER_MODEL, len(candidates))
     t0 = time.monotonic()
     scores = []
     for i, candidate in enumerate(candidates):
@@ -62,9 +86,12 @@ def rerank(query: str, candidates: list[str]) -> list[float]:
             response = _rerank_client.embeddings.create(model=RERANKER_MODEL, input=combined)
             scores.append(response.data[0].embedding[0])
         except Exception as e:
-            logger.error("rerank() FAILED on candidate %d/%d — %s: %s",
-                         i + 1, len(candidates), type(e).__name__, e)
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.exception(
+                "rerank() ← FAILED on candidate %d/%d url=%s model=%s elapsed_ms=%d — %s: %s",
+                i + 1, len(candidates), OLLAMA_BASE_URL, RERANKER_MODEL, elapsed, type(e).__name__, e,
+            )
             raise
     elapsed = int((time.monotonic() - t0) * 1000)
-    logger.debug("rerank() done candidates=%d elapsed_ms=%d", len(candidates), elapsed)
+    logger.debug("rerank() ← OK candidates=%d elapsed_ms=%d", len(candidates), elapsed)
     return scores
