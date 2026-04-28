@@ -65,10 +65,12 @@ class SearchStats(BaseModel):
     use_bm25: Optional[bool] = None
     use_rrf: Optional[bool] = None
     use_rerank: Optional[bool] = None
-    # topic mode timings
+    # topic mode timings + per-stage candidate counts
     embedding_ms: Optional[float] = None
     vector_search_ms: Optional[float] = None
+    vector_candidates: Optional[int] = None
     bm25_search_ms: Optional[float] = None
+    bm25_candidates: Optional[int] = None
     rrf_merge_ms: Optional[float] = None
     reranker_ms: Optional[float] = None
     # id mode timings

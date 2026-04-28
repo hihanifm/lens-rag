@@ -7,10 +7,10 @@ export default function StatsPanel({ stats }) {
     ? [{ label: 'SQL lookup', ms: stats.sql_lookup_ms }]
     : [
         { label: 'Query embedding', ms: stats.embedding_ms },
-        { label: 'Vector search', ms: stats.vector_search_ms },
-        { label: 'BM25 search', ms: stats.bm25_search_ms },
-        { label: 'RRF merge', ms: stats.rrf_merge_ms },
-        { label: 'Re-ranker', ms: stats.reranker_ms },
+        { label: 'Vector search',   ms: stats.vector_search_ms, count: stats.vector_candidates },
+        { label: 'BM25 search',     ms: stats.bm25_search_ms,   count: stats.bm25_candidates },
+        { label: 'RRF merge',       ms: stats.rrf_merge_ms,     count: stats.candidates_retrieved },
+        { label: 'Re-ranker',       ms: stats.reranker_ms,      count: stats.results_returned },
       ]
 
   const maxMs = Math.max(...rows.map(r => r.ms || 0))
@@ -29,10 +29,15 @@ export default function StatsPanel({ stats }) {
       </div>
 
       <div className="space-y-2">
-        {rows.map(({ label, ms }) => (
+        {rows.map(({ label, ms, count }) => (
           ms != null ? (
             <div key={label} className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 w-36 shrink-0">{label}</span>
+              <div className="w-36 shrink-0 flex items-center gap-1.5">
+                <span className="text-xs text-gray-500">{label}</span>
+                {count != null && (
+                  <span className="text-xs text-gray-400 tabular-nums">· {count}</span>
+                )}
+              </div>
               <div className="flex-1 bg-gray-200 rounded-full h-1.5">
                 <div
                   className="bg-blue-500 h-1.5 rounded-full"

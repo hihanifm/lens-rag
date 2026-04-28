@@ -159,9 +159,11 @@ def topic_search_stream(
 
         vector_ids = [row['id'] for row in vector_rows]
         rows_by_id = {row['id']: row for row in vector_rows}
+        stats['vector_candidates'] = len(vector_ids)
     else:
         stats['embedding_ms'] = None
         stats['vector_search_ms'] = None
+        stats['vector_candidates'] = None
         logger.debug("  vector search skipped (use_vector=False)")
 
     # ── Step 2: BM25 retrieval ────────────────────────────────────────────────
@@ -182,12 +184,14 @@ def topic_search_stream(
         logger.debug("  bm25 search hits=%d bm25_ms=%.1f", len(bm25_rows), stats['bm25_search_ms'])
 
         bm25_ids = [row['id'] for row in bm25_rows]
+        stats['bm25_candidates'] = len(bm25_ids)
         for row in bm25_rows:
             if row['id'] not in rows_by_id:
                 rows_by_id[row['id']] = row
     else:
         bm25_ids = []
         stats['bm25_search_ms'] = None
+        stats['bm25_candidates'] = None
         logger.debug("  bm25 search skipped (use_bm25=False)")
 
     # ── Step 3: Merge ─────────────────────────────────────────────────────────
@@ -261,7 +265,9 @@ def topic_search_stream(
                 use_rerank=eff_rerank,
                 embedding_ms=stats['embedding_ms'],
                 vector_search_ms=stats['vector_search_ms'],
+                vector_candidates=stats['vector_candidates'],
                 bm25_search_ms=stats['bm25_search_ms'],
+                bm25_candidates=stats['bm25_candidates'],
                 rrf_merge_ms=stats['rrf_merge_ms'],
                 reranker_ms=stats['reranker_ms'],
                 total_ms=stats['total_ms'],
