@@ -9,8 +9,8 @@ export default function StatsPanel({ stats }) {
         { label: 'Query embedding', ms: stats.embedding_ms },
         { label: 'Vector search',   ms: stats.vector_search_ms, count: stats.vector_candidates },
         { label: 'BM25 search',     ms: stats.bm25_search_ms,   count: stats.bm25_candidates },
-        { label: 'RRF merge',       ms: stats.rrf_merge_ms,     count: stats.candidates_retrieved },
-        { label: 'Re-ranker',       ms: stats.reranker_ms,      count: stats.results_returned },
+        { label: 'RRF merge',       ms: stats.rrf_merge_ms,     count: stats.candidates_retrieved, alwaysShow: true },
+        { label: 'Re-ranker',       ms: stats.reranker_ms,      count: stats.results_returned,     alwaysShow: true },
       ]
 
   const maxMs = Math.max(...rows.map(r => r.ms || 0))
@@ -29,8 +29,8 @@ export default function StatsPanel({ stats }) {
       </div>
 
       <div className="space-y-2">
-        {rows.map(({ label, ms, count }) => (
-          ms != null ? (
+        {rows.map(({ label, ms, count, alwaysShow }) => (
+          (ms != null || alwaysShow) ? (
             <div key={label} className="flex items-center gap-3">
               <div className="w-36 shrink-0 flex items-center gap-1.5">
                 <span className="text-xs text-gray-500">{label}</span>
@@ -41,10 +41,12 @@ export default function StatsPanel({ stats }) {
               <div className="flex-1 bg-gray-200 rounded-full h-1.5">
                 <div
                   className="bg-blue-500 h-1.5 rounded-full"
-                  style={{ width: maxMs > 0 ? `${(ms / maxMs) * 100}%` : '0%' }}
+                  style={{ width: ms != null && maxMs > 0 ? `${(ms / maxMs) * 100}%` : '0%' }}
                 />
               </div>
-              <span className="text-xs text-gray-600 w-14 text-right">{ms}ms</span>
+              <span className="text-xs text-gray-600 w-14 text-right">
+                {ms != null ? `${ms}ms` : '—'}
+              </span>
             </div>
           ) : null
         ))}

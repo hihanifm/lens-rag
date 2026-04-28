@@ -200,7 +200,7 @@ def topic_search_stream(
     merged_ids = merge_candidates(vector_ids, bm25_ids, use_rrf)
     merge_ms = round((time.perf_counter() - t) * 1000, 1)
     # Only record RRF timing when RRF actually ran; trivial concat gets None
-    stats['rrf_merge_ms'] = merge_ms if (use_rrf and vector_ids and bm25_ids) else None
+    stats['rrf_merge_ms'] = merge_ms
     stats['candidates_retrieved'] = len(merged_ids)
     logger.debug("  merge done candidates=%d rrf=%s ms=%.1f", len(merged_ids), use_rrf, merge_ms)
 
