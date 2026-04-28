@@ -169,6 +169,9 @@ def update_project_status(project_id: int, status: str, row_count: int = None):
     with get_cursor() as (cur, conn):
         cur.execute("""
             UPDATE public.projects
-            SET status = %s, row_count = %s
+            SET status = %s,
+                row_count = %s,
+                ingestion_started_at = CASE WHEN %s = 'ingesting'
+                    THEN NOW() ELSE ingestion_started_at END
             WHERE id = %s
-        """, [status, row_count, project_id])
+        """, [status, row_count, status, project_id])

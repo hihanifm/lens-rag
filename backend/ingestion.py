@@ -94,13 +94,6 @@ def ingest(
                 project_id, schema_name, stored_columns, content_column, context_columns, id_column)
     t_pipeline_start = time.monotonic()
 
-    # Stamp ingestion start time so the Home page can show elapsed duration
-    with get_cursor() as (cur, conn):
-        cur.execute(
-            "UPDATE public.projects SET ingestion_started_at = NOW() WHERE id = %s",
-            [project_id]
-        )
-
     # Step 1: Read Excel
     yield {"step": "reading", "message": "Reading Excel file..."}
     df, original_columns, sheet_names = read_excel(filepath)
