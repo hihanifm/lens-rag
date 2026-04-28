@@ -152,7 +152,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Search
+              Search Pro 🚀🔥
             </Link>
             <Link
               to={`/projects/${projectId}/evaluate`}
@@ -162,7 +162,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Evaluate
+              Evaluate 🧪
             </Link>
             <Link
               to={`/projects/${projectId}/browse`}
@@ -172,7 +172,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Browse
+              Browse 👀
             </Link>
             <Link
               to={`/projects/${projectId}/cluster`}
@@ -182,7 +182,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              Cluster
+              Cluster 🧩
             </Link>
             <Link
               to={`/projects/${projectId}/system`}
@@ -192,7 +192,7 @@ export default function Search() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              System
+              System 🛠️
             </Link>
             <Link
               to={`/projects/${projectId}/settings`}
@@ -203,11 +203,14 @@ export default function Search() {
               }`}
             >
               <span className="inline-flex items-center gap-1">
-                Settings
+                Settings ⚙️
                 {project.has_pin && <span aria-hidden>🔒</span>}
               </span>
             </Link>
           </div>
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            Quickly surface the right rows: semantic search with a keyword backbone. Click a row to expand details.
+          </p>
         </div>
 
         {/* Search bar */}

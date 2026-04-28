@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { loadHistory, clearHistory, exportHistoryCSV, fileDateTime } from '../utils/history'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { loadHistory, clearHistory, exportHistoryCSV, fileDateTime, subscribeHistoryUpdates } from '../utils/history'
 import ResultsTable from '../components/ResultsTable'
 
 function timeAgo(iso) {
@@ -182,12 +182,36 @@ export default function History() {
   const [entries, setEntries] = useState(() => loadHistory())
   const [projectFilter, setProjectFilter] = useState('all')
   const [expandedId, setExpandedId] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const projects = [...new Map(entries.map(e => [e.project_id, e.project_name])).entries()]
 
   const filtered = projectFilter === 'all'
     ? entries
     : entries.filter(e => String(e.project_id) === projectFilter)
+
+  useEffect(() => {
+    return subscribeHistoryUpdates(() => {
+      setEntries(loadHistory())
+    })
+  }, [])
+
+  useEffect(() => {
+    const open = searchParams.get('open')
+    if (!open) return
+    setProjectFilter('all')
+    setExpandedId(String(open))
+    // scroll after paint
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`history-${open}`)
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('open')
+      return next
+    }, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const handleClear = () => {
     if (!window.confirm('Clear all history? This cannot be undone.')) return
@@ -197,7 +221,8 @@ export default function History() {
   }
 
   const toggleExpand = (id) => {
-    setExpandedId(prev => prev === id ? null : id)
+    const key = String(id)
+    setExpandedId(prev => prev === key ? null : key)
   }
 
   return (
@@ -263,7 +288,8 @@ export default function History() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map(entry => {
-                    const isExpanded = expandedId === entry.id
+                    const entryKey = String(entry.id)
+                    const isExpanded = expandedId === entryKey
                     const hasExpansion = entry.type === 'cluster'
                       ? entry.groups?.length > 0
                       : entry.results?.length > 0
@@ -284,8 +310,9 @@ export default function History() {
                       <>
                         <tr
                           key={entry.id}
-                          onClick={() => toggleExpand(entry.id)}
+                          onClick={() => toggleExpand(entryKey)}
                           className="hover:bg-gray-50 transition-colors cursor-pointer"
+                          id={`history-${entryKey}`}
                         >
                           <td className="px-5 py-3">
                             {entry.type === 'search' ? (

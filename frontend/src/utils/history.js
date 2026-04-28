@@ -1,5 +1,6 @@
 const KEY = 'lens_history'
 const MAX_ENTRIES = 100
+const HISTORY_UPDATED_EVENT = 'lens_history_updated'
 
 /** Returns a filesystem-safe datetime string: YYYY-MM-DD_HH-MM */
 export function fileDateTime(date = new Date()) {
@@ -17,6 +18,12 @@ function load() {
 
 function save(entries) {
   localStorage.setItem(KEY, JSON.stringify(entries))
+  // Same-tab updates: storage event doesn't fire, so dispatch our own.
+  try {
+    window.dispatchEvent(new CustomEvent(HISTORY_UPDATED_EVENT))
+  } catch {
+    // no-op (SSR / tests / older browsers)
+  }
 }
 
 function append(entry) {
@@ -95,6 +102,26 @@ export function loadHistory() {
 
 export function clearHistory() {
   localStorage.removeItem(KEY)
+  try {
+    window.dispatchEvent(new CustomEvent(HISTORY_UPDATED_EVENT))
+  } catch {
+    // no-op
+  }
+}
+
+export function subscribeHistoryUpdates(cb) {
+  if (typeof window === 'undefined') return () => {}
+  const handler = () => cb?.()
+  const storageHandler = (e) => {
+    if (e.key === KEY) handler()
+  }
+  window.addEventListener(HISTORY_UPDATED_EVENT, handler)
+  // Also listen for cross-tab updates.
+  window.addEventListener('storage', storageHandler)
+  return () => {
+    window.removeEventListener(HISTORY_UPDATED_EVENT, handler)
+    window.removeEventListener('storage', storageHandler)
+  }
 }
 
 export function exportHistoryCSV() {

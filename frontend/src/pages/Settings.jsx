@@ -134,25 +134,25 @@ export default function Settings() {
               to={`/projects/${projectId}/search`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Search
+              Search Pro 🚀🔥
             </Link>
             <Link
               to={`/projects/${projectId}/evaluate`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Evaluate
+              Evaluate 🧪
             </Link>
             <Link
               to={`/projects/${projectId}/browse`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Browse
+              Browse 👀
             </Link>
             <Link
               to={`/projects/${projectId}/cluster`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Cluster
+              Cluster 🧩
             </Link>
             <Link
               to={`/projects/${projectId}/system`}
@@ -162,7 +162,7 @@ export default function Settings() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              System
+              System 🛠️
             </Link>
             <Link
               to={`/projects/${projectId}/settings`}
@@ -173,11 +173,15 @@ export default function Settings() {
               }`}
             >
               <span className="inline-flex items-center gap-1">
-                Settings
+                Settings ⚙️
                 {project.has_pin && <span aria-hidden>🔒</span>}
               </span>
             </Link>
           </div>
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            View the ingestion configuration for this project and tweak what the UI shows (project name, default k, display columns).
+            Changing content/context columns requires re-ingestion.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

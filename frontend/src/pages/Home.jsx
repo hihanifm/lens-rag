@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { getProjects, deleteProject } from '../api/client'
-import { loadHistory } from '../utils/history'
+import { loadHistory, subscribeHistoryUpdates } from '../utils/history'
 
 const statusColor = {
   ready: 'bg-emerald-100 text-emerald-700',
@@ -34,10 +34,10 @@ function fmtElapsed(startedAt, now) {
 }
 
 export default function Home() {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [deletingId, setDeletingId] = useState(null)
   const [now, setNow] = useState(Date.now())
+  const [recentHistory, setRecentHistory] = useState(() => loadHistory().slice(0, 5))
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -52,14 +52,13 @@ export default function Home() {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [hasIngesting])
-
-  const recentHistory = loadHistory().slice(0, 5)
-
-  const handleRerun = (entry) => {
-    navigate(`/projects/${entry.project_id}/search`, {
-      state: { query: entry.query, mode: entry.mode, k: entry.k },
+  
+  useEffect(() => {
+    // Keep Recent Activity live as history changes (same-tab + cross-tab).
+    return subscribeHistoryUpdates(() => {
+      setRecentHistory(loadHistory().slice(0, 5))
     })
-  }
+  }, [])
 
   const handleDelete = async (e, project) => {
     e.preventDefault()
@@ -189,9 +188,11 @@ export default function Home() {
             ) : (
               <div className="space-y-2">
                 {recentHistory.map(entry => (
-                  <div
+                  <Link
                     key={entry.id}
-                    className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-start gap-3"
+                    to={`/history?open=${encodeURIComponent(entry.id)}`}
+                    className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-start gap-3 hover:border-blue-300 hover:shadow-sm transition-all"
+                    title="Open in History"
                   >
                     <span className={`mt-0.5 shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
                       entry.type === 'search'
@@ -212,15 +213,7 @@ export default function Home() {
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5">{entry.project_name} · {timeAgo(entry.at)}</p>
                     </div>
-                    {entry.type === 'search' && (
-                      <button
-                        onClick={() => handleRerun(entry)}
-                        className="shrink-0 text-xs text-blue-600 hover:text-blue-700 font-medium mt-0.5"
-                      >
-                        ↩
-                      </button>
-                    )}
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

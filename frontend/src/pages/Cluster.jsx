@@ -318,17 +318,21 @@ export default function Cluster() {
             {project.source_filename && <span className="ml-2 font-mono">{project.source_filename}</span>}
           </p>
           <div className="flex gap-1">
-            <NavLink to={`${activeBase}/search`} active={location.pathname.endsWith('/search')}>Search</NavLink>
-            <NavLink to={`${activeBase}/evaluate`} active={location.pathname.endsWith('/evaluate')}>Evaluate</NavLink>
-            <NavLink to={`${activeBase}/browse`} active={location.pathname.endsWith('/browse')}>Browse</NavLink>
-            <NavLink to={`${activeBase}/cluster`} active={location.pathname.endsWith('/cluster')}>Cluster</NavLink>
-            <NavLink to={`${activeBase}/system`} active={location.pathname.endsWith('/system')}>System</NavLink>
+            <NavLink to={`${activeBase}/search`} active={location.pathname.endsWith('/search')}>Search Pro 🚀🔥</NavLink>
+            <NavLink to={`${activeBase}/evaluate`} active={location.pathname.endsWith('/evaluate')}>Evaluate 🧪</NavLink>
+            <NavLink to={`${activeBase}/browse`} active={location.pathname.endsWith('/browse')}>Browse 👀</NavLink>
+            <NavLink to={`${activeBase}/cluster`} active={location.pathname.endsWith('/cluster')}>Cluster 🧩</NavLink>
+            <NavLink to={`${activeBase}/system`} active={location.pathname.endsWith('/system')}>System 🛠️</NavLink>
             <NavLink to={`${activeBase}/settings`} active={location.pathname.endsWith('/settings')}>
               <span className="inline-flex items-center gap-1">
-                Settings{project.has_pin && <span aria-hidden>🔒</span>}
+                Settings ⚙️{project.has_pin && <span aria-hidden>🔒</span>}
               </span>
             </NavLink>
           </div>
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            Group similar records to spot themes, duplicates, and gaps. Use filters to narrow the dataset, then explore via table or scatter.
+            Click a point (or a cluster) to inspect records below.
+          </p>
         </div>
 
         {/* Controls panel */}

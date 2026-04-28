@@ -60,12 +60,12 @@ export default function Browse() {
           </p>
           <div className="flex gap-1">
             {[
-              { label: 'Search', path: 'search' },
-              { label: 'Evaluate', path: 'evaluate' },
-              { label: 'Browse', path: 'browse' },
-              { label: 'Cluster', path: 'cluster' },
-              { label: 'System', path: 'system' },
-              { label: project?.has_pin ? 'Settings 🔒' : 'Settings', path: 'settings' },
+              { label: 'Search Pro 🚀🔥', path: 'search' },
+              { label: 'Evaluate 🧪', path: 'evaluate' },
+              { label: 'Browse 👀', path: 'browse' },
+              { label: 'Cluster 🧩', path: 'cluster' },
+              { label: 'System 🛠️', path: 'system' },
+              { label: project?.has_pin ? 'Settings ⚙️ 🔒' : 'Settings ⚙️', path: 'settings' },
             ].map(({ label, path }) => (
               <Link
                 key={path}
@@ -80,6 +80,10 @@ export default function Browse() {
               </Link>
             ))}
           </div>
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            Browse the first rows exactly as stored in Postgres (raw columns, contextual content, and indexes).
+            Handy for debugging ingestion and understanding what the search pipeline is actually indexing.
+          </p>
         </div>
 
         {isLoading && <p className="text-gray-400">Loading records...</p>}

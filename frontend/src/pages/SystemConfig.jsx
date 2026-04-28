@@ -40,19 +40,19 @@ export default function SystemConfig() {
   })
 
   const tabs = [
-    { label: 'Search', path: 'search' },
-    { label: 'Evaluate', path: 'evaluate' },
-    { label: 'Browse', path: 'browse' },
-    { label: 'Cluster', path: 'cluster' },
-    { label: 'System', path: 'system' },
-    { label: project?.has_pin ? 'Settings 🔒' : 'Settings', path: 'settings' },
+    { label: 'Search Pro 🚀🔥', path: 'search' },
+    { label: 'Evaluate 🧪', path: 'evaluate' },
+    { label: 'Browse 👀', path: 'browse' },
+    { label: 'Cluster 🧩', path: 'cluster' },
+    { label: 'System 🛠️', path: 'system' },
+    { label: project?.has_pin ? 'Settings ⚙️ 🔒' : 'Settings ⚙️', path: 'settings' },
   ]
 
   if (project && isLocked) return <PinGate onUnlock={unlockWithPin} />
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="w-[90%] mx-auto py-10 max-w-4xl">
+      <div className="w-[90%] mx-auto py-10">
         <div className="mb-8">
           <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
           <div className="flex items-center gap-2 mt-1">
@@ -88,8 +88,9 @@ export default function SystemConfig() {
           </div>
         </div>
 
-        <p className="text-sm text-gray-500 mb-6">
-          Server-side retrieval configuration (read-only). Values come from environment and the running PostgreSQL / pgvector instance.
+        <p className="text-sm text-gray-500 mb-6 max-w-3xl">
+          Read-only system view of the retrieval configuration used by the server (models, dimensions, reranker, and pgvector settings).
+          Values come from environment and the running PostgreSQL / pgvector instance.
         </p>
 
         {isLoading && <p className="text-gray-400">Loading configuration...</p>}

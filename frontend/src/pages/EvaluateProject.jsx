@@ -136,42 +136,46 @@ export default function EvaluateProject() {
               to={`/projects/${projectId}/search`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Search
+              Search Pro 🚀🔥
             </Link>
             <Link
               to={`/projects/${projectId}/evaluate`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white transition-colors"
             >
-              Evaluate
+              Evaluate 🧪
             </Link>
             <Link
               to={`/projects/${projectId}/browse`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Browse
+              Browse 👀
             </Link>
             <Link
               to={`/projects/${projectId}/cluster`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              Cluster
+              Cluster 🧩
             </Link>
             <Link
               to={`/projects/${projectId}/system`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
-              System
+              System 🛠️
             </Link>
             <Link
               to={`/projects/${projectId}/settings`}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
               <span className="inline-flex items-center gap-1">
-                Settings
+                Settings ⚙️
                 {project.has_pin && <span aria-hidden>🔒</span>}
               </span>
             </Link>
           </div>
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            Run a retrieval baseline against a labeled test set (CSV with <span className="font-mono text-gray-600">question</span> and <span className="font-mono text-gray-600">ground_truth</span>).
+            Export the JSON output for scoring in your RAGAS portal.
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm max-w-2xl">
