@@ -47,7 +47,7 @@ services:
       EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
       # Reranker: always Ollama, set to "false" to skip
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
-      RERANKER_MODEL: ${RERANKER_MODEL:-bge-reranker-base}
+      RERANKER_MODEL: ${RERANKER_MODEL:-bbjson/bge-reranker-base:latest}
     volumes:
       - lens-rag-uploads:/data/projects
     extra_hosts:
@@ -105,7 +105,7 @@ services:
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
       EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
-      RERANKER_MODEL: ${RERANKER_MODEL:-bge-reranker-base}
+      RERANKER_MODEL: ${RERANKER_MODEL:-bbjson/bge-reranker-base:latest}
       ROOT_PATH: /lens-rag
       SERVE_FRONTEND: "true"
       FRONTEND_DIST_DIR: /app/frontend/dist
