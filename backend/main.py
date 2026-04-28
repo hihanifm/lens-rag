@@ -374,6 +374,8 @@ def search_stream(
                 ):
                     if event['step'] == 'complete':
                         payload = _json.dumps({"step": "complete", "results": event['response'].dict()})
+                    elif event['step'] == 'count':
+                        payload = _json.dumps({"step": "count", "for_step": event['for_step'], "count": event['count']})
                     else:
                         payload = _json.dumps({"step": event['step'], "message": event['message']})
                     yield f"data: {payload}\n\n"

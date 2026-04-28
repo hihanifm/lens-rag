@@ -307,6 +307,7 @@ export default function Search() {
             {activeStepDefs.map(({ key, label }) => {
               const done   = s.doneSteps.includes(key)
               const active = s.currentStep === key
+              const count  = s.stepCounts?.[key]
               return (
                 <span
                   key={key}
@@ -320,6 +321,9 @@ export default function Search() {
                    active ? <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> :
                             <span className="inline-block w-2 h-2 rounded-full bg-gray-300" />}
                   {label}
+                  {count != null && (
+                    <span className="opacity-60 tabular-nums">· {count}</span>
+                  )}
                 </span>
               )
             })}

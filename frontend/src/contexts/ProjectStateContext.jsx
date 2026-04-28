@@ -17,7 +17,7 @@ const ProjectStateContext = createContext(null)
 const defaultSearch = {
   query: '', mode: 'topic', k: null,
   use_vector: true, use_bm25: true, use_rrf: true, use_rerank: true,
-  loading: false, currentStep: null, doneSteps: [],
+  loading: false, currentStep: null, doneSteps: [], stepCounts: {},
   results: null, stats: null, error: '',
 }
 
@@ -56,7 +56,7 @@ export function ProjectStateProvider({ children }) {
 
     setSearch(pid, {
       loading: true, error: '', results: null, stats: null,
-      currentStep: null, doneSteps: [],
+      currentStep: null, doneSteps: [], stepCounts: {},
       query, mode, k, use_vector, use_bm25, use_rrf, use_rerank,
     })
 
@@ -104,6 +104,11 @@ export function ProjectStateProvider({ children }) {
             } else if (event.step === 'error') {
               delete searchEvtRefs.current[pid]
               setSearch(pid, { loading: false, error: event.message || 'Search failed.', currentStep: null, doneSteps: [] })
+            } else if (event.step === 'count') {
+              setSearch(pid, s => ({
+                ...s,
+                stepCounts: { ...s.stepCounts, [event.for_step]: event.count },
+              }))
             } else {
               setSearch(pid, s => ({
                 ...s,

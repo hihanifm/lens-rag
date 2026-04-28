@@ -160,6 +160,7 @@ def topic_search_stream(
         vector_ids = [row['id'] for row in vector_rows]
         rows_by_id = {row['id']: row for row in vector_rows}
         stats['vector_candidates'] = len(vector_ids)
+        yield {"step": "count", "for_step": "vector", "count": len(vector_ids)}
     else:
         stats['embedding_ms'] = None
         stats['vector_search_ms'] = None
@@ -185,6 +186,7 @@ def topic_search_stream(
 
         bm25_ids = [row['id'] for row in bm25_rows]
         stats['bm25_candidates'] = len(bm25_ids)
+        yield {"step": "count", "for_step": "bm25", "count": len(bm25_ids)}
         for row in bm25_rows:
             if row['id'] not in rows_by_id:
                 rows_by_id[row['id']] = row
@@ -202,6 +204,7 @@ def topic_search_stream(
     # Only record RRF timing when RRF actually ran; trivial concat gets None
     stats['rrf_merge_ms'] = merge_ms
     stats['candidates_retrieved'] = len(merged_ids)
+    yield {"step": "count", "for_step": "rrf", "count": len(merged_ids)}
     logger.debug("  merge done candidates=%d rrf=%s ms=%.1f", len(merged_ids), use_rrf, merge_ms)
 
     # ── Step 4: Rerank ────────────────────────────────────────────────────────
@@ -222,6 +225,7 @@ def topic_search_stream(
         )
         stats['reranker_ms'] = round((time.perf_counter() - t) * 1000, 1)
         logger.debug("  rerank done reranker_ms=%.1f", stats['reranker_ms'])
+        yield {"step": "count", "for_step": "reranking", "count": min(k, len(ranked))}
     else:
         ranked = [(doc_id, None) for doc_id in candidates_to_rerank]
         stats['reranker_ms'] = None
