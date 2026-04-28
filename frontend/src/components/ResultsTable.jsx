@@ -23,13 +23,20 @@ export default function ResultsTable({ results, displayColumns }) {
       accessorFn: row => row.display_data[col],
       id: col,
       header: col,
-      cell: info => (
-        <span className="text-sm text-gray-700 whitespace-pre-wrap break-words">
-          {info.getValue() ?? ''}
-        </span>
-      )
+      cell: info => {
+        const expanded = expandedRows.has(info.row.id)
+        return (
+          <span
+            className={`block text-sm text-gray-700 break-words ${
+              expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5'
+            }`}
+          >
+            {info.getValue() ?? ''}
+          </span>
+        )
+      }
     })),
-    [displayColumns]
+    [displayColumns, expandedRows]
   )
 
   const table = useReactTable({
@@ -66,9 +73,7 @@ export default function ResultsTable({ results, displayColumns }) {
           ))}
         </thead>
         <tbody className="bg-white divide-y divide-gray-100">
-          {table.getRowModel().rows.map((row, i) => {
-            const expanded = expandedRows.has(row.id)
-            return (
+          {table.getRowModel().rows.map((row, i) => (
             <tr
               key={row.id}
               onClick={() => toggleRow(row.id)}
@@ -77,14 +82,11 @@ export default function ResultsTable({ results, displayColumns }) {
             >
               {row.getVisibleCells().map(cell => (
                 <td key={cell.id} className="px-4 py-3 max-w-xs align-top">
-                  <span className={`block ${expanded ? '' : 'line-clamp-5'}`}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </span>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}
             </tr>
-            )
-          })}
+          ))}
         </tbody>
       </table>
     </div>

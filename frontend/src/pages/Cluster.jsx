@@ -654,8 +654,8 @@ export default function Cluster() {
                                     className="px-4 py-3 text-sm text-gray-700 max-w-xs align-top"
                                   >
                                     <span
-                                      className={`block whitespace-pre-wrap break-words ${
-                                        expanded ? '' : 'line-clamp-5'
+                                      className={`block break-words ${
+                                        expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5'
                                       }`}
                                     >
                                       {col === 'Context'

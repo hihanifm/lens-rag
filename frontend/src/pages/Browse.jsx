@@ -142,7 +142,7 @@ export default function Browse() {
                               <td key={col} className="px-4 py-3 align-top">
                                 <span
                                   className={`block font-mono text-xs text-gray-700 break-words ${
-                                    expanded ? '' : 'line-clamp-2'
+                                    expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5'
                                   }`}
                                 >
                                   {text || <span className="text-gray-300 italic not-italic font-sans">null</span>}
