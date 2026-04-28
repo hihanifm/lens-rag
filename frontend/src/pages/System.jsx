@@ -1,8 +1,6 @@
-import { useParams, Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getProject, getProjectSystemConfig } from '../api/client'
-import { useProjectPin } from '../hooks/useProjectPin'
-import PinGate from '../components/PinGate'
+import { getSystemConfig } from '../api/client'
 
 const DEFAULT_TOPIC_PIPELINE =
   'Topic mode: embed query → top-K cosine neighbors (HNSW) + top-K lexical matches → merged (RRF or vector-primary) → optional reranker (Ollama cross-encoder) → top-k results.'
@@ -52,76 +50,24 @@ function Row({ label, value }) {
   )
 }
 
-export default function SystemConfig() {
-  const { projectId } = useParams()
-  const location = useLocation()
-
-  const { data: project } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => getProject(projectId),
-  })
-
-  const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
-
+export default function System() {
   const { data: cfg, isLoading, isError, error } = useQuery({
-    queryKey: ['system-config', projectId],
-    queryFn: () => getProjectSystemConfig(projectId),
-    enabled: !!project && !isLocked,
+    queryKey: ['system-config'],
+    queryFn: getSystemConfig,
   })
-
-  const tabs = [
-    { label: 'Search Pro 🚀🔥', path: 'search' },
-    { label: 'Evaluate 🧪', path: 'evaluate' },
-    { label: 'Browse 👀', path: 'browse' },
-    { label: 'Cluster 🧩', path: 'cluster' },
-    { label: 'System 🛠️', path: 'system' },
-    { label: project?.has_pin ? 'Settings ⚙️ 🔒' : 'Settings ⚙️', path: 'settings' },
-  ]
-
-  if (project && isLocked) return <PinGate onUnlock={unlockWithPin} />
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="w-[90%] mx-auto py-10">
+      <div className="w-[90%] mx-auto py-10 max-w-4xl">
         <div className="mb-8">
-          <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Projects</Link>
+          <Link to="/" className="text-sm text-gray-400 hover:text-gray-600">← Home</Link>
           <div className="flex items-center gap-2 mt-1">
-            <h1 className="text-2xl font-bold text-gray-900">{project?.name}</h1>
-            {project?.has_pin && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
-                <span aria-hidden>🔒</span>
-                PIN protected
-              </span>
-            )}
+            <h1 className="text-2xl font-bold text-gray-900">System 🛠️</h1>
           </div>
-          <p className="text-sm text-gray-400 mb-4">
-            {project?.row_count?.toLocaleString()} records
-            {project?.source_filename && <span className="ml-2 text-gray-300">·</span>}
-            {project?.source_filename && (
-              <span className="ml-2 font-mono">{project.source_filename}</span>
-            )}
+          <p className="text-sm text-gray-500 mt-4 max-w-3xl">
+            Read-only view of the retrieval configuration used by the server (models, dimensions, reranker, and pgvector settings).
           </p>
-          <div className="flex flex-wrap gap-1">
-            {tabs.map(({ label, path }) => (
-              <Link
-                key={path}
-                to={`/projects/${projectId}/${path}`}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  location.pathname.endsWith(`/${path}`)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {label}
-              </Link>
-            ))}
-          </div>
         </div>
-
-        <p className="text-sm text-gray-500 mb-6 max-w-3xl">
-          Read-only system view of the retrieval configuration used by the server (models, dimensions, reranker, and pgvector settings).
-          Values come from environment and the running PostgreSQL / pgvector instance.
-        </p>
 
         {isLoading && <p className="text-gray-400">Loading configuration...</p>}
         {isError && (
@@ -181,3 +127,4 @@ export default function SystemConfig() {
     </div>
   )
 }
+

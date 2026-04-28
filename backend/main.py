@@ -240,10 +240,28 @@ def get_system_config(project_id: int, request: Request):
     Read-only server retrieval configuration (embedding provider, models, indexes,
     HNSW/BM25 summary). PIN-protected when project has a PIN.
     """
-    project_raw = get_project_raw(project_id)
-    if not project_raw:
-        raise HTTPException(status_code=404, detail="Project not found")
-    _check_pin(project_raw, request)
+    return _get_system_config_response(request=request, project_id=project_id)
+
+
+@app.get("/system-config", response_model=SystemConfigResponse)
+def get_system_config_global():
+    """
+    Read-only server retrieval configuration (global).
+    Does not require a project or PIN because values are shared across all projects.
+    """
+    return _get_system_config_response(request=None, project_id=None)
+
+
+def _get_system_config_response(request: Request | None, project_id: int | None) -> SystemConfigResponse:
+    """
+    Shared system config response builder.
+    When project_id is provided, enforce PIN if the project is protected.
+    """
+    project_raw = get_project_raw(project_id) if project_id is not None else None
+    if project_id is not None:
+        if not project_raw:
+            raise HTTPException(status_code=404, detail="Project not found")
+        _check_pin(project_raw, request)
 
     pgvector_version = None
     hnsw_ef_search = None

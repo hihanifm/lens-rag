@@ -62,6 +62,9 @@ export const getProjectColumns = (id) =>
 export const getProjectSystemConfig = (id) =>
   api.get(`/projects/${id}/system-config`, { headers: projectHeaders(id) }).then(r => r.data)
 
+export const getSystemConfig = () =>
+  api.get('/system-config').then(r => r.data)
+
 export const browseProject = (id) =>
   api.get(`/projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
 

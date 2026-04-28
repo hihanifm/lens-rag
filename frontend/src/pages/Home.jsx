@@ -45,6 +45,7 @@ export default function Home() {
     refetchInterval: 3000
   })
 
+
   // Tick every second while any project is ingesting so elapsed time stays live
   const hasIngesting = projects.some(p => p.status === 'ingesting')
   useEffect(() => {
@@ -83,13 +84,21 @@ export default function Home() {
             <Link to="/" className="text-3xl font-bold text-gray-900 tracking-tight hover:text-gray-700 transition-colors">LENS</Link>
             <p className="text-gray-500 mt-1">Lightweight ENgineering Search</p>
           </div>
-          <Link
-            to="/projects/new"
-            data-testid="new-project"
-            className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors"
-          >
-            + New Project
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/system"
+              className="border border-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+            >
+              System 🛠️
+            </Link>
+            <Link
+              to="/projects/new"
+              data-testid="new-project"
+              className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            >
+              + New Project
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
@@ -217,6 +226,7 @@ export default function Home() {
                 ))}
               </div>
             )}
+
           </div>
 
         </div>

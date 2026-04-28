@@ -22,6 +22,7 @@ export default defineConfig({
           if (req.headers.accept?.includes('text/html')) return '/index.html'
         },
       },
+      '/system-config': { target: API_PROXY_TARGET },
       '/health':  { target: API_PROXY_TARGET },
       '/samples': { target: API_PROXY_TARGET },
     }
