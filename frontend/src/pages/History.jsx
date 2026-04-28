@@ -128,11 +128,14 @@ function ClusterExpansion({ entry }) {
           </button>
           {!collapsed[group.label] && (
             <div className="overflow-x-auto border-t border-gray-100">
-              <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <table
+                className="divide-y divide-gray-100 text-sm"
+                style={{ width: 'max-content', minWidth: '100%' }}
+              >
                 <thead className="bg-gray-50">
                   <tr>
                     {[...(entry.display_columns ?? []), 'Context'].map(col => (
-                      <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
+                      <th key={col} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[160px]">{col}</th>
                     ))}
                   </tr>
                 </thead>
@@ -148,7 +151,7 @@ function ClusterExpansion({ entry }) {
                         title="Click to expand/collapse row"
                       >
                         {[...(entry.display_columns ?? []), 'Context'].map(col => (
-                          <td key={col} className="px-4 py-2 text-gray-700 max-w-xs align-top">
+                          <td key={col} className="px-4 py-2 text-gray-700 min-w-[160px] max-w-xs align-top">
                             <span className={`block break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`}>
                               {col === 'Context'
                                 ? (rec.contextual_content ?? '')

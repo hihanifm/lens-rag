@@ -52,7 +52,10 @@ export default function ResultsTable({ results, displayColumns }) {
 
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 mt-6">
-      <table className="min-w-full divide-y divide-gray-200">
+      <table
+        className="divide-y divide-gray-200"
+        style={{ width: 'max-content', minWidth: '100%' }}
+      >
         <thead className="bg-gray-50">
           {table.getHeaderGroups().map(hg => (
             <tr key={hg.id}>
@@ -60,7 +63,7 @@ export default function ResultsTable({ results, displayColumns }) {
                 <th
                   key={header.id}
                   onClick={header.column.getToggleSortingHandler()}
-                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                  className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 min-w-[160px]"
                 >
                   <div className="flex items-center gap-1">
                     {flexRender(header.column.columnDef.header, header.getContext())}
@@ -81,7 +84,7 @@ export default function ResultsTable({ results, displayColumns }) {
               title="Click to expand/collapse row"
             >
               {row.getVisibleCells().map(cell => (
-                <td key={cell.id} className="px-4 py-3 max-w-xs align-top">
+                <td key={cell.id} className="px-4 py-3 min-w-[160px] max-w-xs align-top">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}
