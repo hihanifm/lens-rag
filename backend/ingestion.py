@@ -87,6 +87,7 @@ def ingest(
     """
     logger.info("ingest() start project_id=%d schema=%s content_col=%r context_cols=%s id_col=%r",
                 project_id, schema_name, content_column, context_columns, id_column)
+    t_pipeline_start = time.monotonic()
 
     # Step 1: Read Excel
     yield {"step": "reading", "message": "Reading Excel file..."}
@@ -172,14 +173,15 @@ def ingest(
     total_elapsed = int((time.monotonic() - t_ingest_start) * 1000)
     logger.info("ingest() embedding+insert done rows=%d elapsed_ms=%d", total_rows, total_elapsed)
 
-    # Step 4: Update project status + stamp ingested_at
+    # Step 4: Update project status + stamp ingested_at + record total duration
+    ingestion_ms = int((time.monotonic() - t_pipeline_start) * 1000)
     with get_cursor() as (cur, conn):
         cur.execute("""
             UPDATE public.projects
-            SET status = 'ready', row_count = %s, ingested_at = NOW()
+            SET status = 'ready', row_count = %s, ingested_at = NOW(), ingestion_ms = %s
             WHERE id = %s
-        """, [total_rows, project_id])
-    logger.info("ingest() project %d marked ready", project_id)
+        """, [total_rows, ingestion_ms, project_id])
+    logger.info("ingest() project %d marked ready — total_ms=%d", project_id, ingestion_ms)
 
     yield {
         "step": "complete",

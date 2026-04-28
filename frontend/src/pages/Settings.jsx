@@ -5,6 +5,14 @@ import { getProject, getProjectColumns, updateProject, deleteProject } from '../
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60000)
+  const s = Math.round((ms % 60000) / 1000)
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
 function Badge({ children }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium">
@@ -188,6 +196,13 @@ export default function Settings() {
                 <span className="text-sm text-gray-600">
                   {project.ingested_at
                     ? new Date(project.ingested_at).toLocaleString()
+                    : <span className="text-gray-400">—</span>}
+                </span>
+              </ReadOnlyField>
+              <ReadOnlyField label="Ingestion time">
+                <span className="text-sm text-gray-600">
+                  {project.ingestion_ms != null
+                    ? formatDuration(project.ingestion_ms)
                     : <span className="text-gray-400">—</span>}
                 </span>
               </ReadOnlyField>
