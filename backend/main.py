@@ -681,7 +681,7 @@ def cluster_export_endpoint(project_id: int, req: ClusterRequest, request: Reque
 
 @app.get("/projects/{project_id}/column-values")
 def column_values_endpoint(project_id: int, column: str, request: Request):
-    """Return up to 50 distinct values for any column. Used by the Cluster filter picker."""
+    """Return up to 100 distinct values for any column. Used by the Cluster filter picker."""
     from ingestion import safe_col_name as _safe
     project_raw = get_project_raw(project_id)
     if not project_raw:
@@ -689,15 +689,17 @@ def column_values_endpoint(project_id: int, column: str, request: Request):
     _check_pin(project_raw, request)
     schema = project_raw["schema_name"]
     safe = f'col_{_safe(column)}'
+    max_values = 100
+    fetch_limit = max_values + 1
     with get_cursor() as (cur, _conn):
-        # Fetch 51 rows — if we get 51 the list is truncated; we return at most 50.
+        # Fetch max_values+1 rows — if we exceed max_values the list is truncated.
         cur.execute(
             f'SELECT DISTINCT "{safe}" FROM {schema}.records '
-            f'WHERE "{safe}" IS NOT NULL ORDER BY 1 LIMIT 51'
+            f'WHERE "{safe}" IS NOT NULL ORDER BY 1 LIMIT {fetch_limit}'
         )
         rows = [r[safe] for r in cur.fetchall()]
-    truncated = len(rows) > 50
-    return {"column": column, "values": rows[:50], "truncated": truncated}
+    truncated = len(rows) > max_values
+    return {"column": column, "values": rows[:max_values], "truncated": truncated}
 
 
 # ── Evaluate ─────────────────────────────────────────────────────────────

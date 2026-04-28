@@ -345,6 +345,7 @@ export default function Cluster() {
             {filters.map((row, idx) => {
               const valuesData = columnValuesQueries[idx]?.data
               const pending = !!(row.column && columnValuesQueries[idx]?.isFetching)
+              const mode = row.mode || (valuesData?.truncated ? 'pick' : 'pick')
               return (
                 <div key={idx} className="flex flex-wrap items-center gap-3">
                   <select
@@ -352,7 +353,7 @@ export default function Cluster() {
                     value={row.column}
                     onChange={e => {
                       const col = e.target.value
-                      setFilters(prev => prev.map((r, i) => (i === idx ? { column: col, values: [] } : r)))
+                      setFilters(prev => prev.map((r, i) => (i === idx ? { column: col, values: [], mode: 'pick' } : r)))
                     }}
                     className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[10rem]"
                   >
@@ -382,17 +383,63 @@ export default function Cluster() {
                   )}
 
                   {row.column && valuesData?.truncated && (
-                    <input
-                      {...(idx === 0 ? { 'data-testid': 'cluster-filter-value-input' } : {})}
-                      type="text"
-                      value={(row.values ?? []).join(', ')}
-                      onChange={e => {
-                        const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                        setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, values: parts } : r)))
-                      }}
-                      placeholder="Comma-separated substrings…"
-                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
-                    />
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        Too many distinct values — showing only the first 100.
+                      </div>
+
+                      <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1">
+                        <button
+                          type="button"
+                          onClick={() => setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, mode: 'pick' } : r)))}
+                          className={`px-2 py-1 text-xs rounded-md ${
+                            mode === 'pick' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          Pick
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, mode: 'freeform' } : r)))}
+                          className={`px-2 py-1 text-xs rounded-md ${
+                            mode === 'freeform' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          Freeform
+                        </button>
+                      </div>
+
+                      {mode === 'pick' ? (
+                        <select
+                          {...(idx === 0 ? { 'data-testid': 'cluster-filter-value' } : {})}
+                          multiple
+                          value={row.values ?? []}
+                          onChange={e => {
+                            const sel = [...e.target.selectedOptions].map(o => o.value)
+                            setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, values: sel } : r)))
+                          }}
+                          size={Math.min(Math.max((valuesData.values?.length || 0), 3), 10)}
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
+                          title="Hold Cmd (Mac) or Ctrl (Windows) to select multiple values"
+                        >
+                          {valuesData.values.map(v => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          {...(idx === 0 ? { 'data-testid': 'cluster-filter-value-input' } : {})}
+                          type="text"
+                          value={(row.values ?? []).join(', ')}
+                          onChange={e => {
+                            const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                            setFilters(prev => prev.map((r, i) => (i === idx ? { ...r, values: parts } : r)))
+                          }}
+                          placeholder="Comma-separated substrings…"
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[12rem]"
+                        />
+                      )}
+                    </div>
                   )}
 
                   {row.column && pending && !valuesData && (
