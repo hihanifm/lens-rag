@@ -133,6 +133,11 @@ def delete_project_endpoint(project_id: int, request: Request):
 
 @app.get("/projects/{project_id}/browse")
 def browse_project(project_id: int, request: Request):
+    # Browser page navigation sends Accept: text/html — serve the SPA instead of JSON.
+    if _FRONTEND and "text/html" in request.headers.get("accept", ""):
+        from fastapi.responses import FileResponse
+        dist_dir = os.environ.get("FRONTEND_DIST_DIR", "frontend/dist")
+        return FileResponse(os.path.join(dist_dir, "index.html"))
     project_raw = get_project_raw(project_id)
     if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
