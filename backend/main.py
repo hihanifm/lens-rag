@@ -48,7 +48,7 @@ from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
 from clustering import cluster as do_cluster, stream_cluster
 
-app = FastAPI(title="LENS API", version="1.4.0", root_path=ROOT_PATH)
+app = FastAPI(title="LENS API", version="1.4.1", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
 
 app.add_middleware(
