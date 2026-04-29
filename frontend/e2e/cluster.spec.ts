@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { skipUnlessOllamaEmbedding } from './skipUnlessOllama'
 
 function sampleXlsxPath() {
   const __filename = fileURLToPath(import.meta.url)
@@ -10,8 +9,7 @@ function sampleXlsxPath() {
 }
 
 test.describe.serial('cluster tab', () => {
-  test('k-means cluster, scatter view, filter, and export', async ({ page, request }) => {
-    await skipUnlessOllamaEmbedding(request, test)
+  test('k-means cluster, scatter view, filter, and export', async ({ page }) => {
     // ── Create + ingest project ──────────────────────────────────────────
     await page.goto('/')
     await page.getByTestId('new-project').click()
@@ -38,8 +36,10 @@ test.describe.serial('cluster tab', () => {
     // Display columns (pre-filled)
     await page.getByTestId('display-continue').click()
 
-    // Connection step (leave defaults)
-    await page.getByRole('button', { name: 'Continue' }).click()
+    // Connection step (force Ollama embed for e2e reliability)
+    await page.getByTestId('embed-url').fill('http://host.docker.internal:11434/v1')
+    await page.getByTestId('embed-model-input').fill('qwen3-embedding:0.6b')
+    await page.getByTestId('connection-continue').click()
 
     // Create + wait for ingestion
     await page.getByTestId('create-project').click()

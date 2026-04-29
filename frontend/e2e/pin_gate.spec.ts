@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { skipUnlessOllamaEmbedding } from './skipUnlessOllama'
 
 function sampleXlsxPath() {
   const __filename = fileURLToPath(import.meta.url)
@@ -10,8 +9,7 @@ function sampleXlsxPath() {
 }
 
 test.describe.serial('project PIN', () => {
-  test('PIN gate blocks until unlocked, then search works', async ({ page, request }) => {
-    await skipUnlessOllamaEmbedding(request, test)
+  test('PIN gate blocks until unlocked, then search works', async ({ page }) => {
     const pin = '1234'
 
     await page.goto('/')
@@ -41,8 +39,10 @@ test.describe.serial('project PIN', () => {
     // Step 5: Results columns
     await page.getByTestId('display-continue').click()
 
-    // Step 6: Connection (leave defaults)
-    await page.getByRole('button', { name: 'Continue' }).click()
+    // Step 6: Connection (force Ollama embed for e2e reliability)
+    await page.getByTestId('embed-url').fill('http://host.docker.internal:11434/v1')
+    await page.getByTestId('embed-model-input').fill('qwen3-embedding:0.6b')
+    await page.getByTestId('connection-continue').click()
 
     // Step 7: Settings -> set PIN -> Create + ingest
     await page.getByPlaceholder('Leave blank for open access').fill(pin)

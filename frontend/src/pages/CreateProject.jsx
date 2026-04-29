@@ -131,12 +131,19 @@ export default function CreateProject() {
 
   // Pre-fill Connection step with system defaults on first visit
   const connectionPrefilled = useRef(false)
+  const connectionTouched = useRef(false)
+  const embedUrlRef = useRef('')
   useEffect(() => {
     if (step !== 6 || connectionPrefilled.current) return
     connectionPrefilled.current = true
     getSystemConfig().then(cfg => {
+      if (connectionTouched.current) return
       const url = cfg.embedding_url || ''
-      setEmbedUrl(url)
+      // Only prefill if the user hasn't typed anything yet.
+      if (!embedUrlRef.current.trim()) {
+        setEmbedUrl(url)
+        embedUrlRef.current = url
+      }
       if (url) {
         // OpenAI model listing requires an API key; don't auto-fetch on arrival.
         if (cfg.embedding_provider === 'openai') {
@@ -545,8 +552,9 @@ export default function CreateProject() {
                 <input
                   type="text"
                   value={embedUrl}
-                  onChange={e => { setEmbedUrl(e.target.value); setAvailableModels([]); setEmbedModel(''); setModelError('') }}
+                  onChange={e => { connectionTouched.current = true; embedUrlRef.current = e.target.value; setEmbedUrl(e.target.value); setAvailableModels([]); setEmbedModel(''); setModelError('') }}
                   placeholder="e.g. http://192.168.1.10:11434/v1"
+                  data-testid="embed-url"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -560,6 +568,7 @@ export default function CreateProject() {
                   value={embedApiKey}
                   onChange={e => setEmbedApiKey(e.target.value)}
                   placeholder="Leave blank for Ollama (no key needed)"
+                  data-testid="embed-api-key"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -568,6 +577,7 @@ export default function CreateProject() {
                 type="button"
                 onClick={handleFetchModels}
                 disabled={!embedUrl.trim() || modelLoading}
+                data-testid="fetch-models"
                 className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
               >
                 {modelLoading ? 'Fetching models...' : 'Fetch available models'}
@@ -583,12 +593,32 @@ export default function CreateProject() {
                   <select
                     value={embedModel}
                     onChange={e => setEmbedModel(e.target.value)}
+                    data-testid="embed-model"
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     {availableModels.map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {embedUrl.trim() && availableModels.length === 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Model <span className="text-gray-400 font-normal">(manual)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={embedModel}
+                    onChange={e => setEmbedModel(e.target.value)}
+                    placeholder="e.g. bge-m3"
+                    data-testid="embed-model-input"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    If model listing fails, you can still enter the embedding model ID directly.
+                  </p>
                 </div>
               )}
 
@@ -599,7 +629,7 @@ export default function CreateProject() {
 
             <div className="flex gap-3 mt-8">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
+              <button data-testid="connection-continue" onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
             </div>
           </div>
         )}
