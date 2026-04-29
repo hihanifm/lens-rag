@@ -557,6 +557,11 @@ export default function CreateProject() {
                   data-testid="embed-url"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <p className="mt-1 text-xs text-gray-400">
+                  Ollama examples:{' '}
+                  <span className="font-mono">http://host.docker.internal:11434/v1</span> (Docker → host),{' '}
+                  <span className="font-mono">http://localhost:11434/v1</span> (browser on same machine as Ollama).
+                </p>
               </div>
 
               <div>
