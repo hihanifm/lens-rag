@@ -12,7 +12,11 @@ export const API_BASE_URL = _explicitApiBase
   : (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '')
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  // Important: axios treats `baseURL: ''` as "no base" and then resolves relative
+  // request URLs against the current SPA route (e.g. /projects/new), producing
+  // paths like /projects/projects. When the app base is '/', keep axios anchored
+  // at the origin root by using '/' as the base.
+  baseURL: API_BASE_URL || '/',
   headers: { 'Content-Type': 'application/json' }
 })
 
@@ -33,43 +37,43 @@ export const projectHeaders = (projectId) => {
 }
 
 export const verifyProjectPin = (projectId, pin) =>
-  api.post(`/projects/${projectId}/verify-pin`, { pin }).then(r => r.data)
+  api.post(`projects/${projectId}/verify-pin`, { pin }).then(r => r.data)
 
 // ── Health ────────────────────────────────────────────────────────────────
 
-export const getHealth = () => api.get('/health').then(r => r.data)
+export const getHealth = () => api.get('health').then(r => r.data)
 
 // ── Projects ──────────────────────────────────────────────────────────────
 
 export const getProjects = () =>
-  api.get('/projects').then(r => r.data)
+  api.get('projects').then(r => r.data)
 
 export const getProject = (id) =>
-  api.get(`/projects/${id}`).then(r => r.data)
+  api.get(`projects/${id}`).then(r => r.data)
 
 export const createProject = (data) =>
-  api.post('/projects', data).then(r => r.data)
+  api.post('projects', data).then(r => r.data)
 
 export const updateProject = (id, data) =>
-  api.patch(`/projects/${id}`, data, { headers: projectHeaders(id) }).then(r => r.data)
+  api.patch(`projects/${id}`, data, { headers: projectHeaders(id) }).then(r => r.data)
 
 export const deleteProject = (id) =>
-  api.delete(`/projects/${id}`, { headers: projectHeaders(id) }).then(r => r.data)
+  api.delete(`projects/${id}`, { headers: projectHeaders(id) }).then(r => r.data)
 
 export const getProjectColumns = (id) =>
-  api.get(`/projects/${id}/columns`, { headers: projectHeaders(id) }).then(r => r.data)
+  api.get(`projects/${id}/columns`, { headers: projectHeaders(id) }).then(r => r.data)
 
 export const getSystemConfig = () =>
-  api.get('/system-config').then(r => r.data)
+  api.get('system-config').then(r => r.data)
 
 export const fetchModels = (url, apiKey) => {
   const params = new URLSearchParams({ url })
   if (apiKey) params.set('api_key', apiKey)
-  return api.get(`/models?${params}`).then(r => r.data.models)
+  return api.get(`models?${params}`).then(r => r.data.models)
 }
 
 export const browseProject = (id) =>
-  api.get(`/projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
+  api.get(`projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
 
 // ── Excel Upload ──────────────────────────────────────────────────────────
 
@@ -87,7 +91,7 @@ export const previewExcel = (file) => {
 
 export const searchProject = (projectId, query, mode, k, legacy_method) =>
   api.post(
-    `/projects/${projectId}/search`,
+    `projects/${projectId}/search`,
     { query, mode, k, legacy_method },
     { headers: projectHeaders(projectId) }
   ).then(r => r.data)
@@ -129,7 +133,7 @@ export const exportResults = async (projectId, query, mode, k, projectName = '',
     legacy_method,
   } = pipeline
   const response = await api.post(
-    `/projects/${projectId}/export`,
+    `projects/${projectId}/export`,
     { query, mode, legacy_method, k, use_vector, use_bm25, use_rrf, use_rerank },
     { responseType: 'blob', headers: projectHeaders(projectId) }
   )
@@ -147,14 +151,14 @@ export const exportResults = async (projectId, query, mode, k, projectName = '',
 // ── Cluster ───────────────────────────────────────────────────────────────
 
 export const getColumnValues = (projectId, column) =>
-  api.get(`/projects/${projectId}/column-values`, {
+  api.get(`projects/${projectId}/column-values`, {
     params: { column },
     headers: projectHeaders(projectId),
   }).then(r => r.data)
 
 export const clusterRecords = (projectId, algorithm, k, filters) =>
   api.post(
-    `/projects/${projectId}/cluster`,
+    `projects/${projectId}/cluster`,
     {
       algorithm,
       k: k ?? null,
@@ -165,7 +169,7 @@ export const clusterRecords = (projectId, algorithm, k, filters) =>
 
 export const exportCluster = async (projectId, algorithm, k, filters, projectName = '') => {
   const response = await api.post(
-    `/projects/${projectId}/cluster/export`,
+    `projects/${projectId}/cluster/export`,
     {
       algorithm,
       k: k ?? null,
