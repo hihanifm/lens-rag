@@ -13,19 +13,27 @@ export default defineConfig({
     port: 37001,
     strictPort: true,
     proxy: {
-      '/projects': {
+      // Proxy *all* API calls to the backend so adding new endpoints never
+      // requires updating this file. We only bypass HTML navigations (SPA) and
+      // Vite internal/module requests.
+      '/': {
         target: API_PROXY_TARGET,
-        // Browser page navigations send Accept: text/html — skip the proxy and
-        // let Vite serve index.html so React Router handles the route.
-        // Axios API calls send Accept: application/json and go straight through.
         bypass: (req) => {
+          const url = req.url || ''
+
+          // SPA navigation: serve index.html from Vite
           if (req.headers.accept?.includes('text/html')) return '/index.html'
+
+          // Vite internals / module graph / assets should NOT be proxied
+          if (
+            url.startsWith('/@') ||
+            url.startsWith('/src/') ||
+            url.startsWith('/node_modules/') ||
+            url.startsWith('/assets/') ||
+            url === '/favicon.ico'
+          ) return url
         },
       },
-      '/system-config': { target: API_PROXY_TARGET },
-      '/models': { target: API_PROXY_TARGET },
-      '/health':  { target: API_PROXY_TARGET },
-      '/samples': { target: API_PROXY_TARGET },
     }
   }
 })

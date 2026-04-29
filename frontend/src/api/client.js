@@ -20,6 +20,16 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 })
 
+// Safety: if someone accidentally uses a leading '/' (e.g. '/models'), axios will
+// ignore baseURL path prefixes like '/lens-rag'. Normalize to a relative URL so
+// baseURL is always respected.
+api.interceptors.request.use((config) => {
+  if (typeof config.url === 'string' && config.url.startsWith('/')) {
+    config.url = config.url.replace(/^\/+/, '')
+  }
+  return config
+})
+
 // ── Per-project PIN (localStorage) ─────────────────────────────────────────
 
 export const getProjectPin = (projectId) =>
