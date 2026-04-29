@@ -10,7 +10,7 @@ function sampleXlsxPath() {
 }
 
 test('create project + ingest completes', async ({ page }) => {
-  test.skip(true, 'Covered by major_flows.spec.ts (create+ingest+search+export).')
+  test.skip(true, 'Redundant: covered by major_flows.spec.ts (create+ingest+search+export). Keep skipped to avoid duplicate runtime.')
   await page.goto('/')
   await page.getByTestId('new-project').click()
 

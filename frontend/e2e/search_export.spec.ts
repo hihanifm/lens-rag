@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test('search returns results and export download works', async ({ page }) => {
-  test.skip(true, 'Covered by major_flows.spec.ts (create+ingest+search+export).')
+  test.skip(true, 'Redundant: covered by major_flows.spec.ts (create+ingest+search+export). Keep skipped to avoid duplicate runtime.')
 
   await page.getByTestId('search-query').fill('laptop')
   await page.getByTestId('search-submit').click()
