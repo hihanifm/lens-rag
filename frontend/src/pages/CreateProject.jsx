@@ -557,11 +557,46 @@ export default function CreateProject() {
                   data-testid="embed-url"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="mt-1 text-xs text-gray-400">
-                  Ollama examples:{' '}
-                  <span className="font-mono">http://host.docker.internal:11434/v1</span> (Docker → host),{' '}
-                  <span className="font-mono">http://localhost:11434/v1</span> (browser on same machine as Ollama).
-                </p>
+                <div className="mt-2 text-xs text-gray-600 space-y-2">
+                  <p className="text-gray-500">
+                    Ollama endpoints (click to fill):
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = 'http://host.docker.internal:11434/v1'
+                        connectionTouched.current = true
+                        embedUrlRef.current = v
+                        setEmbedUrl(v)
+                        setAvailableModels([])
+                        setEmbedModel('')
+                        setModelError('')
+                      }}
+                      className="px-2.5 py-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 font-mono"
+                    >
+                      http://host.docker.internal:11434/v1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = 'http://localhost:11434/v1'
+                        connectionTouched.current = true
+                        embedUrlRef.current = v
+                        setEmbedUrl(v)
+                        setAvailableModels([])
+                        setEmbedModel('')
+                        setModelError('')
+                      }}
+                      className="px-2.5 py-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 font-mono"
+                    >
+                      http://localhost:11434/v1
+                    </button>
+                  </div>
+                  <p className="text-gray-400">
+                    Use <span className="font-mono">host.docker.internal</span> when LENS runs in Docker and Ollama runs on the host; use <span className="font-mono">localhost</span> only when the browser is on the same machine as Ollama.
+                  </p>
+                </div>
               </div>
 
               <div>
