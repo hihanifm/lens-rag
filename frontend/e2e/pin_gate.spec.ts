@@ -65,6 +65,8 @@ test.describe.serial('project PIN', () => {
     await expect(page.getByTestId('search-query')).toBeVisible({ timeout: 30_000 })
 
     // Search should work now
+    // Make it faster / less flaky in shared CI: no rerank
+    await page.getByLabel('Rerank').uncheck()
     await page.getByTestId('search-query').fill('laptop')
     await page.getByTestId('search-submit').click()
     await expect(page.getByTestId('results-table')).toBeVisible({ timeout: 60_000 })

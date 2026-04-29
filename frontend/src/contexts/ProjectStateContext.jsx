@@ -36,6 +36,8 @@ export function ProjectStateProvider({ children }) {
   const searchEvtRefs = useRef({})
   // Active fetch reader refs for eval (keyed by projectId)
   const evalReaderRefs = useRef({})
+  // Active abort controllers for eval (keyed by projectId)
+  const evalAbortRefs = useRef({})
 
   // ── Search helpers ──────────────────────────────────────────────────────
 
@@ -141,6 +143,7 @@ export function ProjectStateProvider({ children }) {
   const startEval = useCallback((pid, testCases, k, projectName, pipeline) => {
     // Cancel any existing eval for this project
     evalReaderRefs.current[pid]?.cancel()
+    evalAbortRefs.current[pid]?.abort()
 
     const { use_vector, use_bm25, use_rrf, use_rerank } = pipeline
 
@@ -149,20 +152,25 @@ export function ProjectStateProvider({ children }) {
     const headers = { 'Content-Type': 'application/json' }
     const pin = getProjectPin(pid)
     if (pin) headers['X-Project-Pin'] = pin
+    const controller = new AbortController()
+    evalAbortRefs.current[pid] = controller
 
     fetch(`${API_BASE_URL}/projects/${pid}/evaluate`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ test_cases: testCases, k, use_vector, use_bm25, use_rrf, use_rerank }),
+      signal: controller.signal,
     }).then(async (res) => {
       if (!res.ok) {
         const msg = res.status === 401 ? 'PIN required or incorrect.' : 'Evaluation failed. Please try again.'
         delete evalReaderRefs.current[pid]
+        delete evalAbortRefs.current[pid]
         setEval(pid, { loading: false, error: msg, progress: null })
         return
       }
       if (!res.body) {
         delete evalReaderRefs.current[pid]
+        delete evalAbortRefs.current[pid]
         setEval(pid, { loading: false, error: 'Evaluation failed (empty response).', progress: null })
         return
       }
@@ -181,6 +189,7 @@ export function ProjectStateProvider({ children }) {
           const event = JSON.parse(part.slice(6))
           if (event.type === 'complete') {
             delete evalReaderRefs.current[pid]
+            delete evalAbortRefs.current[pid]
             setEval(pid, { loading: false, results: event.results, progress: null })
             saveEval({
               project_id: Number(pid), project_name: projectName,
@@ -192,14 +201,24 @@ export function ProjectStateProvider({ children }) {
           }
         }
       }
-    }).catch(() => {
+    }).catch((err) => {
+      if (err?.name === 'AbortError') return
       delete evalReaderRefs.current[pid]
+      delete evalAbortRefs.current[pid]
       setEval(pid, { loading: false, error: 'Evaluation failed. Please try again.', progress: null })
     })
   }, [setEval])
 
+  const cancelEval = useCallback((pid) => {
+    evalAbortRefs.current[pid]?.abort()
+    evalReaderRefs.current[pid]?.cancel()
+    delete evalAbortRefs.current[pid]
+    delete evalReaderRefs.current[pid]
+    setEval(pid, { loading: false, progress: null, error: 'Cancelled.', results: null })
+  }, [setEval])
+
   return (
-    <ProjectStateContext.Provider value={{ getSearch, setSearch, startSearch, getEval, setEval, startEval }}>
+    <ProjectStateContext.Provider value={{ getSearch, setSearch, startSearch, getEval, setEval, startEval, cancelEval }}>
       {children}
     </ProjectStateContext.Provider>
   )

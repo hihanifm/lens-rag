@@ -60,7 +60,7 @@ e2e-up:
 	docker compose --profile dev up -d --build
 
 e2e:
-	cd frontend && npm run e2e
+	cd frontend && npx playwright install chromium && npm run e2e
 
 e2e-down:
 	docker compose --profile dev down --remove-orphans

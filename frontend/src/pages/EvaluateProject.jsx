@@ -9,7 +9,7 @@ import { useProjectState } from '../contexts/ProjectStateContext'
 
 export default function EvaluateProject() {
   const { projectId } = useParams()
-  const { getEval, setEval, startEval } = useProjectState()
+  const { getEval, setEval, startEval, cancelEval } = useProjectState()
   const ev = getEval(projectId)
 
   const { data: project } = useQuery({
@@ -288,14 +288,24 @@ export default function EvaluateProject() {
             >
               {ev.loading ? 'Running...' : 'Run Evaluation'}
             </button>
-            <button
-              onClick={handleExport}
-              disabled={!ev.results}
-              data-testid="eval-export"
-              className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
-            >
-              Export RAGAS JSON
-            </button>
+            {ev.loading ? (
+              <button
+                onClick={() => cancelEval(projectId)}
+                data-testid="eval-cancel"
+                className="flex-1 border border-red-200 text-red-700 py-3 rounded-lg font-medium hover:bg-red-50 transition-colors"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleExport}
+                disabled={!ev.results}
+                data-testid="eval-export"
+                className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                Export RAGAS JSON
+              </button>
+            )}
           </div>
 
           {ev.error && <p className="mt-3 text-sm text-red-600">{ev.error}</p>}

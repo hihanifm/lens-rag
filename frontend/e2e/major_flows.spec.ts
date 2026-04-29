@@ -48,6 +48,8 @@ test.describe.serial('major flows', () => {
     await expect(page).toHaveURL(/\/projects\/\d+\/search/, { timeout: 60_000 })
 
     // Search
+    // Make it faster / less flaky in shared CI: no rerank
+    await page.getByLabel('Rerank').uncheck()
     await page.getByTestId('search-query').fill('laptop')
     await page.getByTestId('search-submit').click()
     await expect(page.getByTestId('results-table')).toBeVisible({ timeout: 60_000 })

@@ -61,6 +61,9 @@ test.describe.serial('evaluate export', () => {
 
     await page.getByTestId('eval-run').click()
 
+    // Ensure the new cancel control is present while running (prevents "stuck" UX regressions).
+    await expect(page.getByTestId('eval-cancel')).toBeVisible({ timeout: 30_000 })
+
     // Wait for results to appear then export JSON
     await expect(page.getByRole('heading', { name: 'Results' })).toBeVisible({ timeout: 300_000 })
 
