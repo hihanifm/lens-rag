@@ -564,8 +564,8 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
       setCtxError('')
       try {
         const [left, right] = await Promise.all([
-          previewCompareContext(state.tmpPathLeft, state.contextColumnsLeft, 2),
-          previewCompareContext(state.tmpPathRight, state.contextColumnsRight, 2),
+          previewCompareContext(state.tmpPathLeft, state.contextColumnsLeft, 1),
+          previewCompareContext(state.tmpPathRight, state.contextColumnsRight, 1),
         ])
         if (!alive) return
         setCtxPreview({ left, right })
@@ -612,23 +612,23 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3">
-          <div className="hidden sm:block bg-gray-50 border-r border-gray-100" />
-          <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r border-gray-100">
+        <div className="grid grid-cols-1 sm:grid-cols-12">
+          <div className="hidden sm:block sm:col-span-2 bg-gray-50 border-r border-gray-100" />
+          <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r border-gray-100 sm:col-span-5">
             <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Left</div>
             <div className="text-sm font-semibold text-gray-900 break-words">{leftTitle}</div>
           </div>
-          <div className="px-4 py-3 border-b sm:border-b-0 border-gray-100">
+          <div className="px-4 py-3 border-b sm:border-b-0 border-gray-100 sm:col-span-5">
             <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Right</div>
             <div className="text-sm font-semibold text-gray-900 break-words">{rightTitle}</div>
           </div>
 
           {fields.map(([label, leftVal, rightVal]) => (
             <div key={label} className="contents">
-              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-widest">
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-widest sm:col-span-2">
                 {label}
               </div>
-              <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0">
+              <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0 sm:col-span-5">
                 <span
                   onClick={label === 'Example merged text' ? () => toggleExample('left') : undefined}
                   role={label === 'Example merged text' ? 'button' : undefined}
@@ -645,17 +645,8 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
                 >
                   {leftVal || '—'}
                 </span>
-                {label === 'Example merged text' && !ctxLoading && ctxPreview.left?.samples?.[1] && (
-                  <span
-                    className={`block break-words text-xs text-gray-500 font-normal mt-1 ${
-                      expandedExample.left ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
-                    }`}
-                  >
-                    {ctxPreview.left.samples[1]}
-                  </span>
-                )}
               </div>
-              <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0">
+              <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0 sm:col-span-5">
                 <span
                   onClick={label === 'Example merged text' ? () => toggleExample('right') : undefined}
                   role={label === 'Example merged text' ? 'button' : undefined}
@@ -672,15 +663,6 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
                 >
                   {rightVal || '—'}
                 </span>
-                {label === 'Example merged text' && !ctxLoading && ctxPreview.right?.samples?.[1] && (
-                  <span
-                    className={`block break-words text-xs text-gray-500 font-normal mt-1 ${
-                      expandedExample.right ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
-                    }`}
-                  >
-                    {ctxPreview.right.samples[1]}
-                  </span>
-                )}
               </div>
             </div>
           ))}
@@ -1147,7 +1129,7 @@ export default function CreateCompareJob() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-[90%] mx-auto py-12">
-        <div className="max-w-lg">
+        <div className={`w-full ${step === 7 ? 'max-w-none' : 'max-w-lg'}`}>
 
           {/* Step progress dots */}
           <div className="flex items-center gap-2 mb-8">

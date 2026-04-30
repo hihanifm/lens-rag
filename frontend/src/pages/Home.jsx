@@ -208,10 +208,10 @@ function CompareTab() {
       {jobs.map(j => (
         <Link
           key={j.id}
-          to={j.status === 'ready' ? `/compare/${j.id}` : '#'}
+          to={`/compare/${j.id}`}
           className={`block bg-white rounded-xl border border-gray-200 px-6 py-5
             hover:border-blue-300 hover:shadow-sm transition-all
-            ${j.status !== 'ready' ? 'opacity-60 cursor-default' : ''}`}
+            ${j.status !== 'ready' ? 'opacity-80' : ''}`}
         >
           <div className="flex items-center justify-between">
             <div>
