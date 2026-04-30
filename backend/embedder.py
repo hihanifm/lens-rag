@@ -28,10 +28,13 @@ else:
 # Reranker always runs via Ollama
 _rerank_client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
-# Runtime auto-detect: "native" (POST /api/rerank) vs "embedding" (/v1/embeddings hack).
+# Runtime auto-detect:
+# - "native": Ollama POST /api/rerank
+# - "v1": OpenAI-compatible POST /v1/rerank
+# - "embedding": /v1/embeddings hack (bge-reranker-base pattern)
 # Cached per resolved model id (system default + per-project overrides).
 _rerank_strategy_lock = threading.Lock()
-_rerank_strategy_by_model: dict[str, str] = {}  # model_id -> "native" | "embedding"
+_rerank_strategy_by_model: dict[str, str] = {}  # model_id -> "native" | "v1" | "embedding"
 
 logger.info(
     "Reranker: enabled=%s default_model=%s — strategy auto-detected per model on first rerank (cached in memory)",
@@ -77,12 +80,37 @@ def _ensure_rerank_strategy(model: str) -> str:
                     return _rerank_strategy_by_model[model]
         except Exception as e:
             logger.debug(
-                "Rerank native probe failed — %s: %s (will try /v1/embeddings)",
+                "Rerank native probe failed — %s: %s (will try /v1/rerank then /v1/embeddings)",
                 type(e).__name__,
                 e,
             )
 
-        # 2) Fallback: OpenAI-compatible embeddings (bge-reranker-base pattern)
+        # 2) Try OpenAI-compatible /v1/rerank (some OpenAI-compatible servers expose this)
+        try:
+            r = httpx.post(
+                f"{OLLAMA_BASE_URL}/rerank",
+                json={"model": model, "query": "__lens_probe__", "documents": ["__doc__"]},
+                timeout=45.0,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict) and data.get("error"):
+                    raise RuntimeError(str(data.get("error")))
+                if isinstance(data, dict) and "results" in data:
+                    _rerank_strategy_by_model[model] = "v1"
+                    logger.info(
+                        "Rerank strategy (auto): /v1/rerank for model=%s",
+                        model,
+                    )
+                    return _rerank_strategy_by_model[model]
+        except Exception as e:
+            logger.debug(
+                "Rerank /v1/rerank probe failed — %s: %s (will try /v1/embeddings)",
+                type(e).__name__,
+                e,
+            )
+
+        # 3) Fallback: OpenAI-compatible embeddings (bge-reranker-base pattern)
         try:
             _rerank_client.embeddings.create(
                 model=model,
@@ -96,13 +124,13 @@ def _ensure_rerank_strategy(model: str) -> str:
             return _rerank_strategy_by_model[model]
         except Exception as e:
             logger.error(
-                "Rerank auto-detect FAILED for model=%r — neither /api/rerank nor embeddings: %s",
+                "Rerank auto-detect FAILED for model=%r — /api/rerank, /v1/rerank, and embeddings all failed: %s",
                 model,
                 e,
             )
             raise RuntimeError(
                 f"Rerank model={model!r} is not usable with Ollama "
-                "(tried POST /api/rerank and /v1/embeddings). "
+                "(tried POST /api/rerank, POST /v1/rerank, and /v1/embeddings). "
                 "Use a compatible reranker or set RERANKER_ENABLED=false."
             ) from e
 
@@ -125,7 +153,7 @@ def _probe_ollama():
 
     if RERANKER_ENABLED:
         logger.info(
-            "Reranker: strategy will be chosen at runtime for model=%s (native /api/rerank first, else embeddings)",
+            "Reranker: strategy will be chosen at runtime for model=%s (/api/rerank first, then /v1/rerank, else embeddings)",
             RERANKER_MODEL,
         )
     else:
@@ -229,6 +257,33 @@ def _rerank_ollama_native(query: str, candidates: list[str], model: str) -> list
     return scores
 
 
+def _rerank_v1(query: str, candidates: list[str], model: str) -> list[float]:
+    """POST /v1/rerank — one request for all candidates."""
+    url = f"{OLLAMA_BASE_URL}/rerank"
+    payload = {"model": model, "query": query, "documents": candidates}
+    t0 = time.monotonic()
+    r = httpx.post(url, json=payload, timeout=120.0)
+    r.raise_for_status()
+    data = r.json()
+    results = data.get("results") or []
+    by_idx: dict[int, float] = {}
+    for item in results:
+        idx = item.get("index")
+        if idx is None:
+            continue
+        by_idx[int(idx)] = float(item.get("relevance_score", 0.0))
+    scores = [by_idx.get(i, 0.0) for i in range(len(candidates))]
+    elapsed = int((time.monotonic() - t0) * 1000)
+    logger.debug(
+        "rerank(v1) ← OK url=%s model=%s candidates=%d elapsed_ms=%d",
+        url,
+        model,
+        len(candidates),
+        elapsed,
+    )
+    return scores
+
+
 def rerank(query: str, candidates: list[str], *, model: str | None = None) -> list[float]:
     """Score each candidate against the query. Returns scores in same order."""
     if not candidates:
@@ -254,6 +309,26 @@ def rerank(query: str, candidates: list[str], *, model: str | None = None) -> li
             elapsed = int((time.monotonic() - t0) * 1000)
             logger.exception(
                 "rerank(native) ← FAILED model=%s candidates=%d elapsed_ms=%d — %s: %s",
+                eff_model,
+                len(candidates),
+                elapsed,
+                type(e).__name__,
+                e,
+            )
+            raise
+
+    if strategy == "v1":
+        logger.debug("rerank() /v1/rerank → %s model=%s candidates=%d", OLLAMA_BASE_URL, eff_model, len(candidates))
+        t0 = time.monotonic()
+        try:
+            scores = _rerank_v1(query, candidates, eff_model)
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.debug("rerank(v1) total elapsed_ms=%d", elapsed)
+            return scores
+        except Exception as e:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            logger.exception(
+                "rerank(v1) ← FAILED model=%s candidates=%d elapsed_ms=%d — %s: %s",
                 eff_model,
                 len(candidates),
                 elapsed,
@@ -291,6 +366,8 @@ def verify_rerank_model(model: str | None = None) -> str:
     # Fire a tiny real request on the chosen path to surface runtime errors.
     if strategy == "native":
         _rerank_ollama_native("__lens_probe__", ["__doc__"], eff_model)
+    elif strategy == "v1":
+        _rerank_v1("__lens_probe__", ["__doc__"], eff_model)
     else:
         _rerank_client.embeddings.create(model=eff_model, input="__lens_probe__ [SEP] __doc__")
     return strategy
