@@ -267,3 +267,8 @@ export const browseCompareJob = (jobId, { side = null, limit = 25 } = {}) =>
 
 export const getCompareConfigStats = (jobId) =>
   api.get(`compare/${jobId}/config-stats`).then(r => r.data)
+
+export const browseCompareRaw = (jobId, { limit = 50, leftRow = null } = {}) =>
+  api.get(`compare/${jobId}/browse-raw`, {
+    params: { limit, left_row: leftRow ?? undefined },
+  }).then(r => r.data)

@@ -374,6 +374,68 @@ def browse_compare(job_id: int, side: str | None = None, limit: int = 25):
     return {"records": rows, "total": total}
 
 
+@router.get("/{job_id}/browse-raw")
+def browse_compare_raw(job_id: int, limit: int = 50, left_row: int | None = None):
+    """
+    Browse the raw-pairs report (left × top-k right candidates) with scores.
+    Mirrors the export type=raw query, but returns a limited slice for UI browsing.
+    Optional filter: left_row (original_row index from the left file).
+    """
+    job = _job_or_404(job_id)
+    if job["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
+
+    schema = job["schema_name"]
+    limit = max(1, min(int(limit or 50), 500))
+
+    where = ""
+    params: list = []
+    if left_row is not None:
+        where = "WHERE lr.original_row = %s"
+        params.append(int(left_row))
+    params.append(limit)
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            f"""
+            SELECT
+                lr.original_row        AS left_row,
+                lr.display_value       AS left_display,
+                lr.contextual_content  AS left_contextual,
+                m.rank                 AS rank,
+                rr.original_row        AS right_row,
+                rr.display_value       AS right_display,
+                rr.contextual_content  AS right_contextual,
+                m.cosine_score         AS cosine_score,
+                m.rerank_score         AS rerank_score
+            FROM {schema}.matches m
+            JOIN {schema}.records lr ON lr.id = m.left_id
+            JOIN {schema}.records rr ON rr.id = m.right_id
+            {where}
+            ORDER BY lr.original_row ASC, m.rank ASC
+            LIMIT %s
+            """,
+            params,
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+
+        if left_row is not None:
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM {schema}.matches m
+                JOIN {schema}.records lr ON lr.id = m.left_id
+                WHERE lr.original_row = %s
+                """,
+                [int(left_row)],
+            )
+        else:
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.matches")
+        total = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+
+    return {"records": rows, "total": total}
+
+
 @router.get("/{job_id}/config-stats")
 def compare_config_stats(job_id: int):
     """

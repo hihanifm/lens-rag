@@ -9,6 +9,7 @@ import {
   downloadCompareExport,
   browseCompareJob,
   getCompareConfigStats,
+  browseCompareRaw,
 } from '../api/client'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -479,12 +480,16 @@ function ExportTab({ job }) {
 
 function BrowseTab({ job }) {
   const jobId = job.id
+  const [mode, setMode] = useState('records') // records | raw
   const [side, setSide] = useState('all')
   const [expandedRows, setExpandedRows] = useState(new Set())
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['compare-browse', jobId, side],
-    queryFn: () => browseCompareJob(jobId, { side: side === 'all' ? null : side, limit: 25 }),
+    queryKey: ['compare-browse', jobId, mode, side],
+    queryFn: () => {
+      if (mode === 'raw') return browseCompareRaw(jobId, { limit: 50 })
+      return browseCompareJob(jobId, { side: side === 'all' ? null : side, limit: 25 })
+    },
     enabled: job.status === 'ready',
   })
 
@@ -505,7 +510,9 @@ function BrowseTab({ job }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-gray-600">
-            Browse raw compare records exactly as stored in Postgres.
+            {mode === 'raw'
+              ? 'Browse the raw pairs report (left × top-k right candidates) with cosine/rerank scores.'
+              : 'Browse raw compare records exactly as stored in Postgres.'}
           </p>
           <p className="text-xs text-gray-400 mt-0.5">
             Showing {records.length} of {total?.toLocaleString?.() ?? total} {side === 'all' ? 'records' : `${side} records`}
@@ -514,22 +521,43 @@ function BrowseTab({ job }) {
           </p>
         </div>
 
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {[
-            { id: 'all', label: 'All' },
-            { id: 'left', label: job.label_left || 'Left' },
-            { id: 'right', label: job.label_right || 'Right' },
-          ].map(s => (
-            <button
-              key={s.id}
-              onClick={() => { setSide(s.id); setExpandedRows(new Set()) }}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                side === s.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {[
+              { id: 'records', label: 'Records' },
+              { id: 'raw', label: 'Raw pairs' },
+            ].map(m => (
+              <button
+                key={m.id}
+                onClick={() => { setMode(m.id); setExpandedRows(new Set()) }}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  mode === m.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'records' && (
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'left', label: job.label_left || 'Left' },
+                { id: 'right', label: job.label_right || 'Right' },
+              ].map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => { setSide(s.id); setExpandedRows(new Set()) }}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    side === s.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -554,6 +582,9 @@ function BrowseTab({ job }) {
                         : col === 'sheet_name' ? '100px'
                         : col === 'contextual_content' ? '360px'
                         : col === 'embedding' ? '220px'
+                        : col === 'left_contextual' ? '360px'
+                        : col === 'right_contextual' ? '360px'
+                        : col.endsWith('_score') ? '120px'
                         : '160px'
                     }}
                   />
