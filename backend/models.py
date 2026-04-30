@@ -228,6 +228,7 @@ class CompareJobCreate(BaseModel):
 class CompareJobResponse(BaseModel):
     id: int
     name: str
+    notes: Optional[str] = None
     label_left: str
     label_right: str
     schema_name: str
@@ -241,6 +242,11 @@ class CompareJobResponse(BaseModel):
     rerank_enabled: bool = True
     rerank_model: Optional[str] = None
     created_at: datetime
+
+
+class CompareJobUpdate(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class CompareContextPreviewRequest(BaseModel):

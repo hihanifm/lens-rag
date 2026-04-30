@@ -36,6 +36,7 @@ from models import (
     CompareDecision,
     CompareJobCreate,
     CompareJobResponse,
+    CompareJobUpdate,
     CompareContextPreviewRequest,
     CompareContextPreviewResponse,
     ReviewItem,
@@ -230,6 +231,31 @@ def list_compare_jobs():
 
 @router.get("/{job_id}", response_model=CompareJobResponse)
 def get_compare_job(job_id: int):
+    return _job_response(job_id)
+
+
+@router.patch("/{job_id}", response_model=CompareJobResponse)
+def update_compare_job(job_id: int, data: CompareJobUpdate):
+    job = _job_or_404(job_id)
+    patch = data.model_dump(exclude_unset=True)
+    name = patch.get("name")
+    notes = patch.get("notes")
+
+    if name is not None:
+        name = str(name).strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+
+    # Notes can be empty string (clears it)
+    if notes is not None:
+        notes = str(notes)
+
+    with get_cursor() as (cur, _conn):
+        if name is not None:
+            cur.execute("UPDATE public.compare_jobs SET name = %s WHERE id = %s", [name, job_id])
+        if notes is not None:
+            cur.execute("UPDATE public.compare_jobs SET notes = %s WHERE id = %s", [notes, job_id])
+
     return _job_response(job_id)
 
 
@@ -448,6 +474,7 @@ def compare_config_stats(job_id: int):
     cfg = {
         "id": job["id"],
         "name": job.get("name"),
+        "notes": job.get("notes"),
         "label_left": job.get("label_left"),
         "label_right": job.get("label_right"),
         "status": job.get("status"),
@@ -855,6 +882,7 @@ def _serialize_job(row: dict) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
+        "notes": row.get("notes"),
         "label_left": row["label_left"],
         "label_right": row["label_right"],
         "schema_name": row["schema_name"],

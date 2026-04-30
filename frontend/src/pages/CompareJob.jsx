@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getCompareJob,
+  updateCompareJob,
   getReviewStats,
   getNextReviewItem,
   submitCompareDecision,
@@ -48,13 +49,12 @@ function scoreBorder(score, selected, confirmed) {
 
 function CandidateCard({ candidate, isSelected, onClick }) {
   const { score, source } = effectiveScoreInfo(candidate)
-  const isConfirmed = Boolean(candidate.__confirmed)
   return (
     <button
       onClick={onClick}
       className={`relative flex-1 text-left rounded-xl border-2 p-4 transition-all cursor-pointer
-        ${isConfirmed ? 'bg-emerald-50' : 'bg-white'}
-        ${scoreBorder(score, isSelected, isConfirmed)}`}
+        bg-white
+        ${scoreBorder(score, isSelected, false)}`}
     >
       {/* Score badge */}
       <span
@@ -80,11 +80,9 @@ function CandidateCard({ candidate, isSelected, onClick }) {
       </p>
 
       {/* Selected indicator */}
-      {(isSelected || isConfirmed) && (
-        <div className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${
-          isConfirmed ? 'bg-emerald-600' : 'bg-blue-600'
-        }`}>
-          {isConfirmed ? '✓ Saved' : '✓ Selected'}
+      {isSelected && (
+        <div className="absolute bottom-3 right-3 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
+          ✓ Selected
         </div>
       )}
     </button>
@@ -105,8 +103,6 @@ function ReviewTab({ job }) {
   const [noMore, setNoMore] = useState(false)
   const [selectedRightId, setSelectedRightId] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [confirmedRightId, setConfirmedRightId] = useState(null)
-  const [confirmedNoMatch, setConfirmedNoMatch] = useState(false)
   const [rowStartedAt, setRowStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
 
@@ -161,20 +157,14 @@ function ReviewTab({ job }) {
   const handleSelect = async (rightId) => {
     if (saving) return
     setSelectedRightId(rightId)
-    setConfirmedRightId(rightId)
-    setConfirmedNoMatch(false)
     setSaving(true)
     try {
       await submitCompareDecision(jobId, item.left_id, rightId)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      // Auto-advance to next undecided row
-      if (!includeDecided) {
-        await new Promise(r => setTimeout(r, 3000))
-        await fetchItem(0)
-      }
+      // Stay on the current row; mark it as decided for immediate feedback.
+      setItem(prev => prev ? { ...prev, is_decided: true, current_decision: rightId } : prev)
     } finally {
-      setConfirmedRightId(null)
       setSaving(false)
     }
   }
@@ -182,19 +172,13 @@ function ReviewTab({ job }) {
   const handleNoMatch = async () => {
     if (saving) return
     setSelectedRightId(null)
-    setConfirmedRightId(null)
-    setConfirmedNoMatch(true)
     setSaving(true)
     try {
       await submitCompareDecision(jobId, item.left_id, null)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      if (!includeDecided) {
-        await new Promise(r => setTimeout(r, 3000))
-        await fetchItem(0)
-      }
+      setItem(prev => prev ? { ...prev, is_decided: true, current_decision: null } : prev)
     } finally {
-      setConfirmedNoMatch(false)
       setSaving(false)
     }
   }
@@ -204,7 +188,10 @@ function ReviewTab({ job }) {
   }
 
   const handleNext = () => {
-    fetchItem(offset + 1)
+    // Manual navigation only. In undecided-only mode, deciding the current row
+    // removes it from the list, so the next row occupies the same offset.
+    const nextOffset = (!includeDecided && item?.is_decided) ? offset : (offset + 1)
+    fetchItem(nextOffset)
   }
 
   // Keyboard shortcuts: ← Prev, → Next (ignore while typing in inputs)
@@ -314,9 +301,7 @@ function ReviewTab({ job }) {
         <>
           <div className="flex gap-4 items-stretch">
             {/* Left card (~40%) */}
-            <div className={`w-[38%] shrink-0 rounded-xl border-2 p-4 relative transition-colors ${
-              confirmedNoMatch ? 'bg-gray-50 border-gray-300' : 'bg-white border-blue-200'
-            }`}>
+            <div className="w-[38%] shrink-0 bg-white rounded-xl border-2 border-blue-200 p-4 relative">
               <span className="absolute top-3 left-3 text-xs font-semibold text-blue-600 uppercase tracking-wide">
                 {job.label_left}
               </span>
@@ -343,7 +328,7 @@ function ReviewTab({ job }) {
                 item.candidates.map(c => (
                   <CandidateCard
                     key={c.right_id}
-                    candidate={{ ...c, __confirmed: confirmedRightId === c.right_id }}
+                    candidate={c}
                     isSelected={selectedRightId === c.right_id}
                     onClick={() => handleSelect(c.right_id)}
                   />
@@ -642,6 +627,7 @@ function BrowseTab({ job }) {
 
 function ConfigStatsTab({ job }) {
   const jobId = job.id
+  const queryClient = useQueryClient()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['compare-config-stats', jobId],
     queryFn: () => getCompareConfigStats(jobId),
@@ -652,6 +638,33 @@ function ConfigStatsTab({ job }) {
   const cfg = data?.config
   const stats = data?.stats
   const timings = stats?.timings_ms || null
+
+  const [editName, setEditName] = useState(job.name || '')
+  const [editNotes, setEditNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  useEffect(() => {
+    setEditName(job.name || '')
+  }, [job.name])
+
+  useEffect(() => {
+    setEditNotes(cfg?.notes ?? '')
+  }, [cfg?.notes])
+
+  const onSave = async () => {
+    setSaving(true)
+    setSaveError('')
+    try {
+      await updateCompareJob(jobId, { name: editName.trim(), notes: editNotes })
+      await queryClient.invalidateQueries({ queryKey: ['compare-job', String(jobId)] })
+      await queryClient.invalidateQueries({ queryKey: ['compare-config-stats', String(jobId)] })
+    } catch (e) {
+      setSaveError(e?.response?.data?.detail || e.message || 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const fmtMs = (ms) => (typeof ms === 'number' ? `${ms.toLocaleString()} ms` : '—')
   const fmtNum = (n) => (n == null ? '—' : (typeof n === 'number' ? n.toLocaleString() : String(n)))
@@ -682,6 +695,75 @@ function ConfigStatsTab({ job }) {
 
       {cfg && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 lg:col-span-2">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Editable</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Job name</label>
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div className="md:row-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Findings / notes</label>
+                <textarea
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  rows={5}
+                  placeholder="e.g. Embedding looks good; reranker scores seem unnormalized; using cosine fallback."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+            </div>
+            {saveError && <div className="text-sm text-red-600 mt-3">{saveError}</div>}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving || !editName.trim()}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-40 transition-colors"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 lg:col-span-2">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Models / endpoint</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="space-y-2">
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Embedding URL</span>
+                  <span className="font-medium text-gray-900 break-words">{cfg.embed_url || 'system default'}</span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Embedding model</span>
+                  <span className="font-medium text-gray-900 break-words">{cfg.embed_model || 'system default'}</span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Embedding dims</span>
+                  <span className="font-medium text-gray-900">{cfg.embed_dims ?? '—'}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Rerank enabled</span>
+                  <span className="font-medium text-gray-900">{cfg.rerank_enabled ? 'Yes' : 'No'}</span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Rerank model</span>
+                  <span className="font-medium text-gray-900 break-words">{cfg.rerank_model || 'system default'}</span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-gray-400 w-40 shrink-0">Top‑k candidates</span>
+                  <span className="font-medium text-gray-900">{cfg.top_k ?? '—'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl border border-gray-200 p-5">
             <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Left ({cfg.label_left})</div>
             <div className="space-y-2 text-sm">

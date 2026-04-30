@@ -228,6 +228,9 @@ export const listCompareJobs = () =>
 export const getCompareJob = (jobId) =>
   api.get(`compare/${jobId}`).then(r => r.data)
 
+export const updateCompareJob = (jobId, patch) =>
+  api.patch(`compare/${jobId}`, patch).then(r => r.data)
+
 export const deleteCompareJob = (jobId) =>
   api.delete(`compare/${jobId}`).then(r => r.data)
 

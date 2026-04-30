@@ -75,6 +75,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS public.compare_jobs (
                 id                       SERIAL PRIMARY KEY,
                 name                     TEXT NOT NULL,
+                notes                    TEXT,
                 label_left               TEXT NOT NULL,
                 label_right              TEXT NOT NULL,
                 schema_name              TEXT NOT NULL,
@@ -103,6 +104,7 @@ def init_db():
             );
         """)
         # Migration: add new columns to existing compare_jobs tables
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS notes TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_url TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_model TEXT;")
