@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getProject, getProjectColumns, updateProject, deleteProject } from '../api/client'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
+import RerankConfigModal from '../components/RerankConfigModal'
 
 function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`
@@ -55,16 +56,13 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [rerankEnabled, setRerankEnabled] = useState(true)
-  const [rerankModel, setRerankModel] = useState('')
+  const [rerankOpen, setRerankOpen] = useState(false)
 
   useEffect(() => {
     if (project) {
       setName(project.name)
       setDefaultK(project.default_k)
       setDisplayColumns(project.display_columns)
-      setRerankEnabled(project.rerank_enabled ?? true)
-      setRerankModel(project.rerank_model ?? '')
     }
   }, [project])
 
@@ -85,8 +83,6 @@ export default function Settings() {
         name,
         display_columns: displayColumns,
         default_k: defaultK,
-        rerank_enabled: rerankEnabled,
-        rerank_model: rerankModel.trim() || null,
       })
       await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
@@ -112,9 +108,7 @@ export default function Settings() {
   const isDirty = project && (
     name !== project.name ||
     defaultK !== project.default_k ||
-    JSON.stringify([...displayColumns].sort()) !== JSON.stringify([...project.display_columns].sort()) ||
-    rerankEnabled !== (project.rerank_enabled ?? true) ||
-    (rerankModel.trim() || '') !== ((project.rerank_model || '').trim())
+    JSON.stringify([...displayColumns].sort()) !== JSON.stringify([...project.display_columns].sort())
   )
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
@@ -314,35 +308,34 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Reranker */}
-              <div>
-                <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Topic rerank</h3>
-                <p className="text-sm text-gray-500 mb-3">
-                  Most users should ignore these settings and use the system default.
-                </p>
-                <label className="flex items-center gap-2 cursor-pointer mb-3">
-                  <input
-                    type="checkbox"
-                    checked={rerankEnabled}
-                    onChange={e => { setRerankEnabled(e.target.checked); setSaved(false) }}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-700">Enable reranking</span>
-                </label>
-                <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">
-                  Rerank model id (optional)
-                </label>
-                <input
-                  type="text"
-                  value={rerankModel}
-                  onChange={e => { setRerankModel(e.target.value); setSaved(false) }}
-                  disabled={!rerankEnabled}
-                  placeholder="Blank = system default"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  Leave blank to use the system default. Only change this if you know the rerank model id you installed on the server.
-                </p>
+              {/* Rerank tile (separate, to avoid mixing into main settings form) */}
+              <div className="rounded-xl border border-gray-200 bg-gray-50/30 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                      Topic reranking
+                    </p>
+                    <p className="text-sm text-gray-700 mt-1">
+                      <span className="font-semibold">Enabled:</span>{' '}
+                      {project.rerank_enabled ?? true ? 'Yes' : 'No'}
+                      <span className="mx-2 text-gray-300">·</span>
+                      <span className="font-semibold">Model:</span>{' '}
+                      <span className="font-mono break-all">
+                        {(project.rerank_model || '').trim() ? project.rerank_model : 'system default'}
+                      </span>
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Configure if you want to override the server’s default reranker model.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRerankOpen(true)}
+                    className="shrink-0 bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    Configure →
+                  </button>
+                </div>
               </div>
 
               {/* Display columns */}
@@ -403,6 +396,19 @@ export default function Settings() {
 
         </div>
       </div>
+
+      <RerankConfigModal
+        open={rerankOpen}
+        onClose={() => setRerankOpen(false)}
+        projectId={projectId}
+        currentEnabled={project.rerank_enabled ?? true}
+        currentModel={(project.rerank_model || '').trim()}
+        embedUrl={(project.embed_url || '').trim()}
+        onSaved={async () => {
+          await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+          await queryClient.invalidateQueries({ queryKey: ['projects'] })
+        }}
+      />
     </div>
   )
 }

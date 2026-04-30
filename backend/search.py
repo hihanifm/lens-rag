@@ -265,6 +265,8 @@ def topic_search_stream(
 
     vector_ids = []
     rows_by_id = {}
+    vector_score_by_id: dict[int, float] = {}
+    bm25_rank_by_id: dict[int, int] = {}
 
     # ── Step 1: Embed + vector retrieval ─────────────────────────────────────
     if use_vector:
@@ -290,6 +292,13 @@ def topic_search_stream(
 
         vector_ids = [row['id'] for row in vector_rows]
         rows_by_id = {row['id']: row for row in vector_rows}
+        # 1 - (embedding <=> query_vector) stored as `score` in vector rows
+        for row in vector_rows:
+            try:
+                if row.get("score") is not None:
+                    vector_score_by_id[int(row["id"])] = float(row["score"])
+            except Exception:
+                pass
         stats['vector_candidates'] = len(vector_ids)
         yield {"step": "count", "for_step": "vector", "count": len(vector_ids)}
     else:
@@ -318,6 +327,7 @@ def topic_search_stream(
         bm25_ids = [row['id'] for row in bm25_rows]
         stats['bm25_candidates'] = len(bm25_ids)
         yield {"step": "count", "for_step": "bm25", "count": len(bm25_ids)}
+        bm25_rank_by_id = {int(row_id): (rank + 1) for rank, row_id in enumerate(bm25_ids)}
         for row in bm25_rows:
             if row['id'] not in rows_by_id:
                 rows_by_id[row['id']] = row
@@ -379,7 +389,10 @@ def topic_search_stream(
             display_data[col] = row.get(safe)
         results.append(SearchResult(
             display_data=display_data,
-            score=round(float(score), 4) if score is not None else None
+            score=round(float(score), 4) if score is not None else None,
+            cosine_score=round(float(vector_score_by_id.get(int(doc_id))), 4) if int(doc_id) in vector_score_by_id else None,
+            bm25_rank=bm25_rank_by_id.get(int(doc_id)),
+            rerank_score=round(float(score), 4) if score is not None else None,
         ))
 
     stats['total_ms'] = round((time.perf_counter() - total_start) * 1000, 1)

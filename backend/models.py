@@ -106,6 +106,10 @@ class SearchRequest(BaseModel):
 class SearchResult(BaseModel):
     display_data: Dict[str, Any]
     score: Optional[float] = None
+    # Optional per-stage diagnostics (topic mode only; best-effort).
+    cosine_score: Optional[float] = None        # vector similarity (1 - cosine distance)
+    bm25_rank: Optional[int] = None             # 1-based rank in BM25 retrieval list
+    rerank_score: Optional[float] = None        # cross-encoder reranker score (if enabled)
 
 
 class SearchStats(BaseModel):
