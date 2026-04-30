@@ -406,15 +406,21 @@ def delete_run(job_id: int, run_id: int):
 
 @router.get("/{job_id}/runs/{run_id}/execute")
 def execute_run(job_id: int, run_id: int):
-    """SSE — Phase 2: run the search/rank pipeline for an existing run."""
+    """
+    SSE — Phase 2: run the search/rank pipeline for an existing run.
+
+    The pipeline runs in a background thread; closing this SSE connection does not cancel it.
+    Opening this endpoint again while the same run is in flight reattaches to `_run_progress`
+    (e.g. user navigated away and returned).
+    """
     job = _job_or_404(job_id)
     run = _run_or_404(run_id, job_id)
 
     if job["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Job embeddings not ready (status: {job['status']})")
-    if run["status"] == "running":
-        raise HTTPException(status_code=409, detail="Run already in progress")
 
+    # Reattach first: closing the SSE tab does not stop the worker; buffered tail may include
+    # `complete` before every client has refetched DB status.
     if run_id in _run_progress:
         def _stream_existing():
             while True:
@@ -425,6 +431,15 @@ def execute_run(job_id: int, run_id: int):
                     break
                 time.sleep(0.3)
         return StreamingResponse(_stream_existing(), media_type="text/event-stream")
+
+    if run["status"] == "ready":
+        raise HTTPException(status_code=400, detail="This run has already completed.")
+
+    if run["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Run is marked running but has no active progress session (server may have restarted).",
+        )
 
     _run_progress[run_id] = {"type": "starting", "message": "Starting pipeline..."}
 

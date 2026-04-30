@@ -1163,6 +1163,9 @@ function RunProgressView({ jobId, runId, onDone }) {
         <p className="text-sm font-semibold text-gray-700">Executing run…</p>
         <span className="text-xs text-gray-400">Elapsed: {elapsed}</span>
       </div>
+      <p className="text-xs text-gray-500 -mt-2">
+        Navigating away does not cancel this run — it keeps executing on the server. Open this run again to watch progress or wait until it shows <span className="font-medium text-gray-600">ready</span> in the runs list.
+      </p>
 
       {showBar && (
         <div className="space-y-1">
