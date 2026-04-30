@@ -81,6 +81,7 @@ function parseRunStatusPayload(statusMessage) {
 }
 
 function RunStatsPane({ job, run }) {
+  const [expanded, setExpanded] = useState(true)
   const [promptOpen, setPromptOpen] = useState(false)
   const payload = parseRunStatusPayload(run.status_message)
   const metrics = payload?.metrics && typeof payload.metrics === 'object' ? payload.metrics : null
@@ -145,107 +146,127 @@ function RunStatsPane({ job, run }) {
   const hasMetrics = metrics && Object.keys(metrics).length > 0
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-bold text-gray-900">Run stats</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Pipeline timings, counts, and model configuration for this run.</p>
-        </div>
-        {payload?.message && (
-          <span className="text-xs text-gray-400 font-mono truncate max-w-md" title={payload.message}>
-            {payload.message}
-          </span>
-        )}
-      </div>
-
-      {!hasMetrics && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-          No structured metrics on this run (older run or pipeline did not persist timings). Configuration below still reflects saved run settings.
-        </p>
-      )}
-
-      {hasMetrics && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    <div className={`bg-white rounded-2xl border border-gray-200 ${expanded ? 'p-5 space-y-5' : 'p-4'}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Collapse run stats' : 'Expand run stats'}
+        className="flex w-full items-start gap-2 text-left rounded-lg -m-1 p-1 hover:bg-gray-50/80 transition-colors"
+      >
+        <span className="shrink-0 text-gray-500 text-xs mt-1 w-4 text-center select-none" aria-hidden>
+          {expanded ? '▼' : '▶'}
+        </span>
+        <div className="flex-1 min-w-0 flex flex-wrap items-baseline justify-between gap-2">
           <div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Timings</div>
-            <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
-              {timingDefs.map(([label, key]) => (
-                <div key={key} className="flex justify-between gap-4">
-                  <span className="text-gray-600">{label}</span>
-                  <span className="font-semibold text-gray-900 tabular-nums">{fmtMs(metrics[key])}</span>
-                </div>
-              ))}
-            </div>
+            <h3 className="text-sm font-bold text-gray-900">Run stats</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Pipeline timings, counts, and model configuration for this run.
+              {!expanded && hasMetrics && typeof metrics.total_ms === 'number' && (
+                <span className="text-gray-400"> · Total {fmtMs(metrics.total_ms)}</span>
+              )}
+            </p>
           </div>
-          <div>
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Counts</div>
-            <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
-              {countDefs.map(([label, key]) => (
-                <div key={key} className="flex justify-between gap-4">
-                  <span className="text-gray-600">{label}</span>
-                  <span className="font-semibold text-gray-900 tabular-nums">{fmtNum(metrics[key])}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div>
-          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Run configuration</div>
-          <div className="space-y-2 text-sm">
-            {runCfgRows.map(([k, v]) => (
-              <div key={k} className="flex gap-3">
-                <span className="text-gray-400 w-36 shrink-0">{k}</span>
-                <span className="font-medium text-gray-900 break-all">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Job embedding (snapshot)</div>
-          <div className="space-y-2 text-sm">
-            {embedRows.map(([k, v]) => (
-              <div key={k} className="flex gap-3">
-                <span className="text-gray-400 w-36 shrink-0">{k}</span>
-                <span className="font-medium text-gray-900 break-all">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {llmParamRows.length > 0 && (
-        <div>
-          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">LLM judge parameters</div>
-          <div className="space-y-2 text-sm border border-purple-100 rounded-xl p-3 bg-purple-50/40">
-            {llmParamRows.map(([k, v]) => (
-              <div key={k} className="flex gap-3">
-                <span className="text-gray-500 w-40 shrink-0">{k}</span>
-                <span className="font-medium text-gray-900 break-all">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {run.llm_judge_enabled && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setPromptOpen(o => !o)}
-            className="text-xs font-semibold text-blue-600 hover:text-blue-700"
-          >
-            {promptOpen ? '▼ Hide judge prompt' : '▶ Show judge prompt'}
-          </button>
-          {promptOpen && (
-            <pre className="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
-              {run.llm_judge_prompt?.trim() ? run.llm_judge_prompt : 'Built-in server default (JSON score reply).'}
-            </pre>
+          {payload?.message && (
+            <span className="text-xs text-gray-400 font-mono truncate max-w-md" title={payload.message}>
+              {payload.message}
+            </span>
           )}
         </div>
+      </button>
+
+      {expanded && (
+        <>
+          {!hasMetrics && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              No structured metrics on this run (older run or pipeline did not persist timings). Configuration below still reflects saved run settings.
+            </p>
+          )}
+
+          {hasMetrics && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Timings</div>
+                <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
+                  {timingDefs.map(([label, key]) => (
+                    <div key={key} className="flex justify-between gap-4">
+                      <span className="text-gray-600">{label}</span>
+                      <span className="font-semibold text-gray-900 tabular-nums">{fmtMs(metrics[key])}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Counts</div>
+                <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
+                  {countDefs.map(([label, key]) => (
+                    <div key={key} className="flex justify-between gap-4">
+                      <span className="text-gray-600">{label}</span>
+                      <span className="font-semibold text-gray-900 tabular-nums">{fmtNum(metrics[key])}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div>
+              <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Run configuration</div>
+              <div className="space-y-2 text-sm">
+                {runCfgRows.map(([k, v]) => (
+                  <div key={k} className="flex gap-3">
+                    <span className="text-gray-400 w-36 shrink-0">{k}</span>
+                    <span className="font-medium text-gray-900 break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Job embedding (snapshot)</div>
+              <div className="space-y-2 text-sm">
+                {embedRows.map(([k, v]) => (
+                  <div key={k} className="flex gap-3">
+                    <span className="text-gray-400 w-36 shrink-0">{k}</span>
+                    <span className="font-medium text-gray-900 break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {llmParamRows.length > 0 && (
+            <div>
+              <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">LLM judge parameters</div>
+              <div className="space-y-2 text-sm border border-purple-100 rounded-xl p-3 bg-purple-50/40">
+                {llmParamRows.map(([k, v]) => (
+                  <div key={k} className="flex gap-3">
+                    <span className="text-gray-500 w-40 shrink-0">{k}</span>
+                    <span className="font-medium text-gray-900 break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {run.llm_judge_enabled && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setPromptOpen(o => !o)}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+              >
+                {promptOpen ? '▼ Hide judge prompt' : '▶ Show judge prompt'}
+              </button>
+              {promptOpen && (
+                <pre className="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
+                  {run.llm_judge_prompt?.trim() ? run.llm_judge_prompt : 'Built-in server default (JSON score reply).'}
+                </pre>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
