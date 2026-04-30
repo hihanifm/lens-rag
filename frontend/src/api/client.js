@@ -259,3 +259,11 @@ export const downloadCompareExport = async (jobId, type = 'confirmed', jobName =
   link.click()
   link.remove()
 }
+
+export const browseCompareJob = (jobId, { side = null, limit = 25 } = {}) =>
+  api.get(`compare/${jobId}/browse`, {
+    params: { side: side || undefined, limit },
+  }).then(r => r.data)
+
+export const getCompareConfigStats = (jobId) =>
+  api.get(`compare/${jobId}/config-stats`).then(r => r.data)

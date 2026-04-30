@@ -326,6 +326,186 @@ def review_stats(job_id: int):
     }
 
 
+@router.get("/{job_id}/browse")
+def browse_compare(job_id: int, side: str | None = None, limit: int = 25):
+    """
+    Browse raw compare records exactly as stored in Postgres.
+    Returns the first `limit` rows (default 25). Optional `side` filter: left|right.
+    """
+    job = _job_or_404(job_id)
+    if job["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
+
+    schema = job["schema_name"]
+    limit = max(1, min(int(limit or 25), 200))
+    side = (side or "").strip().lower() or None
+    if side not in (None, "left", "right"):
+        raise HTTPException(status_code=422, detail="side must be 'left' or 'right'")
+
+    where = ""
+    params: list = []
+    if side:
+        where = "WHERE side = %s"
+        params.append(side)
+    params.append(limit)
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            f"SELECT * FROM {schema}.records {where} ORDER BY id LIMIT %s",
+            params,
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+
+        if side:
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = %s", [side])
+        else:
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records")
+        total = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+
+    for row in rows:
+        if row.get("embedding") is not None:
+            emb = row["embedding"]
+            if isinstance(emb, str):
+                vals = [float(v) for v in emb.strip("[]").split(",") if v.strip()]
+            else:
+                vals = [float(v) for v in emb]
+            row["embedding"] = f"[{', '.join(f'{v:.3f}' for v in vals[:3])} … +{max(0, len(vals)-3)} more]"
+
+    return {"records": rows, "total": total}
+
+
+@router.get("/{job_id}/config-stats")
+def compare_config_stats(job_id: int):
+    """
+    Return safe compare-job configuration + lightweight process stats.
+    Intended for UI transparency/debugging (similar to Projects → Settings/System pages).
+    """
+    job = _job_or_404(job_id)
+    schema = job["schema_name"]
+
+    cfg = {
+        "id": job["id"],
+        "name": job.get("name"),
+        "label_left": job.get("label_left"),
+        "label_right": job.get("label_right"),
+        "status": job.get("status"),
+        "status_message": _safe_status_message(job.get("status_message")),
+        "created_at": job.get("created_at"),
+        "schema_name": schema,
+        "source_filename_left": job.get("source_filename_left"),
+        "source_filename_right": job.get("source_filename_right"),
+        "top_k": job.get("top_k") or 3,
+        "embed_dims": job.get("embed_dims"),
+        "embed_url": job.get("embed_url"),
+        "embed_model": job.get("embed_model"),
+        "rerank_enabled": (job.get("rerank_enabled") if job.get("rerank_enabled") is not None else True),
+        "rerank_model": job.get("rerank_model"),
+        "content_column_left": job.get("content_column_left"),
+        "context_columns_left": job.get("context_columns_left") or [],
+        "display_column_left": job.get("display_column_left"),
+        "content_column_right": job.get("content_column_right"),
+        "context_columns_right": job.get("context_columns_right") or [],
+        "display_column_right": job.get("display_column_right"),
+    }
+
+    stats: dict = {
+        "records_left": None,
+        "records_right": None,
+        "matches_rows": None,
+        "candidates_per_left": None,
+        "decisions": None,
+        "pending": None,
+        "best_score_min": None,
+        "best_score_p50": None,
+        "best_score_p90": None,
+        "best_score_max": None,
+        "uses_normalized_rerank": None,
+        "avg_chars_left": None,
+        "avg_chars_right": None,
+        "est_embed_tokens": None,
+        "est_rerank_pair_tokens": None,
+        "timings_ms": None,
+    }
+
+    # Only compute table stats once schema exists and job is at least ingesting.
+    if job.get("status") in ("ingesting", "comparing", "ready", "error"):
+        try:
+            with get_cursor() as (cur, _conn):
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = 'left'")
+                stats["records_left"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = 'right'")
+                stats["records_right"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.matches")
+                stats["matches_rows"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+
+                if stats["records_left"]:
+                    stats["candidates_per_left"] = round((stats["matches_rows"] or 0) / max(1, stats["records_left"]), 3)
+
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions")
+                stats["decisions"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
+                if stats["records_left"] is not None and stats["decisions"] is not None:
+                    stats["pending"] = max(0, stats["records_left"] - stats["decisions"])
+
+                # Best-match score distribution over left rows (rank=1).
+                cur.execute(
+                    f"""
+                    SELECT
+                      COUNT(*) AS n,
+                      MIN(CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END) AS min_s,
+                      MAX(CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END) AS max_s,
+                      percentile_cont(0.5) WITHIN GROUP (ORDER BY (CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END)) AS p50,
+                      percentile_cont(0.9) WITHIN GROUP (ORDER BY (CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END)) AS p90
+                    FROM {schema}.matches
+                    WHERE rank = 1
+                    """
+                )
+                row = cur.fetchone() or {}
+                if row.get("n"):
+                    stats["best_score_min"] = float(row.get("min_s") or 0.0)
+                    stats["best_score_p50"] = float(row.get("p50") or 0.0)
+                    stats["best_score_p90"] = float(row.get("p90") or 0.0)
+                    stats["best_score_max"] = float(row.get("max_s") or 0.0)
+
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*) AS cnt
+                    FROM {schema}.matches
+                    WHERE rerank_score BETWEEN 0 AND 1
+                    """
+                )
+                stats["uses_normalized_rerank"] = int((cur.fetchone() or {}).get("cnt", 0) or 0) > 0
+
+                # Average contextual_content length (chars) per side.
+                cur.execute(f"SELECT AVG(LENGTH(contextual_content)) AS avg_len FROM {schema}.records WHERE side = 'left'")
+                stats["avg_chars_left"] = float((cur.fetchone() or {}).get("avg_len") or 0.0)
+                cur.execute(f"SELECT AVG(LENGTH(contextual_content)) AS avg_len FROM {schema}.records WHERE side = 'right'")
+                stats["avg_chars_right"] = float((cur.fetchone() or {}).get("avg_len") or 0.0)
+
+                # Rough token estimates: ~4 chars per token (rule of thumb).
+                n_left = stats["records_left"] or 0
+                n_right = stats["records_right"] or 0
+                est_embed_chars = (stats["avg_chars_left"] or 0) * n_left + (stats["avg_chars_right"] or 0) * n_right
+                stats["est_embed_tokens"] = int(est_embed_chars / 4) if est_embed_chars else 0
+
+                # Rerank token estimate per pair (query + doc). Very rough.
+                avg_pair_chars = (stats["avg_chars_left"] or 0) + (stats["avg_chars_right"] or 0)
+                stats["est_rerank_pair_tokens"] = int(avg_pair_chars / 4) if avg_pair_chars else 0
+        except Exception:
+            # If schema isn't ready yet, still return config.
+            pass
+
+    # If comparator stored persisted timings in JSON status_message, surface them here.
+    try:
+        parsed = json.loads(job.get("status_message") or "")
+        if isinstance(parsed, dict) and isinstance(parsed.get("metrics"), dict):
+            stats["timings_ms"] = parsed["metrics"]
+    except Exception:
+        pass
+
+    return {"config": cfg, "stats": stats}
+
+
 @router.get("/{job_id}/review/next", response_model=ReviewItem)
 def next_review_item(
     job_id: int,
@@ -338,6 +518,10 @@ def next_review_item(
         raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
 
     schema = job["schema_name"]
+    # Some rerank strategies return arbitrary score ranges (e.g., logits or embedding scalars).
+    # For review filtering, prefer rerank_score only when it appears normalized (0..1),
+    # otherwise fall back to cosine_score which is always in [-1, 1] (typically 0..1 here).
+    effective_score_sql = "CASE WHEN m.rerank_score BETWEEN 0 AND 1 THEN m.rerank_score ELSE m.cosine_score END"
 
     # Find the next left record to review
     if include_decided:
@@ -347,7 +531,7 @@ def next_review_item(
             FROM {schema}.records r
             JOIN {schema}.matches m ON m.left_id = r.id AND m.rank = 1
             WHERE r.side = 'left'
-              AND m.rerank_score >= %s
+              AND {effective_score_sql} >= %s
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
@@ -361,7 +545,7 @@ def next_review_item(
             LEFT JOIN {schema}.decisions d ON d.left_id = r.id
             WHERE r.side = 'left'
               AND d.left_id IS NULL
-              AND m.rerank_score >= %s
+              AND {effective_score_sql} >= %s
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
@@ -634,8 +818,13 @@ def _safe_status_message(msg: str | None) -> str | None:
         return None
     try:
         parsed = json.loads(msg)
+        # Hide internal tmp-path blob
         if isinstance(parsed, dict) and "l" in parsed and "r" in parsed:
             return None
+        # If we stored structured compare metrics, expose only the user-facing message.
+        if isinstance(parsed, dict) and "metrics" in parsed:
+            m = parsed.get("message")
+            return str(m) if m else None
     except Exception:
         pass
     return msg

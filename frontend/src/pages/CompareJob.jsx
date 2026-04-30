@@ -7,6 +7,8 @@ import {
   getNextReviewItem,
   submitCompareDecision,
   downloadCompareExport,
+  browseCompareJob,
+  getCompareConfigStats,
 } from '../api/client'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -15,6 +17,22 @@ function scoreColor(score) {
   if (score >= 0.85) return 'bg-emerald-100 text-emerald-700 border-emerald-200'
   if (score >= 0.60) return 'bg-amber-100 text-amber-700 border-amber-200'
   return 'bg-gray-100 text-gray-500 border-gray-200'
+}
+
+function effectiveScore(candidate) {
+  const r = candidate?.rerank_score
+  if (typeof r === 'number' && r >= 0 && r <= 1) return r
+  const c = candidate?.cosine_score
+  return typeof c === 'number' ? c : 0
+}
+
+function effectiveScoreInfo(candidate) {
+  const r = candidate?.rerank_score
+  if (typeof r === 'number' && r >= 0 && r <= 1) {
+    return { score: r, source: 'rerank' }
+  }
+  const c = candidate?.cosine_score
+  return { score: typeof c === 'number' ? c : 0, source: 'cosine' }
 }
 
 function scoreBorder(score, selected, confirmed) {
@@ -28,7 +46,7 @@ function scoreBorder(score, selected, confirmed) {
 // ── Candidate card (right side) ────────────────────────────────────────────
 
 function CandidateCard({ candidate, isSelected, onClick }) {
-  const score = candidate.rerank_score ?? candidate.cosine_score ?? 0
+  const { score, source } = effectiveScoreInfo(candidate)
   const isConfirmed = Boolean(candidate.__confirmed)
   return (
     <button
@@ -38,7 +56,10 @@ function CandidateCard({ candidate, isSelected, onClick }) {
         ${scoreBorder(score, isSelected, isConfirmed)}`}
     >
       {/* Score badge */}
-      <span className={`absolute top-3 right-3 text-xs font-semibold px-2 py-0.5 rounded-full border ${scoreColor(score)}`}>
+      <span
+        className={`absolute top-3 right-3 text-xs font-semibold px-2 py-0.5 rounded-full border ${scoreColor(score)}`}
+        title={`Scoring: ${source}${source === 'rerank' ? '' : ' (fallback)'} • cosine=${(candidate.cosine_score ?? 0).toFixed?.(3) ?? candidate.cosine_score} • rerank=${candidate.rerank_score}`}
+      >
         {(score * 100).toFixed(0)}%
       </span>
 
@@ -85,6 +106,15 @@ function ReviewTab({ job }) {
   const [saving, setSaving] = useState(false)
   const [confirmedRightId, setConfirmedRightId] = useState(null)
   const [confirmedNoMatch, setConfirmedNoMatch] = useState(false)
+
+  const scoringMode = (() => {
+    const cands = item?.candidates || []
+    const hasNormalizedRerank = cands.some(c => {
+      const r = c?.rerank_score
+      return typeof r === 'number' && r >= 0 && r <= 1
+    })
+    return hasNormalizedRerank ? 'rerank' : 'cosine'
+  })()
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['compare-review-stats', jobId],
@@ -199,6 +229,20 @@ function ReviewTab({ job }) {
               <option key={v} value={v}>≥ {(v * 100).toFixed(0)}%</option>
             ))}
           </select>
+          <span
+            className={`text-xs px-2 py-1 rounded-full border whitespace-nowrap ${
+              scoringMode === 'rerank'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-gray-50 text-gray-600 border-gray-200'
+            }`}
+            title={
+              scoringMode === 'rerank'
+                ? 'Using normalized rerank scores (0..1).'
+                : 'Rerank scores are not normalized; using cosine similarity instead.'
+            }
+          >
+            Scoring: {scoringMode === 'rerank' ? 'Rerank' : 'Cosine'}
+          </span>
         </div>
 
         {/* Include decided toggle */}
@@ -392,6 +436,289 @@ function ExportTab({ job }) {
   )
 }
 
+// ── Browse tab ─────────────────────────────────────────────────────────────
+
+function BrowseTab({ job }) {
+  const jobId = job.id
+  const [side, setSide] = useState('all')
+  const [expandedRows, setExpandedRows] = useState(new Set())
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['compare-browse', jobId, side],
+    queryFn: () => browseCompareJob(jobId, { side: side === 'all' ? null : side, limit: 25 }),
+    enabled: job.status === 'ready',
+  })
+
+  const records = data?.records ?? []
+  const total = data?.total ?? 0
+  const columns = records.length > 0 ? Object.keys(records[0]) : []
+
+  const toggleRow = (idx) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      next.has(idx) ? next.delete(idx) : next.add(idx)
+      return next
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-gray-600">
+            Browse raw compare records exactly as stored in Postgres.
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Showing {records.length} of {total?.toLocaleString?.() ?? total} {side === 'all' ? 'records' : `${side} records`}
+            <span className="ml-2 text-gray-300">·</span>
+            <span className="ml-2">click a row to expand</span>
+          </p>
+        </div>
+
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'left', label: job.label_left || 'Left' },
+            { id: 'right', label: job.label_right || 'Right' },
+          ].map(s => (
+            <button
+              key={s.id}
+              onClick={() => { setSide(s.id); setExpandedRows(new Set()) }}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                side === s.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading && <p className="text-gray-400">Loading records…</p>}
+      {isError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          Failed to load records.
+        </div>
+      )}
+
+      {!isLoading && records.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="text-sm border-collapse" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <colgroup>
+                {columns.map(col => (
+                  <col
+                    key={col}
+                    style={{
+                      width: col === 'id' ? '60px'
+                        : col === 'side' ? '70px'
+                        : col === 'sheet_name' ? '100px'
+                        : col === 'contextual_content' ? '360px'
+                        : col === 'embedding' ? '220px'
+                        : '160px'
+                    }}
+                  />
+                ))}
+              </colgroup>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  {columns.map(col => (
+                    <th
+                      key={col}
+                      className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {records.map((record, idx) => {
+                  const expanded = expandedRows.has(idx)
+                  return (
+                    <tr
+                      key={record.id ?? idx}
+                      onClick={() => toggleRow(idx)}
+                      className="hover:bg-blue-50/40 cursor-pointer transition-colors"
+                    >
+                      {columns.map(col => {
+                        const val = record[col]
+                        const text = val === null || val === undefined ? '' : String(val)
+                        return (
+                          <td key={col} className="px-4 py-3 align-top">
+                            <span
+                              className={`block font-mono text-xs text-gray-700 break-words ${
+                                expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
+                              }`}
+                            >
+                              {text || <span className="text-gray-300 italic not-italic font-sans">null</span>}
+                            </span>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Config / Stats tab ─────────────────────────────────────────────────────
+
+function ConfigStatsTab({ job }) {
+  const jobId = job.id
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['compare-config-stats', jobId],
+    queryFn: () => getCompareConfigStats(jobId),
+    enabled: !!jobId,
+    refetchInterval: job.status === 'ready' ? false : 3000,
+  })
+
+  const cfg = data?.config
+  const stats = data?.stats
+  const timings = stats?.timings_ms || null
+
+  const fmtMs = (ms) => (typeof ms === 'number' ? `${ms.toLocaleString()} ms` : '—')
+  const fmtNum = (n) => (n == null ? '—' : (typeof n === 'number' ? n.toLocaleString() : String(n)))
+  const fmtPct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : '—')
+
+  const statCard = (label, value) => (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">{label}</p>
+      <p className="text-lg font-bold text-gray-900 mt-1">{value ?? '—'}</p>
+    </div>
+  )
+
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Config</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          The settings used to build merged text, embed records, and generate candidate matches.
+        </p>
+      </div>
+
+      {isLoading && <p className="text-gray-400">Loading…</p>}
+      {isError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          Failed to load config/stats.
+        </div>
+      )}
+
+      {cfg && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Left ({cfg.label_left})</div>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Source file</span><span className="font-medium text-gray-900">{cfg.source_filename_left || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Match columns</span><span className="font-medium text-gray-900">{[...(cfg.context_columns_left || []), cfg.content_column_left].filter(Boolean).join(', ') || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Identifier column</span><span className="font-medium text-gray-900">{cfg.display_column_left || '—'}</span></div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Right ({cfg.label_right})</div>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Source file</span><span className="font-medium text-gray-900">{cfg.source_filename_right || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Match columns</span><span className="font-medium text-gray-900">{[...(cfg.context_columns_right || []), cfg.content_column_right].filter(Boolean).join(', ') || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Identifier column</span><span className="font-medium text-gray-900">{cfg.display_column_right || '—'}</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stats && (
+        <>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Stats</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Lightweight summary of ingestion + match generation + review progress.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {statCard('Left records', stats.records_left?.toLocaleString?.() ?? stats.records_left)}
+            {statCard('Right records', stats.records_right?.toLocaleString?.() ?? stats.records_right)}
+            {statCard('Match rows', stats.matches_rows?.toLocaleString?.() ?? stats.matches_rows)}
+            {statCard('Decisions', stats.decisions?.toLocaleString?.() ?? stats.decisions)}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {statCard('Pending', stats.pending?.toLocaleString?.() ?? stats.pending)}
+            {statCard('Candidates/left', stats.candidates_per_left)}
+            {statCard('Scoring mode', stats.uses_normalized_rerank ? 'Rerank (0..1)' : 'Cosine (fallback)')}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Cost / volume (rough)</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
+              <div className="space-y-1.5">
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Avg chars/left row</span><span className="font-semibold text-gray-900">{stats.avg_chars_left != null ? Math.round(stats.avg_chars_left).toLocaleString() : '—'}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Avg chars/right row</span><span className="font-semibold text-gray-900">{stats.avg_chars_right != null ? Math.round(stats.avg_chars_right).toLocaleString() : '—'}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Est embed tokens</span><span className="font-semibold text-gray-900">{fmtNum(stats.est_embed_tokens)}</span></div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Candidate pairs</span><span className="font-semibold text-gray-900">{fmtNum(timings?.candidate_pairs ?? stats.matches_rows)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Est tokens/pair</span><span className="font-semibold text-gray-900">{fmtNum(stats.est_rerank_pair_tokens)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Rerank enabled</span><span className="font-semibold text-gray-900">{cfg?.rerank_enabled ? 'Yes' : 'No'}</span></div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-3">
+              Token estimates use a simple heuristic (≈4 chars/token). On Ollama this is compute cost, not billing.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Timings (persisted)</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
+              <div className="space-y-1.5">
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest left</span><span className="font-semibold text-gray-900">{fmtMs(timings?.ingest_left_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Embed left</span><span className="font-semibold text-gray-900">{fmtMs(timings?.embed_left_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest right</span><span className="font-semibold text-gray-900">{fmtMs(timings?.ingest_right_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Embed right</span><span className="font-semibold text-gray-900">{fmtMs(timings?.embed_right_ms)}</span></div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Vector search</span><span className="font-semibold text-gray-900">{fmtMs(timings?.vector_search_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Rerank</span><span className="font-semibold text-gray-900">{fmtMs(timings?.rerank_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Write matches</span><span className="font-semibold text-gray-900">{fmtMs(timings?.write_matches_ms)}</span></div>
+                <div className="flex justify-between gap-4"><span className="text-gray-500">Total</span><span className="font-semibold text-gray-900">{fmtMs(timings?.total_ms)}</span></div>
+              </div>
+            </div>
+            {!timings && (
+              <p className="text-xs text-gray-400 mt-3">
+                Timings will appear after the job is re-run with this version of the server.
+              </p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Best-match score (rank=1)</div>
+                <div className="text-sm text-gray-500 mt-1">Min / P50 / P90 / Max</div>
+              </div>
+              <div className="flex gap-3 text-sm font-semibold text-gray-900">
+                <span>{fmtPct(stats.best_score_min)}</span>
+                <span className="text-gray-300">·</span>
+                <span>{fmtPct(stats.best_score_p50)}</span>
+                <span className="text-gray-300">·</span>
+                <span>{fmtPct(stats.best_score_p90)}</span>
+                <span className="text-gray-300">·</span>
+                <span>{fmtPct(stats.best_score_max)}</span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export default function CompareJob() {
@@ -464,6 +791,8 @@ export default function CompareJob() {
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1 shrink-0">
               {[
                 { id: 'review', label: '👁 Review' },
+                { id: 'browse', label: '👀 Browse' },
+                { id: 'config', label: '⚙️ Config' },
                 { id: 'export', label: '⬇ Export' },
               ].map(tab => (
                 <button
@@ -493,6 +822,10 @@ export default function CompareJob() {
           </div>
         ) : activeTab === 'review' ? (
           <ReviewTab job={job} />
+        ) : activeTab === 'browse' ? (
+          <BrowseTab job={job} />
+        ) : activeTab === 'config' ? (
+          <ConfigStatsTab job={job} />
         ) : (
           <ExportTab job={job} />
         )}

@@ -12,6 +12,7 @@ No new models, no external calls.
 """
 import logging
 import time
+import json
 from typing import Generator
 
 from db import get_cursor, create_compare_schema
@@ -33,6 +34,7 @@ def ingest_side(
     display_column: str | None,
     schema_name: str,
     embed_kwargs: dict | None = None,
+    metrics: dict | None = None,
 ) -> Generator[dict, None, None]:
     """
     Embed and insert one side (left or right) into compare_{id}.records.
@@ -42,6 +44,7 @@ def ingest_side(
     records = df.to_dict(orient="records")
     total = len(records)
     inserted = 0
+    embed_ms = 0.0
 
     logger.info(
         "ingest_side() job_id=%d side=%s total_rows=%d content_col=%r context_cols=%s",
@@ -63,7 +66,9 @@ def ingest_side(
                 display_value = str(raw)
 
         try:
+            t_embed0 = time.monotonic()
             vector = embed(contextual_content, **(embed_kwargs or {}))
+            embed_ms += (time.monotonic() - t_embed0) * 1000.0
         except Exception as e:
             logger.error("embed failed on row %d/%d side=%s — %s: %s", i + 1, total, side, type(e).__name__, e)
             raise
@@ -102,6 +107,9 @@ def ingest_side(
         )
 
     logger.info("ingest_side() done side=%s inserted=%d", side, inserted)
+    if metrics is not None:
+        metrics[f"rows_{side}"] = inserted
+        metrics[f"embed_{side}_ms"] = int(embed_ms)
 
 
 # ── Bidirectional vector search ────────────────────────────────────────────
@@ -303,12 +311,15 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
             )
 
     try:
+        t_total0 = time.monotonic()
+        metrics: dict = {}
         # ── Ingest left ──────────────────────────────────────────────────
         _set_status("ingesting")
         yield {"type": "ingest_left", "processed": 0, "total": 0, "percent": 0,
                "message": f"Reading {job['source_filename_left'] or 'left file'}..."}
 
         df_left, _, _ = read_excel(job["tmp_path_left"])
+        t0 = time.monotonic()
         for event in ingest_side(
             job_id=job_id,
             side="left",
@@ -318,14 +329,17 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
             display_column=job.get("display_column_left"),
             schema_name=schema_name,
             embed_kwargs=embed_kwargs,
+            metrics=metrics,
         ):
             yield event
+        metrics["ingest_left_ms"] = int((time.monotonic() - t0) * 1000)
 
         # ── Ingest right ─────────────────────────────────────────────────
         yield {"type": "ingest_right", "processed": 0, "total": 0, "percent": 0,
                "message": f"Reading {job['source_filename_right'] or 'right file'}..."}
 
         df_right, _, _ = read_excel(job["tmp_path_right"])
+        t0 = time.monotonic()
         for event in ingest_side(
             job_id=job_id,
             side="right",
@@ -335,30 +349,43 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
             display_column=job.get("display_column_right"),
             schema_name=schema_name,
             embed_kwargs=embed_kwargs,
+            metrics=metrics,
         ):
             yield event
+        metrics["ingest_right_ms"] = int((time.monotonic() - t0) * 1000)
 
         # ── Bidirectional search ──────────────────────────────────────────
         _set_status("comparing")
         yield {"type": "searching", "message": "Running bidirectional vector search..."}
 
+        t0 = time.monotonic()
         candidates = run_bidirectional_search(schema_name, top_k)
+        metrics["vector_search_ms"] = int((time.monotonic() - t0) * 1000)
+        metrics["candidate_pairs"] = len(candidates)
 
         yield {"type": "reranking", "message": f"Reranking {len(candidates)} candidate pairs..."}
 
         # ── Reranking ─────────────────────────────────────────────────────
+        t0 = time.monotonic()
         scored_pairs = run_reranking(
             schema_name,
             candidates,
             rerank_enabled=job_rerank_enabled,
             rerank_model=job_rerank_model,
         )
+        metrics["rerank_ms"] = int((time.monotonic() - t0) * 1000)
 
         # ── Write matches ─────────────────────────────────────────────────
+        t0 = time.monotonic()
         write_matches(schema_name, scored_pairs, top_k)
+        metrics["write_matches_ms"] = int((time.monotonic() - t0) * 1000)
+        metrics["total_ms"] = int((time.monotonic() - t_total0) * 1000)
 
         # ── Done ──────────────────────────────────────────────────────────
-        _set_status("ready")
+        _set_status("ready", json.dumps({
+            "message": "Comparison complete. Ready for review.",
+            "metrics": metrics,
+        }))
         yield {"type": "complete", "message": "Comparison complete. Ready for review."}
         logger.info("run_compare_job() done job_id=%d", job_id)
 

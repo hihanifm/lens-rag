@@ -553,6 +553,7 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
   const [ctxPreview, setCtxPreview] = useState({ left: null, right: null })
   const [ctxLoading, setCtxLoading] = useState(false)
   const [ctxError, setCtxError] = useState('')
+  const [expandedExample, setExpandedExample] = useState({ left: false, right: false })
 
   useEffect(() => {
     let alive = true
@@ -596,6 +597,10 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
     ],
   ]
 
+  const toggleExample = (side) => {
+    setExpandedExample(prev => ({ ...prev, [side]: !prev[side] }))
+  }
+
   return (
     <div className="space-y-4">
       <StepHeader step={7} total={STEPS.length} title="Review & create" />
@@ -611,11 +616,11 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
           <div className="hidden sm:block bg-gray-50 border-r border-gray-100" />
           <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r border-gray-100">
             <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Left</div>
-            <div className="text-sm font-semibold text-gray-900 truncate">{leftTitle}</div>
+            <div className="text-sm font-semibold text-gray-900 break-words">{leftTitle}</div>
           </div>
           <div className="px-4 py-3 border-b sm:border-b-0 border-gray-100">
             <div className="text-xs uppercase tracking-widest text-gray-400 font-semibold">Right</div>
-            <div className="text-sm font-semibold text-gray-900 truncate">{rightTitle}</div>
+            <div className="text-sm font-semibold text-gray-900 break-words">{rightTitle}</div>
           </div>
 
           {fields.map(([label, leftVal, rightVal]) => (
@@ -624,17 +629,55 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
                 {label}
               </div>
               <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0">
-                <span className="block truncate">{leftVal || '—'}</span>
+                <span
+                  onClick={label === 'Example merged text' ? () => toggleExample('left') : undefined}
+                  role={label === 'Example merged text' ? 'button' : undefined}
+                  tabIndex={label === 'Example merged text' ? 0 : undefined}
+                  onKeyDown={label === 'Example merged text' ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') toggleExample('left')
+                  } : undefined}
+                  className={`block break-words ${
+                    label === 'Example merged text'
+                      ? `cursor-pointer ${expandedExample.left ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`
+                      : 'whitespace-normal line-clamp-5 lens-clamp-5'
+                  }`}
+                  title={label === 'Example merged text' ? (expandedExample.left ? 'Click to collapse' : 'Click to expand') : undefined}
+                >
+                  {leftVal || '—'}
+                </span>
                 {label === 'Example merged text' && !ctxLoading && ctxPreview.left?.samples?.[1] && (
-                  <span className="block truncate text-xs text-gray-500 font-normal mt-1">
+                  <span
+                    className={`block break-words text-xs text-gray-500 font-normal mt-1 ${
+                      expandedExample.left ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
+                    }`}
+                  >
                     {ctxPreview.left.samples[1]}
                   </span>
                 )}
               </div>
               <div className="px-4 py-3 border-t border-gray-100 text-sm text-gray-900 font-medium min-w-0">
-                <span className="block truncate">{rightVal || '—'}</span>
+                <span
+                  onClick={label === 'Example merged text' ? () => toggleExample('right') : undefined}
+                  role={label === 'Example merged text' ? 'button' : undefined}
+                  tabIndex={label === 'Example merged text' ? 0 : undefined}
+                  onKeyDown={label === 'Example merged text' ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') toggleExample('right')
+                  } : undefined}
+                  className={`block break-words ${
+                    label === 'Example merged text'
+                      ? `cursor-pointer ${expandedExample.right ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`
+                      : 'whitespace-normal line-clamp-5 lens-clamp-5'
+                  }`}
+                  title={label === 'Example merged text' ? (expandedExample.right ? 'Click to collapse' : 'Click to expand') : undefined}
+                >
+                  {rightVal || '—'}
+                </span>
                 {label === 'Example merged text' && !ctxLoading && ctxPreview.right?.samples?.[1] && (
-                  <span className="block truncate text-xs text-gray-500 font-normal mt-1">
+                  <span
+                    className={`block break-words text-xs text-gray-500 font-normal mt-1 ${
+                      expandedExample.right ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
+                    }`}
+                  >
                     {ctxPreview.right.samples[1]}
                   </span>
                 )}
