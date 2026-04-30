@@ -20,8 +20,9 @@ def create_project(data: ProjectCreate) -> dict:
             INSERT INTO public.projects
                 (name, schema_name, stored_columns, content_column, context_columns,
                  id_column, display_columns, has_id_column, default_k, pin,
-                 source_filename, embed_url, embed_api_key, embed_model, embed_dims, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                 source_filename, embed_url, embed_api_key, embed_model, embed_dims,
+                 rerank_model, rerank_enabled, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
             RETURNING *
         """, [
             data.name,
@@ -39,6 +40,8 @@ def create_project(data: ProjectCreate) -> dict:
             data.embed_api_key or None,
             data.embed_model or None,
             data.embed_dims or None,
+            (data.rerank_model or "").strip() or None,
+            data.rerank_enabled,
         ])
         project = dict(cur.fetchone())
 
@@ -104,26 +107,23 @@ def delete_project(project_id: int) -> dict | None:
     return _to_public_project(project)
 
 
-def update_project(project_id: int, name: str = None, display_columns: list = None, default_k: int = None) -> dict | None:
-    """Update cheap fields — no re-ingestion required."""
+def update_project(project_id: int, patch: dict) -> dict | None:
+    """Update metadata fields — no re-ingestion required. Keys match DB columns."""
+    allowed = {"name", "display_columns", "default_k", "rerank_model", "rerank_enabled"}
     fields = []
     values = []
-    if name is not None:
-        fields.append("name = %s")
-        values.append(name)
-    if display_columns is not None:
-        fields.append("display_columns = %s")
-        values.append(display_columns)
-    if default_k is not None:
-        fields.append("default_k = %s")
-        values.append(default_k)
+    for key, val in patch.items():
+        if key not in allowed:
+            continue
+        fields.append(f"{key} = %s")
+        values.append(val)
     if not fields:
         return get_project(project_id)
     values.append(project_id)
     with get_cursor() as (cur, conn):
         cur.execute(
             f"UPDATE public.projects SET {', '.join(fields)} WHERE id = %s RETURNING *",
-            values
+            values,
         )
         row = cur.fetchone()
         return _to_public_project(dict(row) if row else None)

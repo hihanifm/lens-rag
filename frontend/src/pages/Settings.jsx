@@ -55,12 +55,16 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [rerankEnabled, setRerankEnabled] = useState(true)
+  const [rerankModel, setRerankModel] = useState('')
 
   useEffect(() => {
     if (project) {
       setName(project.name)
       setDefaultK(project.default_k)
       setDisplayColumns(project.display_columns)
+      setRerankEnabled(project.rerank_enabled ?? true)
+      setRerankModel(project.rerank_model ?? '')
     }
   }, [project])
 
@@ -77,7 +81,13 @@ export default function Settings() {
     setSaving(true)
     setSaved(false)
     try {
-      await updateProject(projectId, { name, display_columns: displayColumns, default_k: defaultK })
+      await updateProject(projectId, {
+        name,
+        display_columns: displayColumns,
+        default_k: defaultK,
+        rerank_enabled: rerankEnabled,
+        rerank_model: rerankModel.trim() || null,
+      })
       await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
       setSaved(true)
@@ -102,7 +112,9 @@ export default function Settings() {
   const isDirty = project && (
     name !== project.name ||
     defaultK !== project.default_k ||
-    JSON.stringify([...displayColumns].sort()) !== JSON.stringify([...project.display_columns].sort())
+    JSON.stringify([...displayColumns].sort()) !== JSON.stringify([...project.display_columns].sort()) ||
+    rerankEnabled !== (project.rerank_enabled ?? true) ||
+    (rerankModel.trim() || '') !== ((project.rerank_model || '').trim())
   )
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
@@ -300,6 +312,37 @@ export default function Settings() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Reranker */}
+              <div>
+                <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Topic rerank</h3>
+                <p className="text-sm text-gray-500 mb-3">
+                  Most users should ignore these settings and use the system default.
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer mb-3">
+                  <input
+                    type="checkbox"
+                    checked={rerankEnabled}
+                    onChange={e => { setRerankEnabled(e.target.checked); setSaved(false) }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">Enable reranking</span>
+                </label>
+                <label className="text-xs font-medium text-gray-400 uppercase tracking-wide block mb-1">
+                  Rerank model id (optional)
+                </label>
+                <input
+                  type="text"
+                  value={rerankModel}
+                  onChange={e => { setRerankModel(e.target.value); setSaved(false) }}
+                  disabled={!rerankEnabled}
+                  placeholder="Blank = system default"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Leave blank to use the system default. Only change this if you know the rerank model id you installed on the server.
+                </p>
               </div>
 
               {/* Display columns */}

@@ -86,6 +86,10 @@ export const fetchModels = (url, apiKey) => {
 export const verifyEmbedding = (body) =>
   api.post('embedding/verify', body).then(r => r.data)
 
+/** One rerank probe (server-side Ollama only). */
+export const verifyRerank = (body) =>
+  api.post('rerank/verify', body).then(r => r.data)
+
 export const browseProject = (id) =>
   api.get(`projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
 

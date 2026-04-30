@@ -17,6 +17,8 @@ class ProjectCreate(BaseModel):
     embed_api_key: Optional[str] = None
     embed_model: Optional[str] = None
     embed_dims: Optional[int] = None
+    rerank_model: Optional[str] = None
+    rerank_enabled: bool = True
 
 
 class ProjectResponse(BaseModel):
@@ -38,6 +40,8 @@ class ProjectResponse(BaseModel):
     embed_url: Optional[str] = None
     embed_model: Optional[str] = None
     embed_dims: Optional[int] = None
+    rerank_model: Optional[str] = None
+    rerank_enabled: Optional[bool] = None  # None = legacy row, treat as true in clients
 
 
 class ModelListRequest(BaseModel):
@@ -50,6 +54,12 @@ class EmbeddingVerifyRequest(BaseModel):
 
     url: Optional[str] = None
     api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+class RerankVerifyRequest(BaseModel):
+    """One-shot rerank probe for the Create → Rerank wizard."""
+
     model: Optional[str] = None
 
 
@@ -131,6 +141,8 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     display_columns: Optional[List[str]] = None
     default_k: Optional[int] = None
+    rerank_model: Optional[str] = None
+    rerank_enabled: Optional[bool] = None
 
 
 class ClusterFilterItem(BaseModel):

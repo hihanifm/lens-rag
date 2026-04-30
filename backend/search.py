@@ -232,6 +232,9 @@ def topic_search_stream(
     embed_url: str | None = None,
     embed_api_key: str | None = None,
     embed_model: str | None = None,
+    *,
+    project_rerank_allowed: bool = True,
+    rerank_model: str | None = None,
 ):
     """
     Generator that yields step dicts for SSE streaming, ending with a
@@ -246,12 +249,13 @@ def topic_search_stream(
 
     At least one of use_vector or use_bm25 must be True.
     """
-    # Resolve effective flags (use_rerank is further gated by env)
-    eff_rerank = use_rerank and RERANKER_ENABLED
+    # Resolve effective flags (use_rerank is further gated by env + project setting)
+    eff_rerank = use_rerank and RERANKER_ENABLED and project_rerank_allowed
+    reranker_available = bool(RERANKER_ENABLED and project_rerank_allowed)
 
     logger.info(
-        "topic_search schema=%s query=%r k=%d vector=%s bm25=%s rrf=%s rerank=%s(env=%s)",
-        schema_name, query, k, use_vector, use_bm25, use_rrf, use_rerank, RERANKER_ENABLED,
+        "topic_search schema=%s query=%r k=%d vector=%s bm25=%s rrf=%s rerank=%s(env=%s proj=%s)",
+        schema_name, query, k, use_vector, use_bm25, use_rrf, use_rerank, RERANKER_ENABLED, project_rerank_allowed,
     )
 
     stats = {}
@@ -344,7 +348,7 @@ def topic_search_stream(
             for cid in candidates_to_rerank
             if cid in rows_by_id
         ]
-        rerank_scores = rerank(query, candidate_texts)
+        rerank_scores = rerank(query, candidate_texts, model=rerank_model)
         ranked = sorted(
             zip(candidates_to_rerank, rerank_scores),
             key=lambda x: x[1],
@@ -356,7 +360,12 @@ def topic_search_stream(
     else:
         ranked = [(doc_id, None) for doc_id in candidates_to_rerank]
         stats['reranker_ms'] = None
-        logger.debug("  reranker skipped (use_rerank=%s env=%s)", use_rerank, RERANKER_ENABLED)
+        logger.debug(
+            "  reranker skipped (use_rerank=%s env=%s proj=%s)",
+            use_rerank,
+            RERANKER_ENABLED,
+            project_rerank_allowed,
+        )
 
     # ── Step 5: Build results ─────────────────────────────────────────────────
     results = []
@@ -394,7 +403,7 @@ def topic_search_stream(
                 use_bm25=use_bm25,
                 use_rrf=use_rrf,
                 use_rerank=eff_rerank,
-                reranker_available=RERANKER_ENABLED,
+                reranker_available=reranker_available,
                 embedding_ms=stats['embedding_ms'],
                 vector_search_ms=stats['vector_search_ms'],
                 vector_candidates=stats['vector_candidates'],
@@ -422,6 +431,9 @@ def topic_search(
     embed_url: str | None = None,
     embed_api_key: str | None = None,
     embed_model: str | None = None,
+    *,
+    project_rerank_allowed: bool = True,
+    rerank_model: str | None = None,
 ) -> SearchResponse:
     """Synchronous wrapper — collects the final event from the stream generator."""
     for event in topic_search_stream(
@@ -429,6 +441,8 @@ def topic_search(
         use_vector=use_vector, use_bm25=use_bm25,
         use_rrf=use_rrf, use_rerank=use_rerank,
         embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
+        project_rerank_allowed=project_rerank_allowed,
+        rerank_model=rerank_model,
     ):
         if event['step'] == 'complete':
             return event['response']
@@ -449,6 +463,9 @@ def search(
     embed_url: str | None = None,
     embed_api_key: str | None = None,
     embed_model: str | None = None,
+    *,
+    project_rerank_allowed: bool = True,
+    rerank_model: str | None = None,
 ) -> SearchResponse:
     """Main search dispatcher."""
     k = min(k, TOP_K_MAX)
@@ -468,4 +485,6 @@ def search(
             use_vector=use_vector, use_bm25=use_bm25,
             use_rrf=use_rrf, use_rerank=use_rerank,
             embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
+            project_rerank_allowed=project_rerank_allowed,
+            rerank_model=rerank_model,
         )

@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedding, API_BASE_URL } from '../api/client'
+import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedding, verifyRerank, API_BASE_URL } from '../api/client'
 
-const STEPS = ['Name', 'Upload', 'Store', 'Context', 'ID Column', 'Display', 'Connection', 'Settings']
+const STEPS = [
+  'Name',
+  'Upload',
+  'Store',
+  'Context',
+  'ID Column',
+  'Display',
+  'Connection',
+  'Rerank',
+  'Settings',
+]
 
 export default function CreateProject() {
   const navigate = useNavigate()
@@ -16,12 +26,18 @@ export default function CreateProject() {
   const [displayColumns, setDisplayColumns] = useState([])
   const [defaultK, setDefaultK] = useState(10)
   const [pin, setPin] = useState('')
+  const [rerankEnabled, setRerankEnabled] = useState(true)
+  const [rerankModel, setRerankModel] = useState('')
   const [embedUrl, setEmbedUrl] = useState('')
   const [embedApiKey, setEmbedApiKey] = useState('')
   const [embedModel, setEmbedModel] = useState('')
   const [availableModels, setAvailableModels] = useState([])
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState('')
+  const [rerankAvailableModels, setRerankAvailableModels] = useState([])
+  const [rerankModelError, setRerankModelError] = useState('')
+  const [rerankModelLoading, setRerankModelLoading] = useState(false)
+  const [rerankCheckLoading, setRerankCheckLoading] = useState(false)
   const [connectionCheckLoading, setConnectionCheckLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -59,6 +75,26 @@ export default function CreateProject() {
     }
   }, [embedUrl, embedApiKey, embedModel, next])
 
+  const handleRerankContinue = useCallback(async () => {
+    setRerankModelError('')
+    // Only validate when enabled + explicit override.
+    if (!rerankEnabled || !rerankModel.trim()) return next()
+    setRerankCheckLoading(true)
+    try {
+      await verifyRerank({ model: rerankModel.trim() })
+      next()
+    } catch (e) {
+      const d = e?.response?.data?.detail
+      setRerankModelError(
+        typeof d === 'string'
+          ? d
+          : 'Could not verify reranker model. Use a rerank-capable model id installed on the server.',
+      )
+    } finally {
+      setRerankCheckLoading(false)
+    }
+  }, [rerankEnabled, rerankModel, next])
+
   // Close the EventSource when the component unmounts so the browser doesn't
   // auto-reconnect and trigger a duplicate ingestion request.
   useEffect(() => {
@@ -85,7 +121,8 @@ export default function CreateProject() {
         (step === 4) ||
         (step === 5 && displayColumns.length > 0) ||
         (step === 6 && !connectionCheckLoading) ||
-        (step === 7 && !loading)
+        (step === 7 && !rerankModelLoading && !rerankCheckLoading) ||
+        (step === 8 && !loading)
 
       if (!canProceed) return
       e.preventDefault()
@@ -104,7 +141,8 @@ export default function CreateProject() {
       }
       if (step === 5) return next()
       if (step === 6) return void handleConnectionContinue()
-      if (step === 7) return handleCreate()
+      if (step === 7) return void handleRerankContinue()
+      if (step === 8) return handleCreate()
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -119,7 +157,10 @@ export default function CreateProject() {
     idColumn,
     displayColumns.length,
     connectionCheckLoading,
+    rerankModelLoading,
+    rerankCheckLoading,
     handleConnectionContinue,
+    handleRerankContinue,
   ])
 
   const handleUpload = async (fileArg) => {
@@ -159,12 +200,15 @@ export default function CreateProject() {
   const connectionPrefilled = useRef(false)
   const connectionTouched = useRef(false)
   const embedUrlRef = useRef('')
+  /** System embedding URL — used on Rerank step to list models when Connection was left blank. */
+  const systemEmbedUrlRef = useRef('')
   useEffect(() => {
     if (step !== 6 || connectionPrefilled.current) return
     connectionPrefilled.current = true
     getSystemConfig().then(cfg => {
       if (connectionTouched.current) return
       const url = cfg.embedding_url || ''
+      if (cfg?.embedding_url) systemEmbedUrlRef.current = cfg.embedding_url
       // Only prefill if the user hasn't typed anything yet.
       if (!embedUrlRef.current.trim()) {
         setEmbedUrl(url)
@@ -192,6 +236,48 @@ export default function CreateProject() {
       }
     }).catch(() => {})
   }, [step])
+
+  const rerankPrefilled = useRef(false)
+  useEffect(() => {
+    if (step !== 7 || rerankPrefilled.current) return
+    rerankPrefilled.current = true
+    getSystemConfig()
+      .then(cfg => {
+        if (cfg?.embedding_url) systemEmbedUrlRef.current = cfg.embedding_url
+        if (cfg?.reranker_model) {
+          setRerankModel(prev => (prev.trim() ? prev : cfg.reranker_model))
+        }
+      })
+      .catch(() => {})
+  }, [step])
+
+  const handleFetchRerankModels = async () => {
+    const url = embedUrl.trim() || systemEmbedUrlRef.current
+    if (!url) {
+      setRerankModelError('No OpenAI-compatible endpoint to list models from. Enter one on the Embedding step, or type a rerank model id manually.')
+      return
+    }
+    setRerankModelLoading(true)
+    setRerankModelError('')
+    setRerankAvailableModels([])
+    setRerankModel('')
+    try {
+      const cfg = await getSystemConfig().catch(() => ({}))
+      const raw = await fetchModels(url, embedApiKey.trim() || null)
+      const models = Array.isArray(raw) ? raw : []
+      setRerankAvailableModels(models)
+      if (models.length > 0) {
+        const preferred = cfg?.reranker_model
+        setRerankModel(
+          preferred && models.includes(preferred) ? preferred : models[0],
+        )
+      }
+    } catch (e) {
+      setRerankModelError('Could not reach the endpoint. Check the embedding URL and try again.')
+    } finally {
+      setRerankModelLoading(false)
+    }
+  }
 
   const handleFetchModels = async () => {
     if (!embedUrl.trim()) return
@@ -232,6 +318,8 @@ export default function CreateProject() {
         // Custom model only applies with a custom endpoint; avoids stale chat-model IDs with system URL.
         embed_model: url ? (embedModel.trim() || null) : null,
         embed_dims: null,
+        rerank_enabled: rerankEnabled,
+        rerank_model: rerankModel.trim() || null,
       })
 
       // Start ingestion via SSE
@@ -574,6 +662,14 @@ export default function CreateProject() {
             </p>
 
             <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="font-semibold mb-0.5">Tip</div>
+                <div>
+                  Unless you&apos;re debugging performance or testing a new embedding model/endpoint you installed, leave these fields blank
+                  so the server default is used.
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Endpoint URL <span className="text-gray-400 font-normal">(OpenAI-compatible)</span>
@@ -711,8 +807,112 @@ export default function CreateProject() {
           </div>
         )}
 
-        {/* ── Step 7: Settings ── */}
+        {/* ── Step 7: Rerank (same flow pattern as Connection / embedding) ── */}
         {step === 7 && (
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Reranking model</h2>
+            <p className="text-gray-500 mb-8">
+              Topic search can rerank merged candidates using your server&apos;s Ollama rerank API (same host as embeddings).
+              For most users, you should ignore this and stick with the system default.
+            </p>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="font-semibold mb-0.5">Tip</div>
+                <div>
+                  Unless you&apos;re debugging performance or testing a new reranker you installed, leave reranking enabled
+                  and keep the model blank so the server default is used.
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rerankEnabled}
+                  onChange={e => {
+                    setRerankEnabled(e.target.checked)
+                    if (!e.target.checked) setRerankModelError('')
+                  }}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Enable reranking for this project</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={handleFetchRerankModels}
+                disabled={!rerankEnabled || rerankModelLoading}
+                data-testid="fetch-rerank-models"
+                className="w-full border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                {rerankModelLoading ? 'Fetching models...' : 'Fetch available models'}
+              </button>
+              <p className="text-xs text-gray-400">
+                Lists models from the same OpenAI-compatible URL as the Embedding step (or the system default URL).
+                Uses the embedding API key when set.
+              </p>
+
+              {rerankModelError && (
+                <p className="text-sm text-red-600">{rerankModelError}</p>
+              )}
+
+              {rerankAvailableModels.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Rerank model id <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={rerankModel}
+                    onChange={e => setRerankModel(e.target.value)}
+                    disabled={!rerankEnabled}
+                    data-testid="rerank-model"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  >
+                    {rerankAvailableModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {rerankAvailableModels.length === 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Rerank model id <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={rerankModel}
+                    onChange={e => setRerankModel(e.target.value)}
+                    placeholder="e.g. bbjson/bge-reranker-base:latest"
+                    disabled={!rerankEnabled}
+                    data-testid="rerank-model-input"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Fetch models above, or enter a rerank-capable model id manually. Blank uses the server default.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
+              <button
+                type="button"
+                onClick={handleRerankContinue}
+                data-testid="rerank-continue"
+                disabled={rerankModelLoading || rerankCheckLoading}
+                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {rerankCheckLoading ? 'Checking…' : 'Continue'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 8: Settings ── */}
+        {step === 8 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Settings</h2>
             <p className="text-gray-500 mb-8">Default number of results to show per search.</p>
@@ -752,6 +952,16 @@ export default function CreateProject() {
               <p><span className="font-medium">Records:</span> {preview?.row_count?.toLocaleString()}</p>
               <p><span className="font-medium">Embedding model:</span> {embedModel || <span className="text-gray-400">system default</span>}</p>
               {embedUrl && <p><span className="font-medium">Endpoint:</span> {embedUrl}</p>}
+              <p>
+                <span className="font-medium">Reranker:</span>{' '}
+                {rerankEnabled ? (
+                  rerankModel.trim()
+                    ? <span className="font-mono">{rerankModel.trim()}</span>
+                    : <span className="text-gray-400">system default</span>
+                ) : (
+                  <span className="text-gray-400">off for this project</span>
+                )}
+              </p>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>

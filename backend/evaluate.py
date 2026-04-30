@@ -16,6 +16,9 @@ def _pipeline_for_eval(
     embed_url: str | None = None,
     embed_api_key: str | None = None,
     embed_model: str | None = None,
+    *,
+    project_rerank_allowed: bool = True,
+    rerank_model: str | None = None,
 ):
     """
     Single-pass pipeline generator for evaluation.
@@ -24,7 +27,7 @@ def _pipeline_for_eval(
 
     Shares merge_candidates from search.py — one canonical implementation.
     """
-    eff_rerank = use_rerank and RERANKER_ENABLED
+    eff_rerank = use_rerank and RERANKER_ENABLED and project_rerank_allowed
 
     vector_ids: list = []
     rows_by_id: dict = {}
@@ -70,7 +73,7 @@ def _pipeline_for_eval(
     if eff_rerank and candidates:
         yield {"step": "reranking", "message": f"Reranking {len(candidates)} candidates..."}
         texts = [rows_by_id[cid]['contextual_content'] for cid in candidates if cid in rows_by_id]
-        scores = do_rerank(question, texts)
+        scores = do_rerank(question, texts, model=rerank_model)
         ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
     else:
         ranked = [(cid, None) for cid in candidates]
@@ -94,6 +97,9 @@ def stream_ragas_export(
     embed_url: str | None = None,
     embed_api_key: str | None = None,
     embed_model: str | None = None,
+    *,
+    project_rerank_allowed: bool = True,
+    rerank_model: str | None = None,
 ):
     """
     Generator — yields SSE-formatted strings.
@@ -116,6 +122,8 @@ def stream_ragas_export(
             question, schema_name, effective_k,
             use_vector, use_bm25, use_rrf, use_rerank,
             embed_url=embed_url, embed_api_key=embed_api_key, embed_model=embed_model,
+            project_rerank_allowed=project_rerank_allowed,
+            rerank_model=rerank_model,
         )
         contexts = []
         try:

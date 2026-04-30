@@ -40,6 +40,7 @@ from models import (
     SystemConfigResponse,
     ModelListRequest,
     EmbeddingVerifyRequest,
+    RerankVerifyRequest,
 )
 from projects import (
     create_project,
@@ -52,7 +53,7 @@ from projects import (
     update_project_status,
     verify_project_pin,
 )
-from embedder import embed, list_models as list_embed_models, peek_rerank_strategy
+from embedder import embed, list_models as list_embed_models, peek_rerank_strategy, verify_rerank_model
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
@@ -107,6 +108,14 @@ def _check_pin(project_raw: dict, request: Request):
     provided = request.headers.get("X-Project-Pin", "")
     if provided != stored:
         raise HTTPException(status_code=401, detail="PIN required")
+
+
+def _project_rerank_settings(project_raw: dict) -> tuple[bool, str | None]:
+    """Per-project rerank gate + optional model override (null/empty → system RERANKER_MODEL)."""
+    v = project_raw.get("rerank_enabled")
+    allowed = True if v is None else bool(v)
+    rm = (project_raw.get("rerank_model") or "").strip() or None
+    return allowed, rm
 
 
 MAX_CLUSTER_FILTERS = 10
@@ -193,7 +202,10 @@ def update_project_endpoint(project_id: int, data: ProjectUpdate, request: Reque
     if not project_raw:
         raise HTTPException(status_code=404, detail="Project not found")
     _check_pin(project_raw, request)
-    updated = update_project(project_id, data.name, data.display_columns, data.default_k)
+    patch = data.model_dump(exclude_unset=True)
+    if "rerank_model" in patch:
+        patch["rerank_model"] = (patch["rerank_model"] or "").strip() or None
+    updated = update_project(project_id, patch)
     return updated
 
 
@@ -275,6 +287,17 @@ def verify_embedding_endpoint(body: EmbeddingVerifyRequest):
     try:
         embed("probe", base_url=url, api_key=api_key, model=model)
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/rerank/verify")
+def verify_rerank_endpoint(body: RerankVerifyRequest):
+    """Run a single rerank request against the configured Ollama reranker model."""
+    model = (body.model or "").strip() or None
+    try:
+        strategy = verify_rerank_model(model)
+        return {"ok": True, "strategy": strategy}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -536,6 +559,7 @@ def search_stream(
     if project_raw['status'] != 'ready':
         raise HTTPException(status_code=400, detail=f"Project not ready (status: {project_raw['status']})")
 
+    proj_rerank_ok, proj_rerank_model = _project_rerank_settings(project_raw)
     effective_k = min(k or project_raw['default_k'], 50)
     p_vector  = _parse_bool_param(use_vector)
     p_bm25    = _parse_bool_param(use_bm25)
@@ -588,6 +612,8 @@ def search_stream(
                     embed_url=project_raw.get('embed_url'),
                     embed_api_key=project_raw.get('embed_api_key'),
                     embed_model=project_raw.get('embed_model'),
+                    project_rerank_allowed=proj_rerank_ok,
+                    rerank_model=proj_rerank_model,
                 ):
                     if event['step'] == 'complete':
                         payload = _json.dumps({"step": "complete", "results": event['response'].dict()})
@@ -620,6 +646,7 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
         _validate_topic_pipeline(req.use_vector, req.use_bm25)
 
     k = req.k or project_raw['default_k']
+    proj_rerank_ok, proj_rerank_model = _project_rerank_settings(project_raw)
 
     result = do_search(
         query=req.query,
@@ -636,6 +663,8 @@ def search_endpoint(project_id: int, req: SearchRequest, request: Request):
         embed_url=project_raw.get('embed_url'),
         embed_api_key=project_raw.get('embed_api_key'),
         embed_model=project_raw.get('embed_model'),
+        project_rerank_allowed=proj_rerank_ok,
+        rerank_model=proj_rerank_model,
     )
 
     return result
@@ -658,6 +687,7 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         _validate_topic_pipeline(req.use_vector, req.use_bm25)
 
     k = req.k or project_raw['default_k']
+    proj_rerank_ok, proj_rerank_model = _project_rerank_settings(project_raw)
     result = do_search(
         query=req.query,
         mode=req.mode,
@@ -673,6 +703,8 @@ def export_results(project_id: int, req: SearchRequest, request: Request):
         embed_url=project_raw.get('embed_url'),
         embed_api_key=project_raw.get('embed_api_key'),
         embed_model=project_raw.get('embed_model'),
+        project_rerank_allowed=proj_rerank_ok,
+        rerank_model=proj_rerank_model,
     )
 
     # Convert to DataFrame
@@ -805,6 +837,7 @@ def evaluate_run(project_id: int, req: EvalRequest, request: Request):
 
     _validate_topic_pipeline(req.use_vector, req.use_bm25)
 
+    proj_rerank_ok, proj_rerank_model = _project_rerank_settings(project_raw)
     test_cases = [{"question": c.question, "ground_truth": c.ground_truth} for c in req.test_cases]
     return StreamingResponse(
         stream_ragas_export(
@@ -818,6 +851,8 @@ def evaluate_run(project_id: int, req: EvalRequest, request: Request):
             embed_url=project_raw.get('embed_url'),
             embed_api_key=project_raw.get('embed_api_key'),
             embed_model=project_raw.get('embed_model'),
+            project_rerank_allowed=proj_rerank_ok,
+            rerank_model=proj_rerank_model,
         ),
         media_type="text/event-stream"
     )

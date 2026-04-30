@@ -65,6 +65,10 @@ def init_db():
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_model TEXT;")
         cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS embed_dims INTEGER;")
+        cur.execute("ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS rerank_model TEXT;")
+        cur.execute(
+            "ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;"
+        )
 
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None, dims: int = None):

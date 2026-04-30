@@ -41,7 +41,10 @@ test('create project + ingest completes', async ({ page }) => {
   // Step 6: Connection (leave defaults)
   await page.getByRole('button', { name: 'Continue' }).click()
 
-  // Step 7: Settings -> Create -> ingestion screen
+  // Step 7: Rerank
+  await page.getByTestId('rerank-continue').click()
+
+  // Step 8: Settings -> Create -> ingestion screen
   await page.getByTestId('create-project').click()
 
   // Ingestion can take a bit; wait for complete marker, then redirect to search.

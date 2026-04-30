@@ -43,6 +43,7 @@ test.describe.serial('project PIN', () => {
     await page.getByTestId('embed-url').fill('http://host.docker.internal:11434/v1')
     await page.getByTestId('embed-model-input').fill('qwen3-embedding:0.6b')
     await page.getByTestId('connection-continue').click()
+  await page.getByTestId('rerank-continue').click()
 
     // Step 7: Settings -> set PIN -> Create + ingest
     await page.getByPlaceholder('Leave blank for open access').fill(pin)
