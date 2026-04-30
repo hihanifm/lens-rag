@@ -98,6 +98,14 @@ export default function System() {
             <InfoCard title="Reranker (topic mode)">
               <Row label="Enabled:" value={cfg.reranker_enabled ? 'yes' : 'no'} />
               <Row label="Model:" value={cfg.reranker_model} />
+              <Row
+                label="Strategy (auto-detected, cached):"
+                value={
+                  cfg.reranker_strategy
+                    ? `${cfg.reranker_strategy} (${cfg.reranker_strategy === 'native' ? 'POST /api/rerank' : '/v1/embeddings'})`
+                    : (cfg.reranker_enabled ? 'not probed yet — run a topic search with rerank on' : '—')
+                }
+              />
             </InfoCard>
 
             <InfoCard title="Candidate pool (topic mode)">

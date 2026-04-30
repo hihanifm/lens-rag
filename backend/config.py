@@ -9,6 +9,10 @@ EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "ollama")
 OLLAMA_BASE_URL    = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 
+# Base URL for native Ollama HTTP APIs (/api/...), derived from OpenAI-compatible .../v1 base
+_oba = (OLLAMA_BASE_URL or "").rstrip("/")
+OLLAMA_NATIVE_ORIGIN = _oba[:-3] if _oba.endswith("/v1") else _oba
+
 # OpenAI settings (used when EMBEDDING_PROVIDER=openai)
 OPENAI_API_KEY     = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_EMBED_MODEL = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")

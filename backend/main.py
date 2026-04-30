@@ -30,7 +30,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("lens.main")
 from db import init_db, get_cursor
-from models import ProjectCreate, ProjectUpdate, SearchRequest, EvalRequest, ClusterRequest, ClusterFilterItem, SystemConfigResponse, ModelListRequest
+from models import (
+    ProjectCreate,
+    ProjectUpdate,
+    SearchRequest,
+    EvalRequest,
+    ClusterRequest,
+    ClusterFilterItem,
+    SystemConfigResponse,
+    ModelListRequest,
+    EmbeddingVerifyRequest,
+)
 from projects import (
     create_project,
     get_all_projects,
@@ -42,7 +52,7 @@ from projects import (
     update_project_status,
     verify_project_pin,
 )
-from embedder import list_models as list_embed_models
+from embedder import embed, list_models as list_embed_models, peek_rerank_strategy
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
@@ -256,6 +266,19 @@ def get_available_models(url: str, api_key: str = None):
         raise HTTPException(status_code=502, detail=f"Could not reach embedding endpoint: {e}")
 
 
+@app.post("/embedding/verify")
+def verify_embedding_endpoint(body: EmbeddingVerifyRequest):
+    """Run a single embedding request with the same overrides as project ingest (Create → Connection)."""
+    url = (body.url or "").strip() or None
+    api_key = ((body.api_key or "").strip() or None) if url else None
+    model = ((body.model or "").strip() or None) if url else None
+    try:
+        embed("probe", base_url=url, api_key=api_key, model=model)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/system-config", response_model=SystemConfigResponse)
 def get_system_config_global():
     """
@@ -324,6 +347,7 @@ def _get_system_config_response(request: Request | None, project_id: int | None)
         embedding_dims=EMBEDDING_DIMS,
         reranker_enabled=RERANKER_ENABLED,
         reranker_model=RERANKER_MODEL,
+        reranker_strategy=peek_rerank_strategy(),
         top_k_retrieval=TOP_K_RETRIEVAL,
         top_k_default=TOP_K_DEFAULT,
         top_k_max=TOP_K_MAX,

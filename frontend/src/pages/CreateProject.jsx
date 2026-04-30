@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { previewExcel, createProject, fetchModels, getSystemConfig, API_BASE_URL } from '../api/client'
+import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedding, API_BASE_URL } from '../api/client'
 
 const STEPS = ['Name', 'Upload', 'Store', 'Context', 'ID Column', 'Display', 'Connection', 'Settings']
 
@@ -22,6 +22,7 @@ export default function CreateProject() {
   const [availableModels, setAvailableModels] = useState([])
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState('')
+  const [connectionCheckLoading, setConnectionCheckLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [ingestProgress, setIngestProgress] = useState(null)
@@ -34,6 +35,29 @@ export default function CreateProject() {
 
   const next = () => setStep(s => s + 1)
   const back = () => setStep(s => s - 1)
+
+  const handleConnectionContinue = useCallback(async () => {
+    setModelError('')
+    setConnectionCheckLoading(true)
+    try {
+      const url = embedUrl.trim()
+      await verifyEmbedding({
+        url: url || null,
+        api_key: url ? (embedApiKey.trim() || null) : null,
+        model: url ? (embedModel.trim() || null) : null,
+      })
+      next()
+    } catch (e) {
+      const d = e?.response?.data?.detail
+      setModelError(
+        typeof d === 'string'
+          ? d
+          : 'Could not verify embedding with this URL/model. Use an embedding-capable model or fix the endpoint.',
+      )
+    } finally {
+      setConnectionCheckLoading(false)
+    }
+  }, [embedUrl, embedApiKey, embedModel, next])
 
   // Close the EventSource when the component unmounts so the browser doesn't
   // auto-reconnect and trigger a duplicate ingestion request.
@@ -60,7 +84,7 @@ export default function CreateProject() {
         (step === 3) ||
         (step === 4) ||
         (step === 5 && displayColumns.length > 0) ||
-        (step === 6) ||
+        (step === 6 && !connectionCheckLoading) ||
         (step === 7 && !loading)
 
       if (!canProceed) return
@@ -79,7 +103,7 @@ export default function CreateProject() {
         return next()
       }
       if (step === 5) return next()
-      if (step === 6) return next()
+      if (step === 6) return void handleConnectionContinue()
       if (step === 7) return handleCreate()
     }
 
@@ -94,6 +118,8 @@ export default function CreateProject() {
     contextColumns,
     idColumn,
     displayColumns.length,
+    connectionCheckLoading,
+    handleConnectionContinue,
   ])
 
   const handleUpload = async (fileArg) => {
@@ -178,6 +204,7 @@ export default function CreateProject() {
       const models = Array.isArray(raw) ? raw : []
       setAvailableModels(models)
       if (models.length > 0) setEmbedModel(models[0])
+      else setEmbedModel('')
     } catch (e) {
       setModelError('Could not reach the endpoint. Check the URL and try again.')
     } finally {
@@ -189,6 +216,7 @@ export default function CreateProject() {
     setLoading(true)
     setError('')
     try {
+      const url = embedUrl.trim()
       const project = await createProject({
         name,
         stored_columns: storedColumns,
@@ -199,9 +227,10 @@ export default function CreateProject() {
         default_k: defaultK,
         pin: pin || null,
         source_filename: file?.name || null,
-        embed_url: embedUrl.trim() || null,
-        embed_api_key: embedApiKey.trim() || null,
-        embed_model: embedModel || null,
+        embed_url: url || null,
+        embed_api_key: url ? (embedApiKey.trim() || null) : null,
+        // Custom model only applies with a custom endpoint; avoids stale chat-model IDs with system URL.
+        embed_model: url ? (embedModel.trim() || null) : null,
         embed_dims: null,
       })
 
@@ -669,7 +698,15 @@ export default function CreateProject() {
 
             <div className="flex gap-3 mt-8">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">Back</button>
-              <button data-testid="connection-continue" onClick={next} className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700">Continue</button>
+              <button
+                data-testid="connection-continue"
+                type="button"
+                onClick={handleConnectionContinue}
+                disabled={connectionCheckLoading}
+                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {connectionCheckLoading ? 'Checking…' : 'Continue'}
+              </button>
             </div>
           </div>
         )}

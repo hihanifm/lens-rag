@@ -45,6 +45,14 @@ class ModelListRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class EmbeddingVerifyRequest(BaseModel):
+    """One-shot embed probe for the Connection wizard (same kwargs as project ingest)."""
+
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
 class SystemConfigResponse(BaseModel):
     """Read-only server retrieval configuration (for transparency UI)."""
     embedding_provider: str
@@ -53,6 +61,7 @@ class SystemConfigResponse(BaseModel):
     embedding_dims: int
     reranker_enabled: bool
     reranker_model: str
+    reranker_strategy: Optional[str] = None  # "native" | "embedding" — detected at runtime, cached in API process
     top_k_retrieval: int
     top_k_default: int
     top_k_max: int

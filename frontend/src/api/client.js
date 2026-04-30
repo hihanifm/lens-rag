@@ -82,6 +82,10 @@ export const fetchModels = (url, apiKey) => {
   return api.get(`models?${params}`).then(r => r.data.models)
 }
 
+/** One embed probe; same shape as create-project Connection fields. */
+export const verifyEmbedding = (body) =>
+  api.post('embedding/verify', body).then(r => r.data)
+
 export const browseProject = (id) =>
   api.get(`projects/${id}/browse`, { headers: projectHeaders(id) }).then(r => r.data)
 

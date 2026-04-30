@@ -42,7 +42,11 @@ export default function Home() {
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: getProjects,
-    refetchInterval: 3000
+    refetchInterval: (query) => {
+      const list = query.state.data
+      if (!Array.isArray(list)) return false
+      return list.some((p) => p.status === 'ingesting') ? 3000 : false
+    },
   })
 
 
