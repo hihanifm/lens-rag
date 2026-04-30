@@ -22,7 +22,7 @@ const defaultSearch = {
 }
 
 const defaultEval = {
-  testCases: null, k: 10,
+  testCases: null, k: 5,
   use_vector: true, use_bm25: true, use_rrf: true, use_rerank: true,
   loading: false, progress: null,
   results: null, error: '',

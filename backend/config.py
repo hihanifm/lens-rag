@@ -32,7 +32,7 @@ RERANKER_MODEL     = os.environ.get("RERANKER_MODEL", "bbjson/bge-reranker-base:
 
 # ── Search ─────────────────────────────────────────────────────────────────
 TOP_K_RETRIEVAL    = 50    # internal candidate pool size
-TOP_K_DEFAULT      = 10    # default results shown to user
+TOP_K_DEFAULT      = 5     # default results shown to user
 TOP_K_MAX          = 50    # hard ceiling — user cannot exceed this
 
 # ── Database ───────────────────────────────────────────────────────────────

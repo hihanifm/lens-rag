@@ -25,7 +25,7 @@ export default function CreateProject() {
   const [contextColumns, setContextColumns] = useState([])
   const [idColumn, setIdColumn] = useState(null)
   const [displayColumns, setDisplayColumns] = useState([])
-  const [defaultK, setDefaultK] = useState(10)
+  const [defaultK, setDefaultK] = useState(5)
   const [pin, setPin] = useState('')
   const [rerankEnabled, setRerankEnabled] = useState(true)
   const [rerankModel, setRerankModel] = useState('')

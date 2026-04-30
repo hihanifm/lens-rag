@@ -19,6 +19,14 @@ function ScoreBubble({ label, value, title, className }) {
   )
 }
 
+function rerankStrengthLabel(rank) {
+  if (typeof rank !== 'number') return null
+  if (rank === 1) return 'strong'
+  if (rank <= 3) return 'good'
+  if (rank <= 10) return 'ok'
+  return 'weak'
+}
+
 export default function ResultsTable({ results, displayColumns }) {
   const [sorting, setSorting] = useState([])
   const [expandedRows, setExpandedRows] = useState(new Set())
@@ -36,22 +44,45 @@ export default function ResultsTable({ results, displayColumns }) {
       r?.cosine_score != null || r?.bm25_rank != null || r?.rerank_score != null
     )
 
+    const rerankRankByRow = (() => {
+      if (!Array.isArray(results)) return new Map()
+      const pairs = results
+        .map((r, idx) => ({ idx, score: r?.rerank_score }))
+        .filter(p => typeof p.score === 'number' && !Number.isNaN(p.score))
+        .sort((a, b) => Number(b.score) - Number(a.score))
+      const m = new Map()
+      pairs.forEach((p, i) => m.set(p.idx, i + 1))
+      return m
+    })()
+
     const scoreCol = hasAnyScores ? [{
       id: '__scores',
       header: '',
       accessorFn: row => row,
       cell: info => {
         const row = info.getValue()
+        const expanded = expandedRows.has(info.row.id)
         const cos = typeof row?.cosine_score === 'number' ? `${Math.round(row.cosine_score * 100)}%` : null
         const bm25 = typeof row?.bm25_rank === 'number' ? `#${row.bm25_rank}` : null
-        const rr = typeof row?.rerank_score === 'number'
-          ? (row.rerank_score >= 0 && row.rerank_score <= 1
-              ? `${(row.rerank_score * 100).toFixed(1)}%`
-              : row.rerank_score.toFixed(3))
+        const rrScore = typeof row?.rerank_score === 'number' ? row.rerank_score : null
+        const rrScoreTxt = typeof rrScore === 'number' && !Number.isNaN(rrScore) ? rrScore.toFixed(3) : null
+        const rrRank = rerankRankByRow.get(info.row.index) ?? null
+        const rrStrength = rerankStrengthLabel(rrRank)
+        const rrValue = rrScoreTxt
+          ? `${rrStrength ? `${rrStrength} · ` : ''}${rrRank ? `#${rrRank} · ` : ''}${rrScoreTxt}`
           : null
 
         return (
-          <div className="flex flex-col gap-1 items-start pt-0.5">
+          <div className="flex flex-col gap-1 items-start">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleRow(info.row.id) }}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+              title={expanded ? 'Collapse row' : 'Expand row'}
+              aria-label={expanded ? 'Collapse row' : 'Expand row'}
+            >
+              {expanded ? '−' : '+'}
+            </button>
             <ScoreBubble
               label="cos"
               value={cos}
@@ -66,8 +97,8 @@ export default function ResultsTable({ results, displayColumns }) {
             />
             <ScoreBubble
               label="rerank"
-              value={rr}
-              title="Reranker score (model-dependent scale)"
+              value={rrValue}
+              title="Rerank: within-this-results rank and raw score (scale is model-dependent)"
               className="bg-emerald-50 text-emerald-700 border-emerald-200"
             />
           </div>
@@ -137,12 +168,17 @@ export default function ResultsTable({ results, displayColumns }) {
           {table.getRowModel().rows.map((row, i) => (
             <tr
               key={row.id}
-              onClick={() => toggleRow(row.id)}
-              className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 cursor-pointer transition-colors`}
-              title="Click to expand/collapse row"
+              className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/40 transition-colors`}
             >
               {row.getVisibleCells().map(cell => (
-                <td key={cell.id} className="px-4 py-3 min-w-[160px] max-w-xs align-top">
+                <td
+                  key={cell.id}
+                  className={`px-4 py-3 align-top ${
+                    cell.column.id === '__scores'
+                      ? 'min-w-[120px] w-[120px] px-2'
+                      : 'min-w-[160px] max-w-xs'
+                  }`}
+                >
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </td>
               ))}

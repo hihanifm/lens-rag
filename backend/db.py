@@ -45,7 +45,7 @@ def init_db():
                 id_column       TEXT,
                 display_columns TEXT[] NOT NULL DEFAULT '{}',
                 has_id_column   BOOLEAN DEFAULT FALSE,
-                default_k       INTEGER DEFAULT 10,
+                default_k       INTEGER DEFAULT 5,
                 status          TEXT DEFAULT 'pending',
                 row_count       INTEGER,
                 created_at      TIMESTAMP DEFAULT NOW()

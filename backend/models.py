@@ -10,7 +10,7 @@ class ProjectCreate(BaseModel):
     context_columns: List[str]
     id_column: Optional[str] = None
     display_columns: List[str]
-    default_k: int = 10
+    default_k: int = 5
     pin: Optional[str] = None
     source_filename: Optional[str] = None
     embed_url: Optional[str] = None
@@ -198,7 +198,7 @@ class EvalCase(BaseModel):
 
 class EvalRequest(BaseModel):
     test_cases: List[EvalCase]
-    k: int = 10
+    k: int = 5
     # same pipeline toggles as topic search (defaults preserve current behavior)
     use_vector: Optional[bool] = True
     use_bm25: Optional[bool] = True

@@ -64,7 +64,7 @@ export default function Search() {
   }, [project]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const effectiveMode = s.mode
-  const effectiveK    = s.k || project?.default_k || 10
+  const effectiveK    = s.k || project?.default_k || 5
   const legacyMethod  = s.legacy_method || 'bm25'
 
   const orderedDisplayColumns = (() => {
