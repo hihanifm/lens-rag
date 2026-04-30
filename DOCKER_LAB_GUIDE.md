@@ -103,6 +103,7 @@ pip config set global.trusted-host "<your-mirror-host>"
 Provide both:
 
 - **simple**: `docker compose logs -f`
+- **focused**: one command/target per service (API-only is the most common)
 - **nice**: a `logs-split` helper that tails API/FE/DB in separate panes (tmux is common in labs)
 
 Fallback (no tmux): document per-service log commands.
@@ -138,6 +139,14 @@ logs-split:
 	  split-window -v "docker compose --profile dev logs -f lens-rag-postgres" \; \
 	  select-pane -t 0 \; \
 	  attach -t lens-logs
+```
+
+```makefile
+logs-api:
+	docker compose --profile dev logs -f lens-rag-api
+
+prod-logs-api:
+	docker compose --profile prod logs -f lens-rag-api-prod
 ```
 
 ```makefile

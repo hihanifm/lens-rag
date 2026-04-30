@@ -1,4 +1,4 @@
-.PHONY: up down build logs logs-split prod-logs-split restart prod-restart ps dev-up prod-up prod-down prod-logs build-frontend e2e-up e2e e2e-down pip-cache clean
+.PHONY: up down build logs logs-api logs-frontend logs-db logs-split prod-logs prod-logs-api prod-logs-db prod-logs-split restart prod-restart ps dev-up prod-up prod-down build-frontend e2e-up e2e e2e-down pip-cache clean
 
 up:
 	docker compose --profile dev up -d
@@ -11,6 +11,16 @@ build:
 
 logs:
 	docker compose logs -f
+
+# Focused logs (dev)
+logs-api:
+	docker compose --profile dev logs -f lens-rag-api
+
+logs-frontend:
+	docker compose --profile dev logs -f lens-rag-frontend
+
+logs-db:
+	docker compose --profile dev logs -f lens-rag-postgres
 
 # Split logs into 3 tmux panes (API / frontend / postgres).
 # Requires tmux installed.
@@ -50,6 +60,13 @@ prod-logs-split:
 
 prod-logs:
 	docker compose --profile prod logs -f
+
+# Focused logs (prod)
+prod-logs-api:
+	docker compose --profile prod logs -f lens-rag-api-prod
+
+prod-logs-db:
+	docker compose --profile prod logs -f lens-rag-postgres-prod
 
 # Build frontend for production under /lens-rag sub-path.
 # Output goes to frontend/dist/ — copy or mount into the FastAPI container.
