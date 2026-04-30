@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useId } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -14,8 +14,20 @@ import {
   browseCompareJob,
   browseRunRaw,
   getCompareConfigStats,
+  getSystemConfig,
+  fetchModels,
   API_BASE_URL,
 } from '../api/client'
+
+/** Defaults for LLM judge (OpenAI-compatible chat). */
+const LLM_PRESET_OLLAMA = {
+  url: 'http://host.docker.internal:11434/v1',
+  model: 'llama3.2:3b',
+}
+const LLM_PRESET_OPENAI = {
+  url: 'https://api.openai.com/v1',
+  model: 'gpt-4o-mini',
+}
 
 // ── Score helpers ──────────────────────────────────────────────────────────
 
@@ -759,6 +771,7 @@ function ConfigStatsTab({ job }) {
 // ── New Run Modal ──────────────────────────────────────────────────────────
 
 function NewRunModal({ onClose, onCreated }) {
+  const llmModelListId = useId()
   const [name, setName] = useState('')
   const [topK, setTopK] = useState(3)
   const [rerankerEnabled, setRerankerEnabled] = useState(false)
@@ -767,9 +780,51 @@ function NewRunModal({ onClose, onCreated }) {
   const [llmEnabled, setLlmEnabled] = useState(false)
   const [llmUrl, setLlmUrl] = useState('')
   const [llmModel, setLlmModel] = useState('')
+  const [llmApiKey, setLlmApiKey] = useState('')
   const [llmPrompt, setLlmPrompt] = useState('')
+  const [llmModelOptions, setLlmModelOptions] = useState([])
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false)
+  const [llmModelsError, setLlmModelsError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    getSystemConfig()
+      .then((cfg) => {
+        if (cancelled || !cfg?.embedding_url) return
+        if (cfg.embedding_provider === 'ollama') {
+          setLlmUrl((u) => (u.trim() ? u : cfg.embedding_url))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleFetchLlmModels = async () => {
+    const url = llmUrl.trim()
+    if (!url) {
+      setLlmModelsError('Enter an endpoint URL first.')
+      return
+    }
+    setLlmModelsError('')
+    setLlmModelsLoading(true)
+    try {
+      const models = await fetchModels(url, llmApiKey.trim() || undefined)
+      const ids = Array.isArray(models) ? models.filter(Boolean) : []
+      setLlmModelOptions(ids)
+      if (ids.length && !llmModel.trim()) setLlmModel(ids[0])
+    } catch (e) {
+      setLlmModelOptions([])
+      setLlmModelsError(
+        e?.response?.data?.detail || e?.message || 'Could not list models. Check URL and API key (OpenAI).'
+      )
+    } finally {
+      setLlmModelsLoading(false)
+    }
+  }
 
   const handleCreate = async () => {
     setSubmitting(true)
@@ -880,7 +935,38 @@ function NewRunModal({ onClose, onCreated }) {
             {llmEnabled && (
               <div className="space-y-3 pl-6">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Endpoint URL <span className="text-red-500">*</span></label>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <label className="block text-xs font-medium text-gray-600">
+                      Endpoint URL <span className="text-red-500">*</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLlmUrl(LLM_PRESET_OLLAMA.url)
+                          setLlmModel(LLM_PRESET_OLLAMA.model)
+                          setLlmApiKey('')
+                          setLlmModelOptions([])
+                          setLlmModelsError('')
+                        }}
+                        className="text-xs px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      >
+                        Ollama
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLlmUrl(LLM_PRESET_OPENAI.url)
+                          setLlmModel(LLM_PRESET_OPENAI.model)
+                          setLlmModelOptions([])
+                          setLlmModelsError('')
+                        }}
+                        className="text-xs px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      >
+                        OpenAI
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="text"
                     value={llmUrl}
@@ -888,16 +974,53 @@ function NewRunModal({ onClose, onCreated }) {
                     placeholder="e.g. http://host.docker.internal:11434/v1"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Ollama preset uses Docker→host; use <span className="font-mono">localhost</span> only if the API is reachable from the LENS backend container.
+                  </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Model <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    API key <span className="text-gray-400 font-normal">(optional — for listing OpenAI models)</span>
+                  </label>
                   <input
-                    type="text"
-                    value={llmModel}
-                    onChange={e => setLlmModel(e.target.value)}
-                    placeholder="e.g. llama3.2:3b"
+                    type="password"
+                    autoComplete="off"
+                    value={llmApiKey}
+                    onChange={e => setLlmApiKey(e.target.value)}
+                    placeholder="sk-… only if using OpenAI /v1/models"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-end gap-2 mb-1">
+                    <label className="block text-xs font-medium text-gray-600 flex-1 min-w-[8rem]">
+                      Model <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchLlmModels}
+                      disabled={llmModelsLoading || !llmUrl.trim()}
+                      className="text-xs shrink-0 px-2.5 py-1 rounded-md border border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {llmModelsLoading ? 'Fetching…' : 'Fetch models'}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    list={llmModelOptions.length > 0 ? llmModelListId : undefined}
+                    value={llmModel}
+                    onChange={e => setLlmModel(e.target.value)}
+                    placeholder="e.g. llama3.2:3b or gpt-4o-mini"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  />
+                  {llmModelOptions.length > 0 ? (
+                    <datalist id={llmModelListId}>
+                      {llmModelOptions.map((id) => (
+                        <option key={id} value={id} />
+                      ))}
+                    </datalist>
+                  ) : null}
+                  {llmModelsError && <p className="text-xs text-red-600 mt-1">{llmModelsError}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
