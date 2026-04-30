@@ -128,7 +128,6 @@ function ReviewTab({ job }) {
   const queryClient = useQueryClient()
 
   const [minScore, setMinScore] = useState(0)
-  const [includeDecided, setIncludeDecided] = useState(false)
   const [offset, setOffset] = useState(0)
   const [item, setItem] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -160,7 +159,7 @@ function ReviewTab({ job }) {
       const result = await getNextReviewItem(jobId, {
         minScore,
         offset: newOffset,
-        includeDecided,
+        includeDecided: true,
       })
       setItem(result)
       setSelectedRightId(result.current_decision ?? null)
@@ -174,7 +173,7 @@ function ReviewTab({ job }) {
     } finally {
       setLoading(false)
     }
-  }, [jobId, minScore, includeDecided])
+  }, [jobId, minScore])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -184,7 +183,7 @@ function ReviewTab({ job }) {
   // Load first item on mount and when filters change
   useEffect(() => {
     fetchItem(0)
-  }, [minScore, includeDecided])
+  }, [minScore])
 
   const handleSelect = async (rightId) => {
     if (saving) return
@@ -216,14 +215,13 @@ function ReviewTab({ job }) {
   }
 
   const handlePrev = () => {
+    if (saving || loading) return
     if (offset > 0) fetchItem(offset - 1)
   }
 
   const handleNext = () => {
-    // Manual navigation only. In undecided-only mode, deciding the current row
-    // removes it from the list, so the next row occupies the same offset.
-    const nextOffset = (!includeDecided && item?.is_decided) ? offset : (offset + 1)
-    fetchItem(nextOffset)
+    if (saving || loading) return
+    fetchItem(offset + 1)
   }
 
   // Keyboard shortcuts: ← Prev, → Next (ignore while typing in inputs)
@@ -309,17 +307,6 @@ function ReviewTab({ job }) {
             Scoring: {scoringMode === 'rerank' ? 'Rerank' : 'Cosine'}
           </span>
         </div>
-
-        {/* Include decided toggle */}
-        <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={includeDecided}
-            onChange={e => setIncludeDecided(e.target.checked)}
-            className="rounded border-gray-300 text-blue-600"
-          />
-          Include reviewed
-        </label>
       </div>
 
       {/* Main review area */}
@@ -328,11 +315,9 @@ function ReviewTab({ job }) {
       ) : noMore ? (
         <div className="text-center py-20">
           <p className="text-gray-500 text-lg font-medium">
-            {includeDecided
-              ? 'No rows match the current score filter.'
-              : stats?.pending === 0
-                ? '🎉 All rows reviewed!'
-                : 'No more rows match the current filter. Try lowering the min score.'}
+            {stats?.pending === 0
+              ? '🎉 All rows reviewed!'
+              : 'No more rows match the current filter. Try lowering the min score.'}
           </p>
         </div>
       ) : item ? (
@@ -396,7 +381,7 @@ function ReviewTab({ job }) {
               <button
                 type="button"
                 onClick={handlePrev}
-                disabled={offset === 0}
+                disabled={offset === 0 || saving || loading}
                 className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30"
               >
                 ← Prev
@@ -405,7 +390,8 @@ function ReviewTab({ job }) {
               <button
                 type="button"
                 onClick={handleNext}
-                className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50"
+                disabled={saving || loading}
+                className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30"
               >
                 Next →
               </button>
@@ -946,6 +932,15 @@ export default function CompareJob() {
     },
   })
 
+  const { data: headerStats } = useQuery({
+    queryKey: ['compare-review-stats', String(jobId)],
+    queryFn: () => getReviewStats(jobId),
+    enabled: !!jobId && job?.status === 'ready',
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">
@@ -971,6 +966,13 @@ export default function CompareJob() {
     error: 'bg-red-100 text-red-700',
   }
 
+  const totalLeft = headerStats?.total_left ?? null
+  const noMatch = headerStats?.no_match ?? null
+  const noMatchPct =
+    typeof totalLeft === 'number' && totalLeft > 0 && typeof noMatch === 'number'
+      ? Math.round((noMatch / totalLeft) * 100)
+      : null
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -985,6 +987,14 @@ export default function CompareJob() {
                 <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${statusColors[job.status] || 'bg-gray-100 text-gray-500'}`}>
                   {job.status}
                 </span>
+                {noMatchPct != null && (
+                  <span
+                    className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200"
+                    title={`No match decisions: ${noMatch?.toLocaleString?.() ?? noMatch} / ${totalLeft?.toLocaleString?.() ?? totalLeft}`}
+                  >
+                    No match: {noMatchPct}%
+                  </span>
+                )}
               </div>
               <p className="text-sm text-gray-500 mt-0.5">
                 <span className="font-medium text-gray-700">{job.label_left}</span>

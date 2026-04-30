@@ -345,10 +345,16 @@ def review_stats(job_id: int):
         cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions")
         reviewed = (cur.fetchone() or {}).get("cnt", 0)
 
+        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions WHERE matched_right_id IS NULL")
+        no_match = (cur.fetchone() or {}).get("cnt", 0)
+        matched = max(0, reviewed - no_match)
+
     return {
         "total_left": total_left,
         "reviewed": reviewed,
         "pending": max(0, total_left - reviewed),
+        "no_match": no_match,
+        "matched": matched,
     }
 
 
