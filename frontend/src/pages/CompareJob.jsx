@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useId } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -771,7 +771,6 @@ function ConfigStatsTab({ job }) {
 // ── New Run Modal ──────────────────────────────────────────────────────────
 
 function NewRunModal({ onClose, onCreated }) {
-  const llmModelListId = useId()
   const [name, setName] = useState('')
   const [topK, setTopK] = useState(3)
   const [rerankerEnabled, setRerankerEnabled] = useState(false)
@@ -803,6 +802,11 @@ function NewRunModal({ onClose, onCreated }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!llmModelOptions.length) return
+    setLlmModel((m) => (llmModelOptions.includes(m) ? m : llmModelOptions[0]))
+  }, [llmModelOptions])
+
   const handleFetchLlmModels = async () => {
     const url = llmUrl.trim()
     if (!url) {
@@ -814,8 +818,17 @@ function NewRunModal({ onClose, onCreated }) {
     try {
       const models = await fetchModels(url, llmApiKey.trim() || undefined)
       const ids = Array.isArray(models) ? models.filter(Boolean) : []
+      if (ids.length === 0) {
+        setLlmModelOptions([])
+        setLlmModelsError('Endpoint returned no models.')
+        return
+      }
       setLlmModelOptions(ids)
-      if (ids.length && !llmModel.trim()) setLlmModel(ids[0])
+      setLlmModel((prev) => {
+        const p = prev.trim()
+        if (p && ids.includes(p)) return p
+        return ids[0]
+      })
     } catch (e) {
       setLlmModelOptions([])
       setLlmModelsError(
@@ -1005,21 +1018,33 @@ function NewRunModal({ onClose, onCreated }) {
                       {llmModelsLoading ? 'Fetching…' : 'Fetch models'}
                     </button>
                   </div>
-                  <input
-                    type="text"
-                    list={llmModelOptions.length > 0 ? llmModelListId : undefined}
-                    value={llmModel}
-                    onChange={e => setLlmModel(e.target.value)}
-                    placeholder="e.g. llama3.2:3b or gpt-4o-mini"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                  />
                   {llmModelOptions.length > 0 ? (
-                    <datalist id={llmModelListId}>
-                      {llmModelOptions.map((id) => (
-                        <option key={id} value={id} />
-                      ))}
-                    </datalist>
-                  ) : null}
+                    <>
+                      <select
+                        value={llmModel}
+                        onChange={(e) => setLlmModel(e.target.value)}
+                        className="w-full max-w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                        size={1}
+                      >
+                        {llmModelOptions.map((id) => (
+                          <option key={id} value={id}>
+                            {id}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        {llmModelOptions.length} model{llmModelOptions.length !== 1 ? 's' : ''} from endpoint. Fetch again after changing URL or API key.
+                      </p>
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      placeholder="e.g. llama3.2:3b or gpt-4o-mini — use Fetch models to list"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                  )}
                   {llmModelsError && <p className="text-xs text-red-600 mt-1">{llmModelsError}</p>}
                 </div>
                 <div>
