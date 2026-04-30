@@ -1,14 +1,17 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getProject } from '../api/client'
 import { API_BASE_URL } from '../api/client'
 import { fileDateTime } from '../utils/history'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { useProjectState } from '../contexts/ProjectStateContext'
+import RerankConfigModal from '../components/RerankConfigModal'
 
 export default function EvaluateProject() {
   const { projectId } = useParams()
+  const queryClient = useQueryClient()
   const { getEval, setEval, startEval, cancelEval } = useProjectState()
   const ev = getEval(projectId)
 
@@ -18,6 +21,7 @@ export default function EvaluateProject() {
   })
 
   const { isLocked, unlockWithPin } = useProjectPin(projectId, project?.has_pin)
+  const [rerankOpen, setRerankOpen] = useState(false)
 
   const parseCSVLine = (line) => {
     const result = []
@@ -270,6 +274,16 @@ export default function EvaluateProject() {
                     className="w-3.5 h-3.5 rounded accent-blue-600"
                   />
                   <span className="text-xs text-gray-600">{label}</span>
+                  {key === 'use_rerank' && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRerankOpen(true) }}
+                      className="ml-1 text-[11px] text-blue-600 hover:text-blue-700 font-medium"
+                      title="Configure project reranking model"
+                    >
+                      Configure
+                    </button>
+                  )}
                 </label>
               ))}
             </div>
@@ -400,6 +414,19 @@ export default function EvaluateProject() {
         })()}
 
       </div>
+
+      <RerankConfigModal
+        open={rerankOpen}
+        onClose={() => setRerankOpen(false)}
+        projectId={projectId}
+        currentEnabled={project.rerank_enabled ?? true}
+        currentModel={(project.rerank_model || '').trim()}
+        embedUrl={(project.embed_url || '').trim()}
+        onSaved={async () => {
+          await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+          await queryClient.invalidateQueries({ queryKey: ['projects'] })
+        }}
+      />
     </div>
   )
 }
