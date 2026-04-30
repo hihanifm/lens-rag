@@ -20,6 +20,7 @@ export default function CreateProject() {
   const [name, setName] = useState('')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)  // { columns, sheet_names, row_count, tmp_path }
+  const [previewFileName, setPreviewFileName] = useState('')
   const [storedColumns, setStoredColumns] = useState([])  // Step A: which columns to store in DB
   const [contextColumns, setContextColumns] = useState([])
   const [idColumn, setIdColumn] = useState(null)
@@ -172,6 +173,7 @@ export default function CreateProject() {
       const data = await previewExcel(target)
       setFile(target)
       setPreview(data)
+      setPreviewFileName(target.name)
       setStoredColumns(data.columns)  // default: store all columns
       next()
     } catch (e) {
@@ -189,9 +191,15 @@ export default function CreateProject() {
       if (!res.ok) throw new Error('fetch failed')
       const blob = await res.blob()
       const sampleFile = new File([blob], filename, { type: blob.type })
-      await handleUpload(sampleFile)
+      // Populate the widget and pre-fetch preview, but do not advance steps.
+      setFile(sampleFile)
+      const data = await previewExcel(sampleFile)
+      setPreview(data)
+      setPreviewFileName(sampleFile.name)
+      setStoredColumns(data.columns) // default: store all columns
     } catch (e) {
       setError('Failed to load sample file.')
+    } finally {
       setLoading(false)
     }
   }
@@ -443,6 +451,28 @@ export default function CreateProject() {
                     Choose file
                   </button>
                   <p className="text-xs text-gray-400">.xlsx or .xls</p>
+                  <div className="pt-2">
+                    <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Or try a sample</p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {[
+                        { label: 'Products', file: 'product_catalog.xlsx', icon: '📦' },
+                        { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
+                        { label: 'Books', file: 'book_library.xlsx', icon: '📚' },
+                        { label: 'HR', file: 'hr_directory.xlsx', icon: '👥' },
+                      ].map(s => (
+                        <button
+                          key={s.file}
+                          type="button"
+                          disabled={loading}
+                          onClick={(e) => { e.stopPropagation(); handleLoadSample(s.file) }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 transition-colors"
+                        >
+                          <span aria-hidden>{s.icon}</span>
+                          <span>{s.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
               <input
@@ -451,31 +481,13 @@ export default function CreateProject() {
                 type="file"
                 accept=".xlsx,.xls"
                 className="hidden"
-                onChange={e => setFile(e.target.files[0])}
+                onChange={e => {
+                  const f = e.target.files[0]
+                  setFile(f || null)
+                  setPreview(null)
+                  setPreviewFileName('')
+                }}
               />
-            </div>
-
-            <div className="mt-8">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Or try a sample</p>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: 'Product Catalog', file: 'product_catalog.xlsx', icon: '📦' },
-                  { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
-                  { label: 'Book Library', file: 'book_library.xlsx', icon: '📚' },
-                  { label: 'HR Directory', file: 'hr_directory.xlsx', icon: '👥' },
-                ].map(s => (
-                  <button
-                    key={s.file}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => handleLoadSample(s.file)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 transition-colors"
-                  >
-                    <span>{s.icon}</span>
-                    <span>{s.label}</span>
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -483,7 +495,10 @@ export default function CreateProject() {
                 Back
               </button>
               <button
-                onClick={() => handleUpload()}
+                onClick={() => {
+                  if (file && preview && previewFileName === file.name) return next()
+                  return handleUpload()
+                }}
                 data-testid="upload-continue"
                 disabled={!file || loading}
                 className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40"

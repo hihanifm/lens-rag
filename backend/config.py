@@ -57,6 +57,11 @@ CORS_ORIGINS = [
 # Leave empty when running at root.
 ROOT_PATH = os.environ.get("ROOT_PATH", "")
 
+# ── Comparator ─────────────────────────────────────────────────────────────
+COMPARE_TOP_K          = int(os.getenv("COMPARE_TOP_K", "3"))
+COMPARE_MATCH_THRESHOLD  = float(os.getenv("COMPARE_MATCH_THRESHOLD", "0.85"))
+COMPARE_REVIEW_THRESHOLD = float(os.getenv("COMPARE_REVIEW_THRESHOLD", "0.60"))
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")

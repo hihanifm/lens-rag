@@ -58,6 +58,7 @@ from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
 from clustering import cluster as do_cluster, stream_cluster
+from compare_router import router as compare_router
 
 app = FastAPI(title="LENS API", version="1.4.1", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
@@ -70,6 +71,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(compare_router, prefix="/compare")
+
 
 @app.on_event("startup")
 def startup():
@@ -81,7 +84,10 @@ def startup():
     init_db()
     logger.info("DB initialised")
 
-_SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
+_SAMPLES_DIR = os.environ.get(
+    "SAMPLES_DIR",
+    os.path.join(os.path.dirname(__file__), "samples"),
+)
 if os.path.isdir(_SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=_SAMPLES_DIR), name="samples")
 

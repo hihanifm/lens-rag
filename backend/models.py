@@ -200,3 +200,86 @@ class EvalRequest(BaseModel):
     use_bm25: Optional[bool] = True
     use_rrf: Optional[bool] = True
     use_rerank: Optional[bool] = True
+
+
+# ── Compare models ─────────────────────────────────────────────────────────
+
+class CompareJobCreate(BaseModel):
+    name: str
+    label_left: str
+    label_right: str
+    tmp_path_left: str
+    tmp_path_right: str
+    source_filename_left: Optional[str] = None
+    source_filename_right: Optional[str] = None
+    context_columns_left: List[str]
+    content_column_left: str
+    display_column_left: Optional[str] = None
+    context_columns_right: List[str]
+    content_column_right: str
+    display_column_right: Optional[str] = None
+    embed_url: Optional[str] = None
+    embed_api_key: Optional[str] = None
+    embed_model: Optional[str] = None
+    rerank_enabled: bool = True
+    rerank_model: Optional[str] = None
+
+
+class CompareJobResponse(BaseModel):
+    id: int
+    name: str
+    notes: Optional[str] = None
+    label_left: str
+    label_right: str
+    schema_name: str
+    status: str
+    status_message: Optional[str] = None
+    row_count_left: Optional[int] = None
+    row_count_right: Optional[int] = None
+    top_k: int
+    embed_url: Optional[str] = None
+    embed_model: Optional[str] = None
+    rerank_enabled: bool = True
+    rerank_model: Optional[str] = None
+    created_at: datetime
+
+
+class CompareJobUpdate(BaseModel):
+    name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CompareContextPreviewRequest(BaseModel):
+    """Preview the merged text used for embeddings in Compare (pre-ingest)."""
+
+    tmp_path: str
+    match_columns: List[str]
+    n: int = 3
+
+
+class CompareContextPreviewResponse(BaseModel):
+    content_column: str
+    context_columns: List[str]
+    samples: List[str]
+
+
+class CandidateItem(BaseModel):
+    right_id: int
+    contextual_content: str
+    display_value: Optional[str] = None
+    cosine_score: float
+    rerank_score: Optional[float] = None
+    rank: int
+
+
+class ReviewItem(BaseModel):
+    left_id: int
+    contextual_content: str
+    display_value: Optional[str] = None
+    candidates: List[CandidateItem]
+    current_decision: Optional[int] = None   # matched_right_id if already decided, else None
+    is_decided: bool
+
+
+class CompareDecision(BaseModel):
+    matched_right_id: Optional[int] = None   # None means "no match"
