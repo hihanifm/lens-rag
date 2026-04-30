@@ -322,7 +322,7 @@ def write_matches(
     table_name: str,
     scored_tuples: list,
     top_k: int,
-) -> None:
+) -> int:
     """
     Per left_id: sort by final_score desc, take top_k, insert into {schema_name}.{table_name}.
     scored_tuples: (left_id, right_id, cosine_score, rerank_score, llm_score, final_score)
@@ -338,7 +338,8 @@ def write_matches(
         for rank, (lid, right_id, cosine, rerank_score, llm_score, final_score) in enumerate(sorted_pairs, start=1):
             rows_to_insert.append((lid, right_id, cosine, rerank_score, llm_score, final_score, rank))
 
-    logger.info("write_matches() table=%s.%s inserting %d rows", schema_name, table_name, len(rows_to_insert))
+    n_insert = len(rows_to_insert)
+    logger.info("write_matches() table=%s.%s inserting %d rows", schema_name, table_name, n_insert)
     with get_cursor() as (cur, _conn):
         cur.executemany(
             f"""
@@ -348,6 +349,7 @@ def write_matches(
             """,
             rows_to_insert,
         )
+    return n_insert
 
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
@@ -359,6 +361,10 @@ _DEFAULT_LLM_JUDGE_PROMPT = (
     "A score of 0.0 means completely unrelated. "
     'Reply with ONLY valid JSON in this format: {"score": <float>}'
 )
+
+# OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
+LLM_JUDGE_MAX_TOKENS = 50
+LLM_JUDGE_TEMPERATURE = 0.0
 
 
 def iter_run_llm_judge(
@@ -419,8 +425,8 @@ def iter_run_llm_judge(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Query: {query_text}\n\nDocument: {doc_text}"},
                 ],
-                max_tokens=50,
-                temperature=0,
+                max_tokens=LLM_JUDGE_MAX_TOKENS,
+                temperature=LLM_JUDGE_TEMPERATURE,
             )
             text = resp.choices[0].message.content.strip()
             data = json.loads(text)
@@ -602,6 +608,7 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             yield prog
         metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
         metrics["candidate_pairs"] = len(candidates)
+        metrics["vector_left_rows"] = len({left_id for left_id, _, _ in candidates})
 
         # ── Reranker ──────────────────────────────────────────────────────
         pairs_with_rerank: list[tuple[int, int, float, float]] = []
@@ -616,6 +623,7 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             ):
                 yield prog
             metrics["rerank_ms"] = int((time.monotonic() - t_rr0) * 1000)
+            metrics["rerank_pairs"] = len(candidates)
         else:
             # No reranker pass: keep rerank slot None so DB/UI do not show a fake "R" score (was cosine duplicate).
             pairs_with_rerank = [(l, r, c, None) for l, r, c in candidates]
@@ -641,6 +649,9 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             ):
                 yield prog
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
+            metrics["llm_judge_pairs"] = len(pairs_with_rerank)
+            metrics["llm_judge_max_tokens"] = LLM_JUDGE_MAX_TOKENS
+            metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
             scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
         else:
             # final_score = rerank when present, else cosine (reranker off)
@@ -651,9 +662,20 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
 
         # ── Write matches ─────────────────────────────────────────────────
         t0 = time.monotonic()
-        write_matches(schema_name, table_name, scored_tuples, top_k)
+        metrics["matches_inserted"] = write_matches(schema_name, table_name, scored_tuples, top_k)
         metrics["write_matches_ms"] = int((time.monotonic() - t0) * 1000)
         metrics["total_ms"]         = int((time.monotonic() - t_total0) * 1000)
+
+        lp = metrics.get("llm_judge_pairs")
+        lm = metrics.get("llm_judge_ms")
+        if lp and lm and lp > 0:
+            metrics["llm_judge_avg_ms_per_pair"] = round(lm / lp, 2)
+
+        metrics["embedding_job"] = {
+            "embed_dims": job.get("embed_dims"),
+            "embed_model": job.get("embed_model"),
+            "embed_url": job.get("embed_url"),
+        }
 
         # Update row_count_left on the run
         with get_cursor() as (cur, _conn):

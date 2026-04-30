@@ -16,6 +16,7 @@ import {
   getCompareConfigStats,
   getSystemConfig,
   fetchModels,
+  getRun,
   API_BASE_URL,
 } from '../api/client'
 
@@ -65,6 +66,189 @@ function scoreBorder(score, selected, confirmed) {
   if (score >= 0.85) return 'border-emerald-300 hover:border-emerald-400'
   if (score >= 0.60) return 'border-amber-300 hover:border-amber-400'
   return 'border-gray-200 hover:border-gray-300'
+}
+
+/** Parsed `compare_runs.status_message` when pipeline stored JSON `{ message, metrics }`. */
+function parseRunStatusPayload(statusMessage) {
+  if (!statusMessage || typeof statusMessage !== 'string') return null
+  try {
+    const o = JSON.parse(statusMessage)
+    if (o && typeof o === 'object') return o
+  } catch {
+    return null
+  }
+  return null
+}
+
+function RunStatsPane({ job, run }) {
+  const [promptOpen, setPromptOpen] = useState(false)
+  const payload = parseRunStatusPayload(run.status_message)
+  const metrics = payload?.metrics && typeof payload.metrics === 'object' ? payload.metrics : null
+  const embed = metrics?.embedding_job && typeof metrics.embedding_job === 'object' ? metrics.embedding_job : {}
+
+  const fmtMs = (ms) => (typeof ms === 'number' ? `${ms.toLocaleString()} ms` : '—')
+  const fmtNum = (n) => (n == null || n === '' ? '—' : typeof n === 'number' ? n.toLocaleString() : String(n))
+  const fmtBool = (v) => (v === true ? 'Yes' : v === false ? 'No' : '—')
+  const fmtDt = (iso) => {
+    if (!iso) return '—'
+    try {
+      return new Date(iso).toLocaleString()
+    } catch {
+      return '—'
+    }
+  }
+
+  const timingDefs = [
+    ['Vector search', 'vector_search_ms'],
+    ['Rerank', 'rerank_ms'],
+    ['LLM judge', 'llm_judge_ms'],
+    ['Write matches', 'write_matches_ms'],
+    ['Total (pipeline)', 'total_ms'],
+  ]
+
+  const countDefs = [
+    ['Candidate pairs (pre top-K)', 'candidate_pairs'],
+    ['Distinct left rows (search)', 'vector_left_rows'],
+    ['Rerank pairs', 'rerank_pairs'],
+    ['LLM judge pairs', 'llm_judge_pairs'],
+    ['Match rows inserted', 'matches_inserted'],
+  ]
+
+  const runCfgRows = [
+    ['Top K', run.top_k],
+    ['Vector stage', fmtBool(run.vector_enabled !== false)],
+    ['Reranker', fmtBool(run.reranker_enabled)],
+    ['Reranker model', run.reranker_model || '—'],
+    ['Reranker URL', run.reranker_url || '—'],
+    ['LLM judge', fmtBool(run.llm_judge_enabled)],
+    ['LLM model', run.llm_judge_model || '—'],
+    ['LLM endpoint', run.llm_judge_url || '—'],
+    ['Completed', fmtDt(run.completed_at)],
+  ]
+
+  const llmParamRows = []
+  if (run.llm_judge_enabled && metrics) {
+    llmParamRows.push(
+      ['Max output tokens', fmtNum(metrics.llm_judge_max_tokens)],
+      ['Temperature', metrics.llm_judge_temperature != null ? String(metrics.llm_judge_temperature) : '—'],
+      ['Avg ms / pair', metrics.llm_judge_avg_ms_per_pair != null ? `${metrics.llm_judge_avg_ms_per_pair} ms` : '—'],
+      ['Response shape', '{ "score": number } (chat completion)'],
+    )
+  }
+
+  const embedRows = [
+    ['Embedding URL', embed.embed_url || job.embed_url || '—'],
+    ['Embedding model', embed.embed_model || job.embed_model || '—'],
+    ['Embedding dims', embed.embed_dims != null ? fmtNum(embed.embed_dims) : '—'],
+  ]
+
+  const hasMetrics = metrics && Object.keys(metrics).length > 0
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900">Run stats</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Pipeline timings, counts, and model configuration for this run.</p>
+        </div>
+        {payload?.message && (
+          <span className="text-xs text-gray-400 font-mono truncate max-w-md" title={payload.message}>
+            {payload.message}
+          </span>
+        )}
+      </div>
+
+      {!hasMetrics && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          No structured metrics on this run (older run or pipeline did not persist timings). Configuration below still reflects saved run settings.
+        </p>
+      )}
+
+      {hasMetrics && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Timings</div>
+            <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
+              {timingDefs.map(([label, key]) => (
+                <div key={key} className="flex justify-between gap-4">
+                  <span className="text-gray-600">{label}</span>
+                  <span className="font-semibold text-gray-900 tabular-nums">{fmtMs(metrics[key])}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Counts</div>
+            <div className="space-y-1.5 text-sm border border-gray-100 rounded-xl p-3 bg-gray-50/50">
+              {countDefs.map(([label, key]) => (
+                <div key={key} className="flex justify-between gap-4">
+                  <span className="text-gray-600">{label}</span>
+                  <span className="font-semibold text-gray-900 tabular-nums">{fmtNum(metrics[key])}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div>
+          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Run configuration</div>
+          <div className="space-y-2 text-sm">
+            {runCfgRows.map(([k, v]) => (
+              <div key={k} className="flex gap-3">
+                <span className="text-gray-400 w-36 shrink-0">{k}</span>
+                <span className="font-medium text-gray-900 break-all">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">Job embedding (snapshot)</div>
+          <div className="space-y-2 text-sm">
+            {embedRows.map(([k, v]) => (
+              <div key={k} className="flex gap-3">
+                <span className="text-gray-400 w-36 shrink-0">{k}</span>
+                <span className="font-medium text-gray-900 break-all">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {llmParamRows.length > 0 && (
+        <div>
+          <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-2">LLM judge parameters</div>
+          <div className="space-y-2 text-sm border border-purple-100 rounded-xl p-3 bg-purple-50/40">
+            {llmParamRows.map(([k, v]) => (
+              <div key={k} className="flex gap-3">
+                <span className="text-gray-500 w-40 shrink-0">{k}</span>
+                <span className="font-medium text-gray-900 break-all">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {run.llm_judge_enabled && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setPromptOpen(o => !o)}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+          >
+            {promptOpen ? '▼ Hide judge prompt' : '▶ Show judge prompt'}
+          </button>
+          {promptOpen && (
+            <pre className="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
+              {run.llm_judge_prompt?.trim() ? run.llm_judge_prompt : 'Built-in server default (JSON score reply).'}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Candidate card ─────────────────────────────────────────────────────────
@@ -1230,7 +1414,7 @@ function RunProgressView({ jobId, runId, onDone }) {
 
 // ── Run detail panel ────────────────────────────────────────────────────────
 
-function RunDetailPanel({ job, run, onBack, onRunComplete }) {
+function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
   const [subTab, setSubTab] = useState('review')
   const [executing, setExecuting] = useState(run.status === 'pending' || run.status === 'running')
 
@@ -1274,10 +1458,21 @@ function RunDetailPanel({ job, run, onBack, onRunComplete }) {
           <RunProgressView
             jobId={job.id}
             runId={run.id}
-            onDone={() => { setExecuting(false); onRunComplete() }}
+            onDone={async () => {
+              setExecuting(false)
+              onRunComplete()
+              try {
+                const fresh = await getRun(job.id, run.id)
+                onRunUpdated?.(fresh)
+              } catch {
+                onRunUpdated?.({ ...run, status: 'ready' })
+              }
+            }}
           />
         </div>
       )}
+
+      {!executing && run.status === 'ready' && <RunStatsPane job={job} run={run} />}
 
       {/* Sub-tabs (only when ready) */}
       {!executing && run.status === 'ready' && (
@@ -1471,7 +1666,6 @@ export default function CompareJob() {
   const handleRunComplete = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['compare-runs', Number(jobId)] })
     queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
-    setSelectedRun(prev => prev ? { ...prev, status: 'ready' } : prev)
   }, [jobId, queryClient])
 
   if (isLoading) {
@@ -1562,6 +1756,7 @@ export default function CompareJob() {
               run={selectedRun}
               onBack={() => setSelectedRun(null)}
               onRunComplete={handleRunComplete}
+              onRunUpdated={setSelectedRun}
             />
           ) : (
             <RunsPanel job={job} onSelectRun={setSelectedRun} />
