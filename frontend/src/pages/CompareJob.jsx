@@ -37,6 +37,20 @@ function effectiveScoreInfo(candidate) {
   return { score: typeof c === 'number' ? c : 0, source: 'cosine' }
 }
 
+function isNormalized01(v) {
+  return typeof v === 'number' && v >= 0 && v <= 1
+}
+
+function fmtPct01(v, digits = 0) {
+  if (!isNormalized01(v)) return '—'
+  return `${(v * 100).toFixed(digits)}%`
+}
+
+function fmtMaybeNumber(v, digits = 3) {
+  if (typeof v !== 'number' || Number.isNaN(v)) return '—'
+  return v.toFixed(digits)
+}
+
 function scoreBorder(score, selected, confirmed) {
   if (confirmed) return 'border-emerald-500 ring-2 ring-emerald-200'
   if (selected) return 'border-blue-500 ring-2 ring-blue-200'
@@ -49,6 +63,9 @@ function scoreBorder(score, selected, confirmed) {
 
 function CandidateCard({ candidate, isSelected, onClick }) {
   const { score, source } = effectiveScoreInfo(candidate)
+  const cosine = candidate?.cosine_score
+  const rerank = candidate?.rerank_score
+  const rerankIsNorm = isNormalized01(rerank)
   return (
     <button
       onClick={onClick}
@@ -56,13 +73,20 @@ function CandidateCard({ candidate, isSelected, onClick }) {
         bg-white
         ${scoreBorder(score, isSelected, false)}`}
     >
-      {/* Score badge */}
-      <span
-        className={`absolute top-3 right-3 text-xs font-semibold px-2 py-0.5 rounded-full border ${scoreColor(score)}`}
-        title={`Scoring: ${source}${source === 'rerank' ? '' : ' (fallback)'} • cosine=${(candidate.cosine_score ?? 0).toFixed?.(3) ?? candidate.cosine_score} • rerank=${candidate.rerank_score}`}
+      {/* Score badges (show both) */}
+      <div
+        className="absolute top-3 right-3 flex flex-col items-end gap-1"
+        title={`Filter/order uses: ${source}${source === 'rerank' ? '' : ' (fallback)'} • cosine=${fmtMaybeNumber(cosine)} • rerank=${rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}`}
       >
-        {(score * 100).toFixed(0)}%
-      </span>
+        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-white text-gray-700 border-gray-200">
+          C {fmtPct01(cosine, 0)}
+        </span>
+        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+          rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+        }`}>
+          R {rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}
+        </span>
+      </div>
 
       {/* Rank badge */}
       <span className="absolute top-3 left-3 text-xs text-gray-400 font-medium">
