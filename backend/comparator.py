@@ -617,7 +617,8 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
                 yield prog
             metrics["rerank_ms"] = int((time.monotonic() - t_rr0) * 1000)
         else:
-            pairs_with_rerank = [(l, r, c, c) for l, r, c in candidates]
+            # No reranker pass: keep rerank slot None so DB/UI do not show a fake "R" score (was cosine duplicate).
+            pairs_with_rerank = [(l, r, c, None) for l, r, c in candidates]
 
         # ── LLM Judge ─────────────────────────────────────────────────────
         if run["llm_judge_enabled"]:
@@ -642,8 +643,11 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
             scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
         else:
-            # final_score = rerank_score (which may equal cosine when reranker off)
-            scored_tuples = [(l, r, c, rs, None, rs) for l, r, c, rs in pairs_with_rerank]
+            # final_score = rerank when present, else cosine (reranker off)
+            scored_tuples = [
+                (l, r, c, rs, None, float(rs) if rs is not None else float(c))
+                for l, r, c, rs in pairs_with_rerank
+            ]
 
         # ── Write matches ─────────────────────────────────────────────────
         t0 = time.monotonic()

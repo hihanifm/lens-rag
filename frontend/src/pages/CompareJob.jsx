@@ -69,7 +69,7 @@ function scoreBorder(score, selected, confirmed) {
 
 // ── Candidate card ─────────────────────────────────────────────────────────
 
-function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
+function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadge }) {
   const score = primaryScore(candidate)
   const cosine = candidate?.cosine_score
   const rerank = candidate?.rerank_score
@@ -90,7 +90,7 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
         <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-white text-gray-700 border-gray-200 whitespace-nowrap">
           C {fmtPct01(cosine, 0)}
         </span>
-        {rerank != null && (
+        {showRerankBadge && rerank != null && (
           <span
             className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
               rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
@@ -348,6 +348,7 @@ function ReviewTab({ job, run }) {
                               isSelected={selectedRightId === c.right_id}
                               isSaved={it.is_decided && it.current_decision === c.right_id}
                               onClick={() => handleSelect(it.left_id, c.right_id)}
+                              showRerankBadge={!!run.reranker_enabled}
                             />
                           ))
                       )}
