@@ -665,6 +665,7 @@ function ConfigStatsTab({ job }) {
 
   const [editName, setEditName] = useState(job.name || '')
   const [editNotes, setEditNotes] = useState('')
+  const [notesExpanded, setNotesExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
@@ -675,6 +676,11 @@ function ConfigStatsTab({ job }) {
   useEffect(() => {
     setEditNotes(cfg?.notes ?? '')
   }, [cfg?.notes])
+
+  // Auto-collapse when notes are empty (keeps the UI compact).
+  useEffect(() => {
+    if (!editNotes) setNotesExpanded(false)
+  }, [editNotes])
 
   const onSave = async () => {
     setSaving(true)
@@ -730,13 +736,22 @@ function ConfigStatsTab({ job }) {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
-              <div className="md:row-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Findings / notes</label>
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Findings / notes</label>
+                  <button
+                    type="button"
+                    onClick={() => setNotesExpanded(v => !v)}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    {notesExpanded ? 'Collapse' : (editNotes ? 'Expand' : 'Add')}
+                  </button>
+                </div>
                 <textarea
                   value={editNotes}
                   onChange={(e) => setEditNotes(e.target.value)}
-                  rows={5}
-                  placeholder="e.g. Embedding looks good; reranker scores seem unnormalized; using cosine fallback."
+                  rows={notesExpanded ? 5 : 2}
+                  placeholder="Quick findings…"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
