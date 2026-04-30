@@ -17,7 +17,8 @@ function scoreColor(score) {
   return 'bg-gray-100 text-gray-500 border-gray-200'
 }
 
-function scoreBorder(score, selected) {
+function scoreBorder(score, selected, confirmed) {
+  if (confirmed) return 'border-emerald-500 ring-2 ring-emerald-200'
   if (selected) return 'border-blue-500 ring-2 ring-blue-200'
   if (score >= 0.85) return 'border-emerald-300 hover:border-emerald-400'
   if (score >= 0.60) return 'border-amber-300 hover:border-amber-400'
@@ -28,11 +29,13 @@ function scoreBorder(score, selected) {
 
 function CandidateCard({ candidate, isSelected, onClick }) {
   const score = candidate.rerank_score ?? candidate.cosine_score ?? 0
+  const isConfirmed = Boolean(candidate.__confirmed)
   return (
     <button
       onClick={onClick}
-      className={`relative flex-1 text-left bg-white rounded-xl border-2 p-4 transition-all cursor-pointer
-        ${scoreBorder(score, isSelected)}`}
+      className={`relative flex-1 text-left rounded-xl border-2 p-4 transition-all cursor-pointer
+        ${isConfirmed ? 'bg-emerald-50' : 'bg-white'}
+        ${scoreBorder(score, isSelected, isConfirmed)}`}
     >
       {/* Score badge */}
       <span className={`absolute top-3 right-3 text-xs font-semibold px-2 py-0.5 rounded-full border ${scoreColor(score)}`}>
@@ -55,9 +58,11 @@ function CandidateCard({ candidate, isSelected, onClick }) {
       </p>
 
       {/* Selected indicator */}
-      {isSelected && (
-        <div className="absolute bottom-3 right-3 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          ✓ Selected
+      {(isSelected || isConfirmed) && (
+        <div className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${
+          isConfirmed ? 'bg-emerald-600' : 'bg-blue-600'
+        }`}>
+          {isConfirmed ? '✓ Saved' : '✓ Selected'}
         </div>
       )}
     </button>
@@ -78,6 +83,8 @@ function ReviewTab({ job }) {
   const [noMore, setNoMore] = useState(false)
   const [selectedRightId, setSelectedRightId] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [confirmedRightId, setConfirmedRightId] = useState(null)
+  const [confirmedNoMatch, setConfirmedNoMatch] = useState(false)
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['compare-review-stats', jobId],
@@ -115,6 +122,8 @@ function ReviewTab({ job }) {
   const handleSelect = async (rightId) => {
     if (saving) return
     setSelectedRightId(rightId)
+    setConfirmedRightId(rightId)
+    setConfirmedNoMatch(false)
     setSaving(true)
     try {
       await submitCompareDecision(jobId, item.left_id, rightId)
@@ -122,9 +131,11 @@ function ReviewTab({ job }) {
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       // Auto-advance to next undecided row
       if (!includeDecided) {
+        await new Promise(r => setTimeout(r, 3000))
         await fetchItem(0)
       }
     } finally {
+      setConfirmedRightId(null)
       setSaving(false)
     }
   }
@@ -132,15 +143,19 @@ function ReviewTab({ job }) {
   const handleNoMatch = async () => {
     if (saving) return
     setSelectedRightId(null)
+    setConfirmedRightId(null)
+    setConfirmedNoMatch(true)
     setSaving(true)
     try {
       await submitCompareDecision(jobId, item.left_id, null)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       if (!includeDecided) {
+        await new Promise(r => setTimeout(r, 3000))
         await fetchItem(0)
       }
     } finally {
+      setConfirmedNoMatch(false)
       setSaving(false)
     }
   }
@@ -215,7 +230,9 @@ function ReviewTab({ job }) {
         <>
           <div className="flex gap-4 items-stretch">
             {/* Left card (~40%) */}
-            <div className="w-[38%] shrink-0 bg-white rounded-xl border-2 border-blue-200 p-4 relative">
+            <div className={`w-[38%] shrink-0 rounded-xl border-2 p-4 relative transition-colors ${
+              confirmedNoMatch ? 'bg-gray-50 border-gray-300' : 'bg-white border-blue-200'
+            }`}>
               <span className="absolute top-3 left-3 text-xs font-semibold text-blue-600 uppercase tracking-wide">
                 {job.label_left}
               </span>
@@ -242,7 +259,7 @@ function ReviewTab({ job }) {
                 item.candidates.map(c => (
                   <CandidateCard
                     key={c.right_id}
-                    candidate={c}
+                    candidate={{ ...c, __confirmed: confirmedRightId === c.right_id }}
                     isSelected={selectedRightId === c.right_id}
                     onClick={() => handleSelect(c.right_id)}
                   />

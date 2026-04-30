@@ -29,12 +29,15 @@ from fastapi.responses import Response, StreamingResponse
 from comparator import run_compare_job
 from config import EMBEDDING_DIMS
 from db import create_compare_schema, drop_compare_schema, get_cursor
-from ingestion import read_excel
+from embedder import embed as _embed_probe
+from ingestion import read_excel, build_contextual_content
 from models import (
     CandidateItem,
     CompareDecision,
     CompareJobCreate,
     CompareJobResponse,
+    CompareContextPreviewRequest,
+    CompareContextPreviewResponse,
     ReviewItem,
 )
 
@@ -92,6 +95,52 @@ async def preview_right(file: UploadFile = File(...)):
     return await _preview_file(file)
 
 
+@router.post("/preview-context", response_model=CompareContextPreviewResponse)
+def preview_context(body: CompareContextPreviewRequest):
+    """
+    Return a few example merged context strings for the selected match columns.
+    Mirrors how Compare builds `contextual_content` (sheet_name + context cols + content col).
+    """
+    tmp_path = (body.tmp_path or "").strip()
+    if not tmp_path or not os.path.exists(tmp_path):
+        raise HTTPException(status_code=400, detail="Uploaded file not found. Please re-upload.")
+
+    match_columns = [str(c).strip() for c in (body.match_columns or []) if str(c).strip()]
+    if not match_columns:
+        raise HTTPException(status_code=422, detail="match_columns must include at least one column")
+
+    def _pick_content(cols: list[str]) -> str:
+        lower = lambda s: str(s or "").lower()
+        for pat in ["description", "details", "notes", "summary", "text", "content", "specs", "name", "title"]:
+            for c in cols:
+                lc = lower(c)
+                if lc == pat or pat in lc:
+                    return c
+        return cols[0]
+
+    content_col = _pick_content(match_columns)
+    context_cols = [c for c in match_columns if c != content_col]
+
+    df, _columns, _sheets = read_excel(tmp_path)
+    records = df.to_dict(orient="records")
+
+    samples: list[str] = []
+    n = max(1, min(int(body.n or 3), 5))
+    for row in records:
+        sheet_name = str(row.get("sheet_name", ""))
+        text = build_contextual_content(row, context_cols, content_col, sheet_name)
+        if text and str(text).strip():
+            samples.append(str(text))
+        if len(samples) >= n:
+            break
+
+    return CompareContextPreviewResponse(
+        content_column=content_col,
+        context_columns=context_cols,
+        samples=samples,
+    )
+
+
 # ── Job CRUD ──────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=CompareJobResponse)
@@ -104,6 +153,25 @@ async def create_compare_job(data: CompareJobCreate):
                 detail=f"Upload file for {label} not found. Please re-upload.",
             )
 
+    # Probe embedding dims if a custom endpoint is provided.
+    # Must happen before create_compare_schema() which bakes the vector size.
+    resolved_dims = EMBEDDING_DIMS
+    if data.embed_url:
+        try:
+            probe_vec = _embed_probe(
+                "probe",
+                base_url=data.embed_url,
+                api_key=data.embed_api_key or None,
+                model=data.embed_model or None,
+            )
+            resolved_dims = len(probe_vec)
+            logger.info("compare create: probed embed dims=%d from %s", resolved_dims, data.embed_url)
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not verify embedding endpoint: {e}",
+            )
+
     with get_cursor() as (cur, _conn):
         cur.execute(
             """
@@ -113,14 +181,16 @@ async def create_compare_job(data: CompareJobCreate):
                 context_columns_right, content_column_right, display_column_right,
                 source_filename_left, source_filename_right,
                 tmp_path_left, tmp_path_right,
-                embed_dims
+                embed_dims, embed_url, embed_api_key, embed_model,
+                rerank_enabled, rerank_model
             ) VALUES (
                 %s, %s, %s, 'compare_placeholder',
                 %s, %s, %s,
                 %s, %s, %s,
                 %s, %s,
                 %s, %s,
-                %s
+                %s, %s, %s, %s,
+                %s, %s
             ) RETURNING id, created_at
             """,
             [
@@ -129,7 +199,8 @@ async def create_compare_job(data: CompareJobCreate):
                 data.context_columns_right, data.content_column_right, data.display_column_right,
                 data.source_filename_left, data.source_filename_right,
                 data.tmp_path_left, data.tmp_path_right,
-                EMBEDDING_DIMS,
+                resolved_dims, data.embed_url or None, data.embed_api_key or None, data.embed_model or None,
+                data.rerank_enabled, data.rerank_model or None,
             ],
         )
         row = cur.fetchone()
@@ -141,8 +212,8 @@ async def create_compare_job(data: CompareJobCreate):
             [schema_name, job_id],
         )
 
-    # Create per-job schema
-    create_compare_schema(job_id, EMBEDDING_DIMS)
+    # Create per-job schema with the resolved (possibly custom) dims
+    create_compare_schema(job_id, resolved_dims)
 
     return _job_response(job_id)
 
@@ -533,7 +604,8 @@ def export_compare(job_id: int, type: str = "confirmed"):
 # ── Response helpers ──────────────────────────────────────────────────────
 
 def _serialize_job(row: dict) -> dict:
-    """Strip internal tmp_path fields before returning to client."""
+    """Strip internal/sensitive fields (tmp_path, embed_api_key) before returning to client."""
+    rerank_enabled = row.get("rerank_enabled")
     return {
         "id": row["id"],
         "name": row["name"],
@@ -545,7 +617,14 @@ def _serialize_job(row: dict) -> dict:
         "row_count_left": row.get("row_count_left"),
         "row_count_right": row.get("row_count_right"),
         "top_k": row.get("top_k") or 3,
+        "embed_url": row.get("embed_url"),
+        "embed_model": row.get("embed_model"),
+        # rerank_enabled may be None for legacy rows written before this column existed;
+        # treat None as True (system default = enabled).
+        "rerank_enabled": rerank_enabled if rerank_enabled is not None else True,
+        "rerank_model": row.get("rerank_model"),
         "created_at": row["created_at"],
+        # embed_api_key is intentionally NOT included — same policy as project.pin
     }
 
 

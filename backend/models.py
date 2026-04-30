@@ -218,6 +218,11 @@ class CompareJobCreate(BaseModel):
     context_columns_right: List[str]
     content_column_right: str
     display_column_right: Optional[str] = None
+    embed_url: Optional[str] = None
+    embed_api_key: Optional[str] = None
+    embed_model: Optional[str] = None
+    rerank_enabled: bool = True
+    rerank_model: Optional[str] = None
 
 
 class CompareJobResponse(BaseModel):
@@ -231,7 +236,25 @@ class CompareJobResponse(BaseModel):
     row_count_left: Optional[int] = None
     row_count_right: Optional[int] = None
     top_k: int
+    embed_url: Optional[str] = None
+    embed_model: Optional[str] = None
+    rerank_enabled: bool = True
+    rerank_model: Optional[str] = None
     created_at: datetime
+
+
+class CompareContextPreviewRequest(BaseModel):
+    """Preview the merged text used for embeddings in Compare (pre-ingest)."""
+
+    tmp_path: str
+    match_columns: List[str]
+    n: int = 3
+
+
+class CompareContextPreviewResponse(BaseModel):
+    content_column: str
+    context_columns: List[str]
+    samples: List[str]
 
 
 class CandidateItem(BaseModel):

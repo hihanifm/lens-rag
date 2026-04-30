@@ -218,6 +218,10 @@ export const previewCompareFile = (file, side) => {
 export const createCompareJob = (data) =>
   api.post('compare/', data).then(r => r.data)
 
+export const previewCompareContext = (tmpPath, matchColumns, n = 3) =>
+  api.post('compare/preview-context', { tmp_path: tmpPath, match_columns: matchColumns, n })
+    .then(r => r.data)
+
 export const listCompareJobs = () =>
   api.get('compare/').then(r => r.data)
 

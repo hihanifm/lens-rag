@@ -94,9 +94,20 @@ def init_db():
                 tmp_path_right           TEXT,
                 top_k                    INTEGER DEFAULT 3,
                 embed_dims               INTEGER,
+                embed_url                TEXT,
+                embed_api_key            TEXT,
+                embed_model              TEXT,
+                rerank_enabled           BOOLEAN DEFAULT TRUE,
+                rerank_model             TEXT,
                 created_at               TIMESTAMP DEFAULT NOW()
             );
         """)
+        # Migration: add new columns to existing compare_jobs tables
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_url TEXT;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_model TEXT;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_model TEXT;")
 
 
 def create_compare_schema(job_id: int, dims: int):

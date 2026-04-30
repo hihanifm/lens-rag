@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getProjects, deleteProject, listCompareJobs, deleteCompareJob } from '../api/client'
@@ -233,6 +233,25 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('search')
   const [now, setNow] = useState(Date.now())
   const [recentHistory, setRecentHistory] = useState(() => loadHistory().slice(0, 5))
+  const headerRef = useRef(null)
+  const [headerHeight, setHeaderHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+
+    const update = () => setHeaderHeight(el.offsetHeight || 0)
+    update()
+
+    const ro = 'ResizeObserver' in window ? new ResizeObserver(update) : null
+    ro?.observe(el)
+
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('resize', update)
+      ro?.disconnect()
+    }
+  }, [])
 
   // Tick every second while projects are ingesting
   const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects })
@@ -252,7 +271,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Fixed header */}
-      <div className="fixed top-0 left-0 right-0 z-20 bg-blue-600 border-b border-blue-700">
+      <div ref={headerRef} className="fixed top-0 left-0 right-0 z-20 bg-blue-600 border-b border-blue-700">
         <div className="w-[90%] mx-auto py-4">
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0 pr-6">
@@ -301,34 +320,47 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="w-[90%] mx-auto py-12 pt-28">
+      <div
+        className="w-[90%] mx-auto py-12"
+        style={{ paddingTop: headerHeight ? headerHeight + 24 : undefined }}
+      >
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
 
           {/* Main content — wider column */}
           <div className="lg:col-span-3">
 
             {/* Tab bar */}
-            <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+            <div className="mb-4 w-full sm:w-fit">
+              <div className="grid grid-cols-2 gap-1 bg-blue-50/70 border border-blue-100 rounded-xl p-1.5 shadow-sm overflow-hidden">
               <button
                 onClick={() => setActiveTab('search')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                aria-pressed={activeTab === 'search'}
+                className={`min-w-0 px-3 sm:px-4 py-2 rounded-lg text-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   activeTab === 'search'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white text-gray-900 shadow-sm ring-1 ring-blue-300 font-semibold'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/70 font-medium'
                 }`}
               >
-                🔍 Search Projects
+                <span className="flex items-center justify-center gap-2 min-w-0">
+                  <span aria-hidden>🔍</span>
+                  <span className="truncate">Search Projects</span>
+                </span>
               </button>
               <button
                 onClick={() => setActiveTab('compare')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                aria-pressed={activeTab === 'compare'}
+                className={`min-w-0 px-3 sm:px-4 py-2 rounded-lg text-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
                   activeTab === 'compare'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white text-gray-900 shadow-sm ring-1 ring-blue-300 font-semibold'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-white/70 font-medium'
                 }`}
               >
-                ⚖️ Compare Jobs
+                <span className="flex items-center justify-center gap-2 min-w-0">
+                  <span aria-hidden>⚖️</span>
+                  <span className="truncate">Compare Jobs</span>
+                </span>
               </button>
+            </div>
             </div>
 
             {activeTab === 'search' ? <SearchTab now={now} /> : <CompareTab />}
@@ -336,10 +368,15 @@ export default function Home() {
 
           {/* Recent activity — narrower column */}
           <div className="lg:col-span-2">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Recent Activity</h2>
+            <div className="flex items-center justify-between gap-2 mb-3 min-w-0">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest min-w-0 truncate">
+                Recent Activity
+              </h2>
               {recentHistory.length > 0 && (
-                <Link to="/history" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                <Link
+                  to="/history"
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium shrink-0 whitespace-nowrap"
+                >
                   View all →
                 </Link>
               )}

@@ -32,6 +32,7 @@ def ingest_side(
     context_columns: list[str],
     display_column: str | None,
     schema_name: str,
+    embed_kwargs: dict | None = None,
 ) -> Generator[dict, None, None]:
     """
     Embed and insert one side (left or right) into compare_{id}.records.
@@ -62,7 +63,7 @@ def ingest_side(
                 display_value = str(raw)
 
         try:
-            vector = embed(contextual_content)
+            vector = embed(contextual_content, **(embed_kwargs or {}))
         except Exception as e:
             logger.error("embed failed on row %d/%d side=%s — %s: %s", i + 1, total, side, type(e).__name__, e)
             raise
@@ -159,13 +160,21 @@ def run_bidirectional_search(
 def run_reranking(
     schema_name: str,
     candidates: list[tuple[int, int, float]],
+    *,
+    rerank_enabled: bool | None = None,
+    rerank_model: str | None = None,
 ) -> list[tuple[int, int, float, float]]:
     """
     Rerank each (left, right) pair.
     Groups candidates by left_id, calls rerank() once per left record.
     Returns list of (left_id, right_id, cosine_score, rerank_score).
+
+    rerank_enabled: per-job override; falls back to global RERANKER_ENABLED when None.
+    rerank_model:   per-job model override; None = use server default.
     """
-    if not RERANKER_ENABLED:
+    # Per-job setting takes precedence; fall back to global config.
+    effective_enabled = rerank_enabled if rerank_enabled is not None else RERANKER_ENABLED
+    if not effective_enabled:
         logger.info("run_reranking() reranker disabled — using cosine score as rerank_score")
         return [(l, r, c, c) for l, r, c in candidates]
 
@@ -199,7 +208,7 @@ def run_reranking(
         right_texts = [content_map.get(right_id, "") for right_id, _ in pairs]
 
         try:
-            scores = rerank(query_text, right_texts)
+            scores = rerank(query_text, right_texts, model=rerank_model or None)
         except Exception as e:
             logger.warning(
                 "rerank() failed for left_id=%d — falling back to cosine. Error: %s", left_id, e
@@ -268,9 +277,23 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
     job = dict(job)
     schema_name = job["schema_name"]
 
-    # Resolve dims
+    # Resolve dims + per-job embed/rerank config
     dims = job.get("embed_dims") or EMBEDDING_DIMS
     top_k = job.get("top_k") or 3
+
+    embed_url   = job.get("embed_url") or None
+    embed_key   = job.get("embed_api_key") or None
+    embed_model = job.get("embed_model") or None
+    embed_kwargs: dict = {}
+    if embed_url:
+        embed_kwargs["base_url"] = embed_url
+        if embed_key:
+            embed_kwargs["api_key"] = embed_key
+        if embed_model:
+            embed_kwargs["model"] = embed_model
+
+    job_rerank_enabled = job.get("rerank_enabled")   # may be None for legacy rows
+    job_rerank_model   = job.get("rerank_model") or None
 
     def _set_status(status: str, message: str | None = None):
         with get_cursor() as (cur, _conn):
@@ -294,6 +317,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
             context_columns=job["context_columns_left"] or [],
             display_column=job.get("display_column_left"),
             schema_name=schema_name,
+            embed_kwargs=embed_kwargs,
         ):
             yield event
 
@@ -310,6 +334,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
             context_columns=job["context_columns_right"] or [],
             display_column=job.get("display_column_right"),
             schema_name=schema_name,
+            embed_kwargs=embed_kwargs,
         ):
             yield event
 
@@ -322,7 +347,12 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
         yield {"type": "reranking", "message": f"Reranking {len(candidates)} candidate pairs..."}
 
         # ── Reranking ─────────────────────────────────────────────────────
-        scored_pairs = run_reranking(schema_name, candidates)
+        scored_pairs = run_reranking(
+            schema_name,
+            candidates,
+            rerank_enabled=job_rerank_enabled,
+            rerank_model=job_rerank_model,
+        )
 
         # ── Write matches ─────────────────────────────────────────────────
         write_matches(schema_name, scored_pairs, top_k)

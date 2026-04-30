@@ -84,7 +84,10 @@ def startup():
     init_db()
     logger.info("DB initialised")
 
-_SAMPLES_DIR = os.environ.get("SAMPLES_DIR", "samples")
+_SAMPLES_DIR = os.environ.get(
+    "SAMPLES_DIR",
+    os.path.join(os.path.dirname(__file__), "samples"),
+)
 if os.path.isdir(_SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=_SAMPLES_DIR), name="samples")
 
