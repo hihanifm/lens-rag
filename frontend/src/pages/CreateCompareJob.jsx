@@ -711,9 +711,17 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
 
 // ── Progress overlay ──────────────────────────────────────────────────────
 
-function ProgressView({ jobId, onDone }) {
+function ProgressView({ jobId, onDone, onBackground, onHome }) {
   const [events, setEvents] = useState([])
   const [done, setDone] = useState(false)
+  const [startedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (done) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [done])
 
   useEffect(() => {
     if (!jobId) return
@@ -750,10 +758,18 @@ function ProgressView({ jobId, onDone }) {
 
   const current = events[events.length - 1]
   const currentType = current?.type
+  const elapsedSec = Math.max(0, Math.floor((now - startedAt) / 1000))
+  const elapsed =
+    elapsedSec >= 60
+      ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
+      : `${elapsedSec}s`
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold text-gray-900">Running comparison…</h2>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-xl font-bold text-gray-900">Running comparison…</h2>
+        <span className="text-xs text-gray-400 whitespace-nowrap">Elapsed: {elapsed}</span>
+      </div>
       <div className="space-y-3">
         {stages.map(stage => {
           const isActive = currentType === stage.type
@@ -794,6 +810,34 @@ function ProgressView({ jobId, onDone }) {
       </div>
       {currentType === 'error' && (
         <p className="text-red-500 text-sm">{current?.message}</p>
+      )}
+
+      {!done && currentType !== 'error' && (
+        <div className="pt-2 border-t border-gray-100">
+          <p className="text-sm text-gray-500">
+            This runs on the server — you can safely leave this page.
+          </p>
+          <div className="flex flex-wrap gap-3 mt-3">
+            {onBackground && (
+              <button
+                type="button"
+                onClick={() => onBackground(jobId)}
+                className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium text-sm hover:bg-gray-50 transition-colors"
+              >
+                Continue in background →
+              </button>
+            )}
+            {onHome && (
+              <button
+                type="button"
+                onClick={onHome}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                ← Home
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -850,59 +894,6 @@ export default function CreateCompareJob() {
   const embedUrlRef = useRef('')
   const systemEmbedUrlRef = useRef('')
   const rerankPrefilled = useRef(false)
-
-  // Enter should behave like clicking the primary action (Continue/Create) in the wizard.
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key !== 'Enter') return
-      if (e.isComposing) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-
-      const el = document.activeElement
-      if (el?.tagName === 'TEXTAREA') return
-      if (el?.isContentEditable) return
-
-      const canProceed =
-        (step === 0 && state.name.trim() && state.labelLeft.trim() && state.labelRight.trim()) ||
-        (step === 1 && state.tmpPathLeft) ||
-        (step === 2 && (state.contextColumnsLeft?.length ?? 0) > 0) ||
-        (step === 3 && state.tmpPathRight) ||
-        (step === 4 && (state.contextColumnsRight?.length ?? 0) > 0) ||
-        (step === 5 && !connectionCheckLoading) ||
-        (step === 6 && !rerankModelLoading && !rerankCheckLoading) ||
-        (step === 7 && !submitting)
-
-      if (!canProceed) return
-      e.preventDefault()
-
-      if (step === 0) return setStep(1)
-      if (step === 1) return setStep(2)
-      if (step === 2) return setStep(3)
-      if (step === 3) return setStep(4)
-      if (step === 4) return setStep(5)
-      if (step === 5) return void handleConnectionContinue()
-      if (step === 6) return void handleRerankContinue()
-      if (step === 7) return void handleSubmit()
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [
-    step,
-    state.name,
-    state.labelLeft,
-    state.labelRight,
-    state.tmpPathLeft,
-    state.contextColumnsLeft,
-    state.tmpPathRight,
-    state.contextColumnsRight,
-    connectionCheckLoading,
-    rerankModelLoading,
-    rerankCheckLoading,
-    submitting,
-    handleConnectionContinue,
-    handleRerankContinue,
-  ])
 
   // Pre-fill Connection step from system config on first visit
   useEffect(() => {
@@ -1084,11 +1075,70 @@ export default function CreateCompareJob() {
     }
   }
 
+  // Enter should behave like clicking the primary action (Continue/Create) in the wizard.
+  // Important: this effect must be declared after the handler callbacks to avoid TDZ issues.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Enter') return
+      if (e.isComposing) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      const el = document.activeElement
+      if (el?.tagName === 'TEXTAREA') return
+      if (el?.isContentEditable) return
+
+      const canProceed =
+        (step === 0 && state.name.trim() && state.labelLeft.trim() && state.labelRight.trim()) ||
+        (step === 1 && state.tmpPathLeft) ||
+        (step === 2 && (state.contextColumnsLeft?.length ?? 0) > 0) ||
+        (step === 3 && state.tmpPathRight) ||
+        (step === 4 && (state.contextColumnsRight?.length ?? 0) > 0) ||
+        (step === 5 && !connectionCheckLoading) ||
+        (step === 6 && !rerankModelLoading && !rerankCheckLoading) ||
+        (step === 7 && !submitting)
+
+      if (!canProceed) return
+      e.preventDefault()
+
+      if (step === 0) return setStep(1)
+      if (step === 1) return setStep(2)
+      if (step === 2) return setStep(3)
+      if (step === 3) return setStep(4)
+      if (step === 4) return setStep(5)
+      if (step === 5) return void handleConnectionContinue()
+      if (step === 6) return void handleRerankContinue()
+      if (step === 7) return void handleSubmit()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    step,
+    state.name,
+    state.labelLeft,
+    state.labelRight,
+    state.tmpPathLeft,
+    state.contextColumnsLeft,
+    state.tmpPathRight,
+    state.contextColumnsRight,
+    connectionCheckLoading,
+    rerankModelLoading,
+    rerankCheckLoading,
+    submitting,
+    handleConnectionContinue,
+    handleRerankContinue,
+  ])
+
   if (createdJobId) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="w-[90%] mx-auto py-12">
-          <ProgressView jobId={createdJobId} onDone={(id) => navigate(`/compare/${id}`)} />
+          <ProgressView
+            jobId={createdJobId}
+            onDone={(id) => navigate(`/compare/${id}`)}
+            onBackground={(id) => navigate(`/compare/${id}`)}
+            onHome={() => navigate('/')}
+          />
         </div>
       </div>
     )

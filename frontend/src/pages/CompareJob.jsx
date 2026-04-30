@@ -106,6 +106,8 @@ function ReviewTab({ job }) {
   const [saving, setSaving] = useState(false)
   const [confirmedRightId, setConfirmedRightId] = useState(null)
   const [confirmedNoMatch, setConfirmedNoMatch] = useState(false)
+  const [rowStartedAt, setRowStartedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
 
   const scoringMode = (() => {
     const cands = item?.candidates || []
@@ -134,6 +136,7 @@ function ReviewTab({ job }) {
       setItem(result)
       setSelectedRightId(result.current_decision ?? null)
       setOffset(newOffset)
+      setRowStartedAt(Date.now())
     } catch (e) {
       if (e?.response?.status === 404) {
         setNoMore(true)
@@ -143,6 +146,11 @@ function ReviewTab({ job }) {
       setLoading(false)
     }
   }, [jobId, minScore, includeDecided])
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   // Load first item on mount and when filters change
   useEffect(() => {
@@ -198,6 +206,33 @@ function ReviewTab({ job }) {
     fetchItem(offset + 1)
   }
 
+  // Keyboard shortcuts: ← Prev, → Next (ignore while typing in inputs)
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (saving || loading) return
+      if (e.isComposing) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      const el = document.activeElement
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+
+      if (e.key === 'ArrowLeft') {
+        if (offset > 0) {
+          e.preventDefault()
+          handlePrev()
+        }
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleNext()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [offset, saving, loading, handlePrev, handleNext])
+
   return (
     <div className="space-y-4">
       {/* Top bar */}
@@ -216,6 +251,10 @@ function ReviewTab({ job }) {
         </div>
 
         <div className="flex-1" />
+
+        <div className="text-xs text-gray-400 whitespace-nowrap">
+          Elapsed: {Math.max(0, Math.floor((now - rowStartedAt) / 1000))}s
+        </div>
 
         {/* Score filter */}
         <div className="flex items-center gap-2">
