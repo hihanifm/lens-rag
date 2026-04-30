@@ -1,12 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getProject, exportResults } from '../api/client'
 import ResultsTable from '../components/ResultsTable'
 import StatsPanel from '../components/StatsPanel'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { useProjectState } from '../contexts/ProjectStateContext'
+import RerankConfigModal from '../components/RerankConfigModal'
 
 // All possible SSE steps in order; only render pills for enabled stages
 const ALL_STEPS = [
@@ -34,8 +35,10 @@ function PipelineToggle({ label, checked, onChange, disabled }) {
 export default function Search() {
   const { projectId } = useParams()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const { getSearch, setSearch, startSearch } = useProjectState()
   const s = getSearch(projectId)
+  const [rerankOpen, setRerankOpen] = useState(false)
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -359,6 +362,14 @@ export default function Search() {
                   checked={s.use_rerank}
                   onChange={v => setSearch(projectId, { use_rerank: v })}
                 />
+                <button
+                  type="button"
+                  onClick={() => setRerankOpen(true)}
+                  className="text-[11px] text-blue-600 hover:text-blue-700 font-medium"
+                  title="Configure project reranking model"
+                >
+                  Configure
+                </button>
               </div>
               {!retrieversOk && (
                 <p className="mt-2 text-xs text-red-500">Enable at least one retriever (Vector or BM25).</p>
@@ -437,6 +448,19 @@ export default function Search() {
         )}
 
       </div>
+
+      <RerankConfigModal
+        open={rerankOpen}
+        onClose={() => setRerankOpen(false)}
+        projectId={projectId}
+        currentEnabled={project.rerank_enabled ?? true}
+        currentModel={(project.rerank_model || '').trim()}
+        embedUrl={(project.embed_url || '').trim()}
+        onSaved={async () => {
+          await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+          await queryClient.invalidateQueries({ queryKey: ['projects'] })
+        }}
+      />
     </div>
   )
 }
