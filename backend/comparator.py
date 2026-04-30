@@ -117,27 +117,47 @@ def ingest_side(
 
 # ── Bidirectional vector search ────────────────────────────────────────────
 
-def run_bidirectional_search(
+def iter_vector_search(
     schema_name: str,
     top_k: int,
-) -> list[tuple[int, int, float]]:
+    candidates_out: list[tuple[int, int, float]],
+) -> Generator[dict, None, None]:
     """
     For each left record, find the top_k closest right records by cosine similarity.
-    Returns list of (left_id, right_id, cosine_score).
-    cosine_score = 1 - cosine_distance (higher = more similar).
+    Appends (left_id, right_id, cosine_score) tuples to candidates_out.
+    Yields SSE dicts with type vector_search and processed/total/percent.
     """
-    logger.info("run_bidirectional_search() schema=%s top_k=%d", schema_name, top_k)
+    logger.info("iter_vector_search() schema=%s top_k=%d", schema_name, top_k)
     t0 = time.monotonic()
 
-    # Fetch all left embeddings
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"SELECT id, embedding FROM {schema_name}.records WHERE side = 'left' ORDER BY id"
         )
         left_rows = cur.fetchall()
 
-    candidates = []
-    for left_row in left_rows:
+    n = len(left_rows)
+    if n == 0:
+        yield {
+            "type": "vector_search",
+            "processed": 0,
+            "total": 0,
+            "percent": 100,
+            "message": "No left rows to search",
+        }
+        elapsed = int((time.monotonic() - t0) * 1000)
+        logger.info("iter_vector_search() done left_rows=0 elapsed_ms=%d", elapsed)
+        return
+
+    yield {
+        "type": "vector_search",
+        "processed": 0,
+        "total": n,
+        "percent": 0,
+        "message": f"Vector search — {n} left row(s)",
+    }
+
+    for i, left_row in enumerate(left_rows):
         left_id = left_row["id"]
         embedding = left_row["embedding"]
 
@@ -156,43 +176,56 @@ def run_bidirectional_search(
             rows = cur.fetchall()
 
         for row in rows:
-            candidates.append((left_id, row["id"], float(row["cosine_score"])))
+            candidates_out.append((left_id, row["id"], float(row["cosine_score"])))
+
+        pct = round(100 * (i + 1) / n)
+        yield {
+            "type": "vector_search",
+            "processed": i + 1,
+            "total": n,
+            "percent": pct,
+            "message": f"Left row {i + 1} / {n} (db id {left_id})",
+            "left_id": left_id,
+        }
 
     elapsed = int((time.monotonic() - t0) * 1000)
     logger.info(
-        "run_bidirectional_search() done left_rows=%d candidates=%d elapsed_ms=%d",
-        len(left_rows), len(candidates), elapsed,
+        "iter_vector_search() done left_rows=%d candidates=%d elapsed_ms=%d",
+        n, len(candidates_out), elapsed,
     )
-    return candidates
+
+
+def run_bidirectional_search(schema_name: str, top_k: int) -> list[tuple[int, int, float]]:
+    """Non-streaming wrapper (tests / callers that do not need SSE)."""
+    out: list[tuple[int, int, float]] = []
+    for _ in iter_vector_search(schema_name, top_k, out):
+        pass
+    return out
 
 
 # ── Reranking ──────────────────────────────────────────────────────────────
 
-def run_reranking(
+def iter_run_reranking(
     schema_name: str,
     candidates: list[tuple[int, int, float]],
     *,
     rerank_enabled: bool | None = None,
     rerank_model: str | None = None,
-) -> list[tuple[int, int, float, float]]:
+    results_out: list[tuple[int, int, float, float]],
+) -> Generator[dict, None, None]:
     """
-    Rerank each (left, right) pair.
-    Groups candidates by left_id, calls rerank() once per left record.
-    Returns list of (left_id, right_id, cosine_score, rerank_score).
-
-    rerank_enabled: per-job override; falls back to global RERANKER_ENABLED when None.
-    rerank_model:   per-job model override; None = use server default.
+    Rerank each (left, right) pair (grouped by left_id). Appends to results_out.
+    Yields SSE dicts type reranking with processed/total per left group.
     """
-    # Per-job setting takes precedence; fall back to global config.
     effective_enabled = rerank_enabled if rerank_enabled is not None else RERANKER_ENABLED
     if not effective_enabled:
-        logger.info("run_reranking() reranker disabled — using cosine score as rerank_score")
-        return [(l, r, c, c) for l, r, c in candidates]
+        logger.info("iter_run_reranking() reranker disabled — using cosine score as rerank_score")
+        results_out.extend([(l, r, c, c) for l, r, c in candidates])
+        return
 
-    logger.info("run_reranking() candidates=%d", len(candidates))
+    logger.info("iter_run_reranking() candidates=%d", len(candidates))
     t0 = time.monotonic()
 
-    # Fetch contextual_content for all unique IDs
     all_ids = set()
     for left_id, right_id, _ in candidates:
         all_ids.add(left_id)
@@ -207,14 +240,33 @@ def run_reranking(
         for row in cur.fetchall():
             content_map[row["id"]] = row["contextual_content"] or ""
 
-    # Group by left_id
-    from collections import defaultdict
     groups: dict[int, list[tuple[int, float]]] = defaultdict(list)
     for left_id, right_id, cosine in candidates:
         groups[left_id].append((right_id, cosine))
 
-    results = []
-    for left_id, pairs in groups.items():
+    group_items = list(groups.items())
+    total_g = len(group_items)
+    if total_g == 0:
+        yield {
+            "type": "reranking",
+            "processed": 0,
+            "total": 0,
+            "percent": 100,
+            "message": "Nothing to rerank",
+        }
+        elapsed = int((time.monotonic() - t0) * 1000)
+        logger.info("iter_run_reranking() done pairs=0 elapsed_ms=%d", elapsed)
+        return
+
+    yield {
+        "type": "reranking",
+        "processed": 0,
+        "total": total_g,
+        "percent": 0,
+        "message": f"Reranking — {total_g} left row(s)",
+    }
+
+    for gi, (left_id, pairs) in enumerate(group_items):
         query_text = content_map.get(left_id, "")
         right_texts = [content_map.get(right_id, "") for right_id, _ in pairs]
 
@@ -227,11 +279,40 @@ def run_reranking(
             scores = [cosine for _, cosine in pairs]
 
         for (right_id, cosine), rerank_score in zip(pairs, scores):
-            results.append((left_id, right_id, cosine, float(rerank_score)))
+            results_out.append((left_id, right_id, cosine, float(rerank_score)))
+
+        pct = round(100 * (gi + 1) / total_g) if total_g else 100
+        yield {
+            "type": "reranking",
+            "processed": gi + 1,
+            "total": total_g,
+            "percent": pct,
+            "message": f"Reranked left group {gi + 1} / {total_g} (db id {left_id})",
+            "left_id": left_id,
+        }
 
     elapsed = int((time.monotonic() - t0) * 1000)
-    logger.info("run_reranking() done pairs=%d elapsed_ms=%d", len(results), elapsed)
-    return results
+    logger.info("iter_run_reranking() done pairs=%d elapsed_ms=%d", len(results_out), elapsed)
+
+
+def run_reranking(
+    schema_name: str,
+    candidates: list[tuple[int, int, float]],
+    *,
+    rerank_enabled: bool | None = None,
+    rerank_model: str | None = None,
+) -> list[tuple[int, int, float, float]]:
+    """Non-streaming wrapper."""
+    out: list[tuple[int, int, float, float]] = []
+    for _ in iter_run_reranking(
+        schema_name,
+        candidates,
+        rerank_enabled=rerank_enabled,
+        rerank_model=rerank_model,
+        results_out=out,
+    ):
+        pass
+    return out
 
 
 # ── Write matches ──────────────────────────────────────────────────────────
@@ -280,23 +361,23 @@ _DEFAULT_LLM_JUDGE_PROMPT = (
 )
 
 
-def run_llm_judge(
+def iter_run_llm_judge(
     schema_name: str,
     candidates: list,
     *,
     url: str,
     model: str,
     prompt: str | None = None,
-) -> list:
+    results_out: list,
+) -> Generator[dict, None, None]:
     """
     Score each (left_id, right_id, cosine, rerank_score) tuple using an LLM judge.
-    Returns list of (left_id, right_id, cosine, rerank_score, llm_score).
-    Falls back to rerank_score (or cosine) on any API error.
+    Appends (left_id, right_id, cosine, rerank_score, llm_score) to results_out.
+    Yields SSE dicts type llm_judge with processed/total per pair.
     """
     system_prompt = prompt or _DEFAULT_LLM_JUDGE_PROMPT
     client = OpenAI(base_url=url, api_key="ollama")
 
-    # Fetch content for all referenced record IDs
     all_ids = list({row[0] for row in candidates} | {row[1] for row in candidates})
     content_map: dict[int, str] = {}
     with get_cursor() as (cur, _conn):
@@ -307,8 +388,26 @@ def run_llm_judge(
         for row in cur.fetchall():
             content_map[row["id"]] = row["contextual_content"] or ""
 
-    results = []
-    for left_id, right_id, cosine, rerank_score in candidates:
+    total_p = len(candidates)
+    if total_p == 0:
+        yield {
+            "type": "llm_judge",
+            "processed": 0,
+            "total": 0,
+            "percent": 100,
+            "message": "No pairs to judge",
+        }
+        return
+
+    yield {
+        "type": "llm_judge",
+        "processed": 0,
+        "total": total_p,
+        "percent": 0,
+        "message": f"LLM judge — {total_p} pair(s)",
+    }
+
+    for pi, (left_id, right_id, cosine, rerank_score) in enumerate(candidates):
         query_text = content_map.get(left_id, "")
         doc_text = content_map.get(right_id, "")
         fallback = float(rerank_score) if rerank_score is not None else float(cosine)
@@ -333,10 +432,37 @@ def run_llm_judge(
             )
             llm_score = fallback
 
-        results.append((left_id, right_id, cosine, rerank_score, llm_score))
+        results_out.append((left_id, right_id, cosine, rerank_score, llm_score))
 
-    logger.info("run_llm_judge() done pairs=%d", len(results))
-    return results
+        pct = round(100 * (pi + 1) / total_p)
+        yield {
+            "type": "llm_judge",
+            "processed": pi + 1,
+            "total": total_p,
+            "percent": pct,
+            "message": f"Pair {pi + 1} / {total_p} (left {left_id} → right {right_id})",
+            "left_id": left_id,
+            "right_id": right_id,
+        }
+
+    logger.info("iter_run_llm_judge() done pairs=%d", len(results_out))
+
+
+def run_llm_judge(
+    schema_name: str,
+    candidates: list,
+    *,
+    url: str,
+    model: str,
+    prompt: str | None = None,
+) -> list:
+    """Non-streaming wrapper."""
+    out = []
+    for _ in iter_run_llm_judge(
+        schema_name, candidates, url=url, model=model, prompt=prompt, results_out=out
+    ):
+        pass
+    return out
 
 
 # ── Job ingest orchestrator (Phase 1 — embed only) ─────────────────────────
@@ -469,55 +595,51 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
 
         # ── Vector search ─────────────────────────────────────────────────
         _set_run_status("running")
-        yield {"type": "searching", "message": "Running vector search..."}
 
-        t0 = time.monotonic()
-        candidates = run_bidirectional_search(schema_name, top_k)
-        metrics["vector_search_ms"] = int((time.monotonic() - t0) * 1000)
-        metrics["candidate_pairs"]  = len(candidates)
-
-        # candidates at this point: [(left_id, right_id, cosine_score), ...]
-        # Extend to include rerank_score placeholder
-        pairs_with_rerank = [(l, r, c, None) for l, r, c in candidates]
+        t_vec0 = time.monotonic()
+        candidates: list[tuple[int, int, float]] = []
+        for prog in iter_vector_search(schema_name, top_k, candidates):
+            yield prog
+        metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
+        metrics["candidate_pairs"] = len(candidates)
 
         # ── Reranker ──────────────────────────────────────────────────────
+        pairs_with_rerank: list[tuple[int, int, float, float]] = []
         if run["reranker_enabled"]:
-            yield {"type": "reranking", "message": f"Reranking {len(candidates)} pairs..."}
-            t0 = time.monotonic()
-            reranked = run_reranking(
+            t_rr0 = time.monotonic()
+            for prog in iter_run_reranking(
                 schema_name,
                 candidates,
                 rerank_enabled=True,
                 rerank_model=run.get("reranker_model") or None,
-            )
-            metrics["rerank_ms"] = int((time.monotonic() - t0) * 1000)
-            # reranked: [(left_id, right_id, cosine, rerank_score), ...]
-            pairs_with_rerank = reranked
+                results_out=pairs_with_rerank,
+            ):
+                yield prog
+            metrics["rerank_ms"] = int((time.monotonic() - t_rr0) * 1000)
         else:
-            # Passthrough: treat cosine as rerank_score
             pairs_with_rerank = [(l, r, c, c) for l, r, c in candidates]
 
         # ── LLM Judge ─────────────────────────────────────────────────────
         if run["llm_judge_enabled"]:
-            url   = run.get("llm_judge_url") or ""
+            url = run.get("llm_judge_url") or ""
             model = run.get("llm_judge_model") or ""
             if not url or not model:
                 yield {"type": "error", "message": "LLM judge enabled but url/model not configured"}
                 _set_run_status("error", "LLM judge url or model missing")
                 return
 
-            yield {"type": "llm_judging", "message": f"LLM judging {len(pairs_with_rerank)} pairs..."}
-            t0 = time.monotonic()
-            judged = run_llm_judge(
+            t_llm0 = time.monotonic()
+            judged: list[tuple] = []
+            for prog in iter_run_llm_judge(
                 schema_name,
                 pairs_with_rerank,
                 url=url,
                 model=model,
                 prompt=run.get("llm_judge_prompt") or None,
-            )
-            metrics["llm_judge_ms"] = int((time.monotonic() - t0) * 1000)
-            # judged: [(left_id, right_id, cosine, rerank_score, llm_score), ...]
-            # final_score = llm_score
+                results_out=judged,
+            ):
+                yield prog
+            metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
             scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
         else:
             # final_score = rerank_score (which may equal cosine when reranker off)

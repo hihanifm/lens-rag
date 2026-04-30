@@ -423,7 +423,7 @@ def execute_run(job_id: int, run_id: int):
                 if prog.get("type") in ("complete", "error"):
                     _run_progress.pop(run_id, None)
                     break
-                time.sleep(1)
+                time.sleep(0.3)
         return StreamingResponse(_stream_existing(), media_type="text/event-stream")
 
     _run_progress[run_id] = {"type": "starting", "message": "Starting pipeline..."}
@@ -445,7 +445,7 @@ def execute_run(job_id: int, run_id: int):
             if prog.get("type") in ("complete", "error"):
                 _run_progress.pop(run_id, None)
                 break
-            time.sleep(1)
+            time.sleep(0.3)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

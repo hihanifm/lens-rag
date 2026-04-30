@@ -10,7 +10,7 @@ build:
 	docker compose --profile dev build
 
 logs:
-	docker compose logs -f
+	docker compose --profile dev logs -f
 
 # Focused logs (dev)
 logs-api:

@@ -1091,6 +1091,19 @@ function NewRunModal({ onClose, onCreated }) {
 
 // ── Run execute progress ────────────────────────────────────────────────────
 
+const RUN_PHASE_ORDER = ['vector_search', 'reranking', 'llm_judge', 'complete']
+
+function normalizeRunProgressType(t) {
+  if (t === 'searching') return 'vector_search'
+  if (t === 'llm_judging') return 'llm_judge'
+  return t
+}
+
+function runPhaseIndex(t) {
+  const i = RUN_PHASE_ORDER.indexOf(t)
+  return i >= 0 ? i : -1
+}
+
 function RunProgressView({ jobId, runId, onDone }) {
   const [events, setEvents] = useState([])
   const [done, setDone] = useState(false)
@@ -1107,7 +1120,8 @@ function RunProgressView({ jobId, runId, onDone }) {
   useEffect(() => {
     const es = new EventSource(`${API_BASE_URL}/compare/${jobId}/runs/${runId}/execute`)
     es.onmessage = (e) => {
-      const data = JSON.parse(e.data)
+      const raw = JSON.parse(e.data)
+      const data = { ...raw, type: normalizeRunProgressType(raw.type) }
       setEvents(prev => {
         const last = prev[prev.length - 1]
         if (last && last.type === data.type) return [...prev.slice(0, -1), data]
@@ -1129,6 +1143,7 @@ function RunProgressView({ jobId, runId, onDone }) {
 
   const current = events[events.length - 1]
   const currentType = current?.type
+  const curOrd = runPhaseIndex(currentType)
   const elapsedSec = Math.max(0, Math.floor((now - startedAt) / 1000))
   const elapsed = elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`
 
@@ -1139,41 +1154,67 @@ function RunProgressView({ jobId, runId, onDone }) {
     s.type === currentType
   )
 
+  const activePct = typeof current?.percent === 'number' ? current.percent : null
+  const showBar = activePct != null && currentType && currentType !== 'complete' && currentType !== 'error'
+
   return (
     <div className="space-y-4 py-4">
       <div className="flex items-baseline justify-between gap-4">
         <p className="text-sm font-semibold text-gray-700">Executing run…</p>
         <span className="text-xs text-gray-400">Elapsed: {elapsed}</span>
       </div>
+
+      {showBar && (
+        <div className="space-y-1">
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+            <div
+              className="h-full bg-blue-500 transition-[width] duration-300 ease-out rounded-full"
+              style={{ width: `${Math.min(100, Math.max(0, activePct))}%` }}
+            />
+          </div>
+          {current?.message && (
+            <p className="text-xs text-gray-600 truncate font-mono" title={current.message}>
+              {current.message}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="space-y-2">
         {activeStages.map(stage => {
+          const stOrd = runPhaseIndex(stage.type)
           const isActive = currentType === stage.type
-          const isDone = done || (
-            stages.findIndex(s => s.type === stage.type) <
-            stages.findIndex(s => s.type === currentType)
-          )
-          const event = events.find(ev => ev.type === stage.type)
+          const isDone = done || (curOrd >= 0 && stOrd >= 0 && stOrd < curOrd)
+          const lastForStage = [...events].reverse().find(ev => ev.type === stage.type)
 
           return (
-            <div key={stage.type} className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border text-sm
+            <div key={stage.type} className={`flex flex-col gap-1 px-4 py-2.5 rounded-lg border text-sm
               ${isDone ? 'bg-emerald-50 border-emerald-200' : isActive ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}
             >
-              <span>
-                {isDone ? '✓' : isActive ? (
-                  <svg className="animate-spin h-3.5 w-3.5 text-blue-600" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                ) : '○'}
-              </span>
-              <p className={`font-medium ${isDone ? 'text-emerald-700' : isActive ? 'text-blue-700' : 'text-gray-400'}`}>
-                {stage.label}
-                {isActive && event?.processed != null && (
-                  <span className="ml-2 font-normal text-xs text-gray-500">
-                    {event.processed.toLocaleString()} / {event.total?.toLocaleString()} ({event.percent ?? 0}%)
-                  </span>
-                )}
-              </p>
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 w-4 text-center">
+                  {isDone ? '✓' : isActive ? (
+                    <svg className="animate-spin h-3.5 w-3.5 text-blue-600 inline" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  ) : '○'}
+                </span>
+                <p className={`font-medium flex-1 min-w-0 ${isDone ? 'text-emerald-700' : isActive ? 'text-blue-700' : 'text-gray-400'}`}>
+                  {stage.label}
+                  {isActive && lastForStage?.processed != null && lastForStage?.total != null && (
+                    <span className="ml-2 font-normal text-xs text-gray-600 whitespace-nowrap">
+                      {lastForStage.processed.toLocaleString()} / {lastForStage.total.toLocaleString()}
+                      {typeof lastForStage.percent === 'number' ? ` (${lastForStage.percent}%)` : ''}
+                    </span>
+                  )}
+                </p>
+              </div>
+              {isActive && lastForStage?.message && !showBar && (
+                <p className="text-xs text-gray-600 font-mono truncate pl-7" title={lastForStage.message}>
+                  {lastForStage.message}
+                </p>
+              )}
             </div>
           )
         })}
