@@ -58,6 +58,7 @@ from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
 from clustering import cluster as do_cluster, stream_cluster
+from compare_router import router as compare_router
 
 app = FastAPI(title="LENS API", version="1.4.1", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
@@ -69,6 +70,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(compare_router, prefix="/compare")
 
 
 @app.on_event("startup")

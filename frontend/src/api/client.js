@@ -205,3 +205,53 @@ export const exportCluster = async (projectId, algorithm, k, filters, projectNam
   link.click()
   link.remove()
 }
+
+// ── Compare ───────────────────────────────────────────────────────────────
+
+export const previewCompareFile = (file, side) => {
+  const form = new FormData()
+  form.append('file', file)
+  return fetch(`${API_BASE_URL}/compare/preview-${side}`, { method: 'POST', body: form })
+    .then(r => r.json())
+}
+
+export const createCompareJob = (data) =>
+  api.post('compare/', data).then(r => r.data)
+
+export const listCompareJobs = () =>
+  api.get('compare/').then(r => r.data)
+
+export const getCompareJob = (jobId) =>
+  api.get(`compare/${jobId}`).then(r => r.data)
+
+export const deleteCompareJob = (jobId) =>
+  api.delete(`compare/${jobId}`).then(r => r.data)
+
+export const getReviewStats = (jobId) =>
+  api.get(`compare/${jobId}/review`).then(r => r.data)
+
+export const getNextReviewItem = (jobId, { minScore = 0, offset = 0, includeDecided = false } = {}) =>
+  api.get(`compare/${jobId}/review/next`, {
+    params: { min_score: minScore, offset, include_decided: includeDecided },
+  }).then(r => r.data)
+
+export const submitCompareDecision = (jobId, leftId, matchedRightId) =>
+  api.post(`compare/${jobId}/review/${leftId}`, { matched_right_id: matchedRightId ?? null })
+    .then(r => r.data)
+
+export const downloadCompareExport = async (jobId, type = 'confirmed', jobName = '') => {
+  const response = await api.get(`compare/${jobId}/export`, {
+    params: { type },
+    responseType: 'blob',
+  })
+  const slug = jobName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'compare'
+  const descriptor = type === 'raw' ? 'raw' : 'confirmed'
+  const filename = `${slug}_lens_compare_${descriptor}_${fileDateTime()}.xlsx`
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}

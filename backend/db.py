@@ -70,6 +70,89 @@ def init_db():
             "ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;"
         )
 
+        # ── Compare jobs global table ──────────────────────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.compare_jobs (
+                id                       SERIAL PRIMARY KEY,
+                name                     TEXT NOT NULL,
+                label_left               TEXT NOT NULL,
+                label_right              TEXT NOT NULL,
+                schema_name              TEXT NOT NULL,
+                status                   TEXT DEFAULT 'pending',
+                status_message           TEXT,
+                row_count_left           INTEGER,
+                row_count_right          INTEGER,
+                context_columns_left     TEXT[],
+                content_column_left      TEXT NOT NULL,
+                display_column_left      TEXT,
+                context_columns_right    TEXT[],
+                content_column_right     TEXT NOT NULL,
+                display_column_right     TEXT,
+                source_filename_left     TEXT,
+                source_filename_right    TEXT,
+                tmp_path_left            TEXT,
+                tmp_path_right           TEXT,
+                top_k                    INTEGER DEFAULT 3,
+                embed_dims               INTEGER,
+                created_at               TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+
+def create_compare_schema(job_id: int, dims: int):
+    """Create per-job schema with records, matches, and decisions tables."""
+    schema = f"compare_{job_id}"
+    with get_cursor() as (cur, conn):
+        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.records (
+                id                  SERIAL PRIMARY KEY,
+                side                TEXT NOT NULL,
+                original_row        INTEGER,
+                sheet_name          TEXT,
+                contextual_content  TEXT,
+                display_value       TEXT,
+                embedding           vector({dims})
+            );
+        """)
+        cur.execute(f"""
+            ALTER TABLE {schema}.records
+                ADD CONSTRAINT records_side_chk CHECK (side IN ('left','right'));
+        """)
+        cur.execute(f"""
+            CREATE INDEX IF NOT EXISTS {schema}_records_emb_idx
+                ON {schema}.records USING hnsw (embedding vector_cosine_ops);
+            CREATE INDEX IF NOT EXISTS {schema}_records_side_idx
+                ON {schema}.records (side);
+        """)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.matches (
+                id              SERIAL PRIMARY KEY,
+                left_id         INTEGER NOT NULL,
+                right_id        INTEGER NOT NULL,
+                cosine_score    FLOAT,
+                rerank_score    FLOAT,
+                rank            INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS {schema}_matches_left_rank_idx
+                ON {schema}.matches (left_id, rank);
+        """)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.decisions (
+                left_id          INTEGER PRIMARY KEY,
+                matched_right_id INTEGER,
+                decided_at       TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+
+def drop_compare_schema(job_id: int):
+    """Drop the per-job schema and delete the compare_jobs row."""
+    schema = f"compare_{job_id}"
+    with get_cursor() as (cur, conn):
+        cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE;")
+        cur.execute("DELETE FROM public.compare_jobs WHERE id = %s;", (job_id,))
+
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None, dims: int = None):
     """

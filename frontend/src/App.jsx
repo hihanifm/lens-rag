@@ -9,6 +9,8 @@ import Settings from './pages/Settings'
 import Browse from './pages/Browse'
 import Cluster from './pages/Cluster'
 import System from './pages/System'
+import CreateCompareJob from './pages/CreateCompareJob'
+import CompareJob from './pages/CompareJob'
 import Layout from './components/Layout'
 import { ProjectStateProvider } from './contexts/ProjectStateContext'
 
@@ -30,6 +32,8 @@ export default function App() {
             <Route path="/projects/:projectId/cluster" element={<Cluster />} />
             <Route path="/system" element={<System />} />
             <Route path="/history" element={<History />} />
+            <Route path="/compare/new" element={<CreateCompareJob />} />
+            <Route path="/compare/:jobId" element={<CompareJob />} />
           </Routes>
         </Layout>
       </BrowserRouter>
