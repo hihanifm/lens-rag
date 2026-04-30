@@ -4,51 +4,47 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getCompareJob,
   updateCompareJob,
-  getReviewStats,
-  getNextReviewItem,
-  submitCompareDecision,
-  downloadCompareExport,
+  listRuns,
+  createRun,
+  deleteRun,
+  getRunReviewStats,
+  getNextRunReviewItem,
+  submitRunDecision,
+  downloadRunExport,
   browseCompareJob,
+  browseRunRaw,
   getCompareConfigStats,
-  browseCompareRaw,
+  API_BASE_URL,
 } from '../api/client'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function scoreColor(score) {
-  if (score >= 0.85) return 'bg-emerald-100 text-emerald-700 border-emerald-200'
-  if (score >= 0.60) return 'bg-amber-100 text-amber-700 border-amber-200'
-  return 'bg-gray-100 text-gray-500 border-gray-200'
-}
-
-function effectiveScore(candidate) {
-  const r = candidate?.rerank_score
-  if (typeof r === 'number' && r >= 0 && r <= 1) return r
-  const c = candidate?.cosine_score
-  return typeof c === 'number' ? c : 0
-}
-
-function effectiveScoreInfo(candidate) {
-  const r = candidate?.rerank_score
-  if (typeof r === 'number' && r >= 0 && r <= 1) {
-    return { score: r, source: 'rerank' }
-  }
-  const c = candidate?.cosine_score
-  return { score: typeof c === 'number' ? c : 0, source: 'cosine' }
-}
-
-function isNormalized01(v) {
-  return typeof v === 'number' && v >= 0 && v <= 1
-}
+// ── Score helpers ──────────────────────────────────────────────────────────
 
 function fmtPct01(v, digits = 0) {
-  if (!isNormalized01(v)) return '—'
+  if (typeof v !== 'number' || v < 0 || v > 1) return '—'
   return `${(v * 100).toFixed(digits)}%`
 }
 
 function fmtMaybeNumber(v, digits = 3) {
   if (typeof v !== 'number' || Number.isNaN(v)) return '—'
   return v.toFixed(digits)
+}
+
+function isNormalized01(v) {
+  return typeof v === 'number' && v >= 0 && v <= 1
+}
+
+function primaryScore(candidate) {
+  const f = candidate?.final_score
+  if (typeof f === 'number') return f
+  const r = candidate?.rerank_score
+  if (isNormalized01(r)) return r
+  return candidate?.cosine_score ?? 0
+}
+
+function scoreColor(score) {
+  if (score >= 0.85) return 'bg-emerald-100 text-emerald-700 border-emerald-200'
+  if (score >= 0.60) return 'bg-amber-100 text-amber-700 border-amber-200'
+  return 'bg-gray-100 text-gray-500 border-gray-200'
 }
 
 function scoreBorder(score, selected, confirmed) {
@@ -59,13 +55,16 @@ function scoreBorder(score, selected, confirmed) {
   return 'border-gray-200 hover:border-gray-300'
 }
 
-// ── Candidate card (right side) ────────────────────────────────────────────
+// ── Candidate card ─────────────────────────────────────────────────────────
 
 function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
-  const { score, source } = effectiveScoreInfo(candidate)
+  const score = primaryScore(candidate)
   const cosine = candidate?.cosine_score
   const rerank = candidate?.rerank_score
+  const llm = candidate?.llm_score
   const rerankIsNorm = isNormalized01(rerank)
+  const llmIsNorm = isNormalized01(llm)
+
   return (
     <button
       type="button"
@@ -74,48 +73,45 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
         ${isSaved ? 'bg-emerald-50' : 'bg-white'}
         ${scoreBorder(score, isSelected, isSaved)}`}
     >
-      {/* Score badges (show both) */}
-      <div
-        className="absolute top-3 right-3 flex items-center justify-end gap-1.5 flex-wrap max-w-[70%]"
-        title={`Filter/order uses: ${source}${source === 'rerank' ? '' : ' (fallback)'} • cosine=${fmtMaybeNumber(cosine)} • rerank=${rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}`}
-      >
+      {/* Score badges */}
+      <div className="absolute top-3 right-3 flex items-center justify-end gap-1 flex-wrap max-w-[70%]">
         <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-white text-gray-700 border-gray-200 whitespace-nowrap">
           C {fmtPct01(cosine, 0)}
         </span>
-        <span
-          className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
-            rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
-          }`}
-        >
-          R {rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}
-        </span>
+        {rerank != null && (
+          <span
+            className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+              rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+            }`}
+          >
+            R {rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}
+          </span>
+        )}
+        {llm != null && (
+          <span
+            className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+              llmIsNorm ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+            }`}
+          >
+            LLM {llmIsNorm ? fmtPct01(llm, 1) : fmtMaybeNumber(llm)}
+          </span>
+        )}
       </div>
 
       {/* Rank badge */}
-      <span
-        className="absolute top-3 left-3 text-xs text-gray-400 font-medium"
-        title={`Original rank: #${candidate.rank}`}
-      >
+      <span className="absolute top-3 left-3 text-xs text-gray-400 font-medium">
         #{candidate.rank}
       </span>
 
-      {/* Display value chip */}
       {candidate.display_value && (
         <p className="text-xs text-blue-600 font-medium mt-10 mb-1 truncate">{candidate.display_value}</p>
       )}
-
-      {/* Contextual content */}
       <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-10' : ''}`}>
         {candidate.contextual_content}
       </p>
 
-      {/* Selected indicator */}
       {(isSaved || isSelected) && (
-        <div
-          className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${
-            isSaved ? 'bg-emerald-600' : 'bg-blue-600'
-          }`}
-        >
+        <div className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${isSaved ? 'bg-emerald-600' : 'bg-blue-600'}`}>
           {isSaved ? '✓ Saved' : '✓ Selected'}
         </div>
       )}
@@ -125,13 +121,14 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
 
 // ── Review tab ────────────────────────────────────────────────────────────
 
-function ReviewTab({ job }) {
+function ReviewTab({ job, run }) {
   const jobId = job.id
+  const runId = run.id
   const queryClient = useQueryClient()
 
   const [minScore, setMinScore] = useState(0)
-  const [offset, setOffset] = useState(0) // page offset (0-based) in left rows list
-  const [rowsShown, setRowsShown] = useState(3) // 1 | 3 | 5
+  const [offset, setOffset] = useState(0)
+  const [rowsShown, setRowsShown] = useState(3)
   const [items, setItems] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -141,18 +138,9 @@ function ReviewTab({ job }) {
   const [rowStartedAt, setRowStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
 
-  const scoringMode = (() => {
-    const cands = items?.[activeIdx]?.candidates || items?.[0]?.candidates || []
-    const hasNormalizedRerank = cands.some(c => {
-      const r = c?.rerank_score
-      return typeof r === 'number' && r >= 0 && r <= 1
-    })
-    return hasNormalizedRerank ? 'rerank' : 'cosine'
-  })()
-
   const { data: stats, refetch: refetchStats } = useQuery({
-    queryKey: ['compare-review-stats', jobId],
-    queryFn: () => getReviewStats(jobId),
+    queryKey: ['run-review-stats', jobId, runId],
+    queryFn: () => getRunReviewStats(jobId, runId),
     refetchInterval: false,
   })
 
@@ -161,18 +149,11 @@ function ReviewTab({ job }) {
     setNoMore(false)
     try {
       const start = newOffset * rowsShown
-      const reqs = Array.from({ length: rowsShown }, (_, i) => (
-        getNextReviewItem(jobId, {
-          minScore,
-          offset: start + i,
-          includeDecided: true,
-        })
-      ))
-
+      const reqs = Array.from({ length: rowsShown }, (_, i) =>
+        getNextRunReviewItem(jobId, runId, { minScore, offset: start + i, includeDecided: true })
+      )
       const results = await Promise.allSettled(reqs)
-      const pageItems = results
-        .map(r => (r.status === 'fulfilled' ? r.value : null))
-        .filter(Boolean)
+      const pageItems = results.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean)
 
       if (pageItems.length === 0) {
         setNoMore(true)
@@ -197,28 +178,21 @@ function ReviewTab({ job }) {
     } finally {
       setLoading(false)
     }
-  }, [jobId, minScore, rowsShown])
+  }, [jobId, runId, minScore, rowsShown])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
 
-  // Load first item on mount and when filters change
-  useEffect(() => {
-    fetchPage(0)
-  }, [minScore, rowsShown])
+  useEffect(() => { fetchPage(0) }, [minScore, rowsShown])
 
   const handleSelect = async (leftId, rightId) => {
     if (savingLeftId != null) return
-    setSelectedByLeft(prev => {
-      const next = new Map(prev)
-      next.set(leftId, rightId)
-      return next
-    })
+    setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, rightId); return m })
     setSavingLeftId(leftId)
     try {
-      await submitCompareDecision(jobId, leftId, rightId)
+      await submitRunDecision(jobId, runId, leftId, rightId)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId } : it))
@@ -229,14 +203,10 @@ function ReviewTab({ job }) {
 
   const handleNoMatch = async (leftId) => {
     if (savingLeftId != null) return
-    setSelectedByLeft(prev => {
-      const next = new Map(prev)
-      next.set(leftId, null)
-      return next
-    })
+    setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
     setSavingLeftId(leftId)
     try {
-      await submitCompareDecision(jobId, leftId, null)
+      await submitRunDecision(jobId, runId, leftId, null)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: null } : it))
@@ -245,46 +215,25 @@ function ReviewTab({ job }) {
     }
   }
 
-  const handlePrev = () => {
-    if (savingLeftId != null || loading) return
-    if (offset > 0) fetchPage(offset - 1)
-  }
+  const handlePrev = useCallback(() => {
+    if (savingLeftId != null || loading || offset === 0) return
+    fetchPage(offset - 1)
+  }, [savingLeftId, loading, offset, fetchPage])
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
     if (savingLeftId != null || loading) return
     fetchPage(offset + 1)
-  }
+  }, [savingLeftId, loading, offset, fetchPage])
 
-  // Keyboard shortcuts: ← Prev, → Next (ignore while typing in inputs)
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (savingLeftId != null || loading) return
-      if (e.isComposing) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-
-      const el = document.activeElement
-      const tag = el?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
-
-      if (e.key === 'x' || e.key === 'X') {
-        e.preventDefault()
-        const it = items?.[activeIdx]
-        if (it) handleNoMatch(it.left_id)
-        return
-      }
-
-      if (e.key === 'ArrowLeft') {
-        if (offset > 0) {
-          e.preventDefault()
-          handlePrev()
-        }
-      }
-      if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        handleNext()
-      }
+      if (savingLeftId != null || loading || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable) return
+      if (e.key === 'x' || e.key === 'X') { e.preventDefault(); const it = items?.[activeIdx]; if (it) handleNoMatch(it.left_id); return }
+      if (e.key === 'ArrowLeft' && offset > 0) { e.preventDefault(); handlePrev() }
+      if (e.key === 'ArrowRight') { e.preventDefault(); handleNext() }
     }
-
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [offset, savingLeftId, loading, activeIdx, items, handlePrev, handleNext, handleNoMatch])
@@ -293,7 +242,6 @@ function ReviewTab({ job }) {
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-wrap items-center gap-4 bg-white border border-gray-200 rounded-xl px-4 py-3">
-        {/* Progress */}
         <div className="text-sm text-gray-600">
           <span className="font-semibold text-gray-900">{stats?.reviewed ?? 0}</span>
           {' / '}
@@ -305,26 +253,20 @@ function ReviewTab({ job }) {
             </span>
           )}
         </div>
-
         <div className="flex-1" />
-
         <div className="text-xs text-gray-400 whitespace-nowrap">
           Elapsed: {Math.max(0, Math.floor((now - rowStartedAt) / 1000))}s
         </div>
-
-        {/* Rows shown */}
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500 whitespace-nowrap">Rows shown</label>
           <select
             value={rowsShown}
-            onChange={(e) => setRowsShown(parseInt(e.target.value, 10))}
+            onChange={e => setRowsShown(parseInt(e.target.value, 10))}
             className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
           >
             {[1, 3, 5].map(v => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>
-
-        {/* Score filter */}
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500 whitespace-nowrap">Min score</label>
           <select
@@ -336,24 +278,9 @@ function ReviewTab({ job }) {
               <option key={v} value={v}>≥ {(v * 100).toFixed(0)}%</option>
             ))}
           </select>
-          <span
-            className={`text-xs px-2 py-1 rounded-full border whitespace-nowrap ${
-              scoringMode === 'rerank'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-gray-50 text-gray-600 border-gray-200'
-            }`}
-            title={
-              scoringMode === 'rerank'
-                ? 'Using normalized rerank scores (0..1).'
-                : 'Rerank scores are not normalized; using cosine similarity instead.'
-            }
-          >
-            Scoring: {scoringMode === 'rerank' ? 'Rerank' : 'Cosine'}
-          </span>
         </div>
       </div>
 
-      {/* Main review area */}
       {loading ? (
         <div className="text-center py-20 text-gray-400">Loading…</div>
       ) : noMore ? (
@@ -378,7 +305,6 @@ function ReviewTab({ job }) {
                   className={`rounded-2xl p-3 border transition-colors ${isActive ? 'border-blue-300 bg-blue-50/30' : 'border-transparent'}`}
                 >
                   <div className="flex gap-4 items-stretch">
-                    {/* Left card (~40%) */}
                     <div className="w-[38%] shrink-0 bg-white rounded-xl border-2 border-blue-200 p-4 relative">
                       <span className="absolute top-3 left-3 text-xs font-semibold text-blue-600 uppercase tracking-wide">
                         {job.label_left} · row {offset * rowsShown + idx + 1}
@@ -395,8 +321,6 @@ function ReviewTab({ job }) {
                         </span>
                       )}
                     </div>
-
-                    {/* Right candidates (~60%) */}
                     <div className="flex-1 flex gap-3 min-w-0">
                       {it.candidates.length === 0 ? (
                         <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
@@ -404,20 +328,19 @@ function ReviewTab({ job }) {
                         </div>
                       ) : (
                         [...it.candidates]
-                          .sort((a, b) => (Number(b?.cosine_score) || 0) - (Number(a?.cosine_score) || 0))
+                          .sort((a, b) => primaryScore(b) - primaryScore(a))
                           .map(c => (
-                          <CandidateCard
-                            key={c.right_id}
-                            candidate={c}
-                            isSelected={selectedRightId === c.right_id}
-                            isSaved={it.is_decided && it.current_decision === c.right_id}
-                            onClick={() => handleSelect(it.left_id, c.right_id)}
-                          />
-                        ))
+                            <CandidateCard
+                              key={c.right_id}
+                              candidate={c}
+                              isSelected={selectedRightId === c.right_id}
+                              isSaved={it.is_decided && it.current_decision === c.right_id}
+                              onClick={() => handleSelect(it.left_id, c.right_id)}
+                            />
+                          ))
                       )}
                     </div>
                   </div>
-
                   <div className="mt-3 flex items-center justify-between">
                     <button
                       type="button"
@@ -430,17 +353,12 @@ function ReviewTab({ job }) {
                     >
                       {isSaving ? '…' : '✕ No match'} <span className="ml-1 text-xs opacity-70">(X)</span>
                     </button>
-
-                    {isActive && (
-                      <div className="text-xs text-gray-400">Active</div>
-                    )}
+                    {isActive && <div className="text-xs text-gray-400">Active</div>}
                   </div>
                 </div>
               )
             })}
           </div>
-
-          {/* Page nav */}
           <div className="flex items-center justify-end">
             <div className="flex items-center gap-3">
               <button
@@ -470,20 +388,21 @@ function ReviewTab({ job }) {
 
 // ── Export tab ────────────────────────────────────────────────────────────
 
-function ExportTab({ job }) {
+function ExportTab({ job, run }) {
   const jobId = job.id
+  const runId = run.id
   const [downloading, setDownloading] = useState(null)
 
   const { data: stats } = useQuery({
-    queryKey: ['compare-review-stats', jobId],
-    queryFn: () => getReviewStats(jobId),
+    queryKey: ['run-review-stats', jobId, runId],
+    queryFn: () => getRunReviewStats(jobId, runId),
     refetchInterval: 5000,
   })
 
   const handleDownload = async (type) => {
     setDownloading(type)
     try {
-      await downloadCompareExport(jobId, type, job.name)
+      await downloadRunExport(jobId, runId, type, job.name)
     } finally {
       setDownloading(null)
     }
@@ -493,7 +412,6 @@ function ExportTab({ job }) {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      {/* Stats */}
       {stats && (
         <div className="grid grid-cols-3 gap-4">
           {[
@@ -508,15 +426,13 @@ function ExportTab({ job }) {
           ))}
         </div>
       )}
-
-      {/* Export buttons */}
       <div className="space-y-3">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h3 className="font-semibold text-gray-900">Raw Report</h3>
               <p className="text-sm text-gray-500 mt-1">
-                All left rows × top-{job.top_k ?? 3} right candidates. One row per pair. Available immediately — no review required.
+                All left rows × top-{run.top_k ?? 3} right candidates. One row per pair. Available immediately.
               </p>
             </div>
             <button
@@ -528,7 +444,6 @@ function ExportTab({ job }) {
             </button>
           </div>
         </div>
-
         <div className="bg-white rounded-xl border border-blue-200 p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -560,16 +475,12 @@ function ExportTab({ job }) {
 
 function BrowseTab({ job }) {
   const jobId = job.id
-  const [mode, setMode] = useState('records') // records | raw
   const [side, setSide] = useState('all')
   const [expandedRows, setExpandedRows] = useState(new Set())
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['compare-browse', jobId, mode, side],
-    queryFn: () => {
-      if (mode === 'raw') return browseCompareRaw(jobId, { limit: 50 })
-      return browseCompareJob(jobId, { side: side === 'all' ? null : side, limit: 25 })
-    },
+    queryKey: ['compare-browse', jobId, side],
+    queryFn: () => browseCompareJob(jobId, { side: side === 'all' ? null : side, limit: 25 }),
     enabled: job.status === 'ready',
   })
 
@@ -589,55 +500,29 @@ function BrowseTab({ job }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-gray-600">
-            {mode === 'raw'
-              ? 'Browse the raw pairs report (left × top-k right candidates) with cosine/rerank scores.'
-              : 'Browse raw compare records exactly as stored in Postgres.'}
-          </p>
+          <p className="text-sm text-gray-600">Browse embedded records as stored in Postgres.</p>
           <p className="text-xs text-gray-400 mt-0.5">
             Showing {records.length} of {total?.toLocaleString?.() ?? total} {side === 'all' ? 'records' : `${side} records`}
             <span className="ml-2 text-gray-300">·</span>
             <span className="ml-2">click a row to expand</span>
           </p>
         </div>
-
-        <div className="flex flex-wrap gap-2">
-          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-            {[
-              { id: 'records', label: 'Records' },
-              { id: 'raw', label: 'Raw pairs' },
-            ].map(m => (
-              <button
-                key={m.id}
-                onClick={() => { setMode(m.id); setExpandedRows(new Set()) }}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  mode === m.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          {mode === 'records' && (
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'left', label: job.label_left || 'Left' },
-                { id: 'right', label: job.label_right || 'Right' },
-              ].map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setSide(s.id); setExpandedRows(new Set()) }}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    side === s.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'left', label: job.label_left || 'Left' },
+            { id: 'right', label: job.label_right || 'Right' },
+          ].map(s => (
+            <button
+              key={s.id}
+              onClick={() => { setSide(s.id); setExpandedRows(new Set()) }}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                side === s.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -654,29 +539,16 @@ function BrowseTab({ job }) {
             <table className="text-sm border-collapse" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
               <colgroup>
                 {columns.map(col => (
-                  <col
-                    key={col}
-                    style={{
-                      width: col === 'id' ? '60px'
-                        : col === 'side' ? '70px'
-                        : col === 'sheet_name' ? '100px'
-                        : col === 'contextual_content' ? '360px'
-                        : col === 'embedding' ? '220px'
-                        : col === 'left_contextual' ? '360px'
-                        : col === 'right_contextual' ? '360px'
-                        : col.endsWith('_score') ? '120px'
-                        : '160px'
-                    }}
-                  />
+                  <col key={col} style={{
+                    width: col === 'id' ? '60px' : col === 'side' ? '70px' : col === 'sheet_name' ? '100px'
+                      : col === 'contextual_content' ? '360px' : col === 'embedding' ? '220px' : '160px'
+                  }} />
                 ))}
               </colgroup>
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   {columns.map(col => (
-                    <th
-                      key={col}
-                      className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
-                    >
+                    <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                       {col}
                     </th>
                   ))}
@@ -686,21 +558,13 @@ function BrowseTab({ job }) {
                 {records.map((record, idx) => {
                   const expanded = expandedRows.has(idx)
                   return (
-                    <tr
-                      key={record.id ?? idx}
-                      onClick={() => toggleRow(idx)}
-                      className="hover:bg-blue-50/40 cursor-pointer transition-colors"
-                    >
+                    <tr key={record.id ?? idx} onClick={() => toggleRow(idx)} className="hover:bg-blue-50/40 cursor-pointer transition-colors">
                       {columns.map(col => {
                         const val = record[col]
                         const text = val === null || val === undefined ? '' : String(val)
                         return (
                           <td key={col} className="px-4 py-3 align-top">
-                            <span
-                              className={`block font-mono text-xs text-gray-700 break-words ${
-                                expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'
-                              }`}
-                            >
+                            <span className={`block font-mono text-xs text-gray-700 break-words ${expanded ? 'whitespace-pre-wrap' : 'whitespace-normal line-clamp-5 lens-clamp-5'}`}>
                               {text || <span className="text-gray-300 italic not-italic font-sans">null</span>}
                             </span>
                           </td>
@@ -740,18 +604,9 @@ function ConfigStatsTab({ job }) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
-  useEffect(() => {
-    setEditName(job.name || '')
-  }, [job.name])
-
-  useEffect(() => {
-    setEditNotes(cfg?.notes ?? '')
-  }, [cfg?.notes])
-
-  // Auto-collapse when notes are empty (keeps the UI compact).
-  useEffect(() => {
-    if (!editNotes) setNotesExpanded(false)
-  }, [editNotes])
+  useEffect(() => { setEditName(job.name || '') }, [job.name])
+  useEffect(() => { setEditNotes(cfg?.notes ?? '') }, [cfg?.notes])
+  useEffect(() => { if (!editNotes) setNotesExpanded(false) }, [editNotes])
 
   const onSave = async () => {
     setSaving(true)
@@ -769,29 +624,17 @@ function ConfigStatsTab({ job }) {
 
   const fmtMs = (ms) => (typeof ms === 'number' ? `${ms.toLocaleString()} ms` : '—')
   const fmtNum = (n) => (n == null ? '—' : (typeof n === 'number' ? n.toLocaleString() : String(n)))
-  const fmtPct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : '—')
-
-  const statCard = (label, value) => (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
-      <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">{label}</p>
-      <p className="text-lg font-bold text-gray-900 mt-1">{value ?? '—'}</p>
-    </div>
-  )
 
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
         <h2 className="text-lg font-bold text-gray-900">Config</h2>
-        <p className="text-sm text-gray-500 mt-1">
-          The settings used to build merged text, embed records, and generate candidate matches.
-        </p>
+        <p className="text-sm text-gray-500 mt-1">Embedding model and column settings locked at job creation.</p>
       </div>
 
       {isLoading && <p className="text-gray-400">Loading…</p>}
       {isError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-          Failed to load config/stats.
-        </div>
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">Failed to load config/stats.</div>
       )}
 
       {cfg && (
@@ -803,24 +646,20 @@ function ConfigStatsTab({ job }) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Job name</label>
                 <input
                   value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
+                  onChange={e => setEditName(e.target.value)}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
               <div>
                 <div className="flex items-center justify-between gap-3 mb-1">
                   <label className="block text-sm font-medium text-gray-700">Findings / notes</label>
-                  <button
-                    type="button"
-                    onClick={() => setNotesExpanded(v => !v)}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                  >
+                  <button type="button" onClick={() => setNotesExpanded(v => !v)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">
                     {notesExpanded ? 'Collapse' : (editNotes ? 'Expand' : 'Add')}
                   </button>
                 </div>
                 <textarea
                   value={editNotes}
-                  onChange={(e) => setEditNotes(e.target.value)}
+                  onChange={e => setEditNotes(e.target.value)}
                   rows={notesExpanded ? 5 : 2}
                   placeholder="Quick findings…"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
@@ -841,35 +680,16 @@ function ConfigStatsTab({ job }) {
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-200 p-5 lg:col-span-2">
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Models / endpoint</div>
+            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Embedding model / endpoint</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div className="space-y-2">
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Embedding URL</span>
-                  <span className="font-medium text-gray-900 break-words">{cfg.embed_url || 'system default'}</span>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Embedding model</span>
-                  <span className="font-medium text-gray-900 break-words">{cfg.embed_model || 'system default'}</span>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Embedding dims</span>
-                  <span className="font-medium text-gray-900">{cfg.embed_dims ?? '—'}</span>
-                </div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Embedding URL</span><span className="font-medium text-gray-900 break-words">{cfg.embed_url || 'system default'}</span></div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Embedding model</span><span className="font-medium text-gray-900 break-words">{cfg.embed_model || 'system default'}</span></div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Embedding dims</span><span className="font-medium text-gray-900">{cfg.embed_dims ?? '—'}</span></div>
               </div>
               <div className="space-y-2">
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Rerank enabled</span>
-                  <span className="font-medium text-gray-900">{cfg.rerank_enabled ? 'Yes' : 'No'}</span>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Rerank model</span>
-                  <span className="font-medium text-gray-900 break-words">{cfg.rerank_model || 'system default'}</span>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-gray-400 w-40 shrink-0">Top‑k candidates</span>
-                  <span className="font-medium text-gray-900">{cfg.top_k ?? '—'}</span>
-                </div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Schema</span><span className="font-medium text-gray-900 font-mono">{cfg.schema_name}</span></div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Created</span><span className="font-medium text-gray-900">{cfg.created_at ? new Date(cfg.created_at).toLocaleDateString() : '—'}</span></div>
               </div>
             </div>
           </div>
@@ -897,85 +717,541 @@ function ConfigStatsTab({ job }) {
       {stats && (
         <>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">Stats</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Lightweight summary of ingestion + match generation + review progress.
-            </p>
+            <h2 className="text-lg font-bold text-gray-900">Embedding Stats</h2>
+            <p className="text-sm text-gray-500 mt-1">Record counts and embedding costs. Match/decision stats are per-run.</p>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {statCard('Left records', stats.records_left?.toLocaleString?.() ?? stats.records_left)}
-            {statCard('Right records', stats.records_right?.toLocaleString?.() ?? stats.records_right)}
-            {statCard('Match rows', stats.matches_rows?.toLocaleString?.() ?? stats.matches_rows)}
-            {statCard('Decisions', stats.decisions?.toLocaleString?.() ?? stats.decisions)}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {statCard('Pending', stats.pending?.toLocaleString?.() ?? stats.pending)}
-            {statCard('Candidates/left', stats.candidates_per_left)}
-            {statCard('Scoring mode', stats.uses_normalized_rerank ? 'Rerank (0..1)' : 'Cosine (fallback)')}
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Cost / volume (rough)</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
-              <div className="space-y-1.5">
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Avg chars/left row</span><span className="font-semibold text-gray-900">{stats.avg_chars_left != null ? Math.round(stats.avg_chars_left).toLocaleString() : '—'}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Avg chars/right row</span><span className="font-semibold text-gray-900">{stats.avg_chars_right != null ? Math.round(stats.avg_chars_right).toLocaleString() : '—'}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Est embed tokens</span><span className="font-semibold text-gray-900">{fmtNum(stats.est_embed_tokens)}</span></div>
+            {[
+              ['Left records', fmtNum(stats.records_left)],
+              ['Right records', fmtNum(stats.records_right)],
+              ['Avg chars / left', stats.avg_chars_left != null ? Math.round(stats.avg_chars_left).toLocaleString() : '—'],
+              ['Est embed tokens', fmtNum(stats.est_embed_tokens)],
+            ].map(([label, val]) => (
+              <div key={label} className="bg-white rounded-xl border border-gray-200 p-4">
+                <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold">{label}</p>
+                <p className="text-lg font-bold text-gray-900 mt-1">{val ?? '—'}</p>
               </div>
-              <div className="space-y-1.5">
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Candidate pairs</span><span className="font-semibold text-gray-900">{fmtNum(timings?.candidate_pairs ?? stats.matches_rows)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Est tokens/pair</span><span className="font-semibold text-gray-900">{fmtNum(stats.est_rerank_pair_tokens)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Rerank enabled</span><span className="font-semibold text-gray-900">{cfg?.rerank_enabled ? 'Yes' : 'No'}</span></div>
+            ))}
+          </div>
+
+          {timings && (
+            <div className="bg-white rounded-2xl border border-gray-200 p-5">
+              <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Embedding timings</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest left</span><span className="font-semibold text-gray-900">{fmtMs(timings.ingest_left_ms)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Embed left</span><span className="font-semibold text-gray-900">{fmtMs(timings.embed_left_ms)}</span></div>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest right</span><span className="font-semibold text-gray-900">{fmtMs(timings.ingest_right_ms)}</span></div>
+                  <div className="flex justify-between gap-4"><span className="text-gray-500">Embed right</span><span className="font-semibold text-gray-900">{fmtMs(timings.embed_right_ms)}</span></div>
+                </div>
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-3">
-              Token estimates use a simple heuristic (≈4 chars/token). On Ollama this is compute cost, not billing.
-            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── New Run Modal ──────────────────────────────────────────────────────────
+
+function NewRunModal({ onClose, onCreated }) {
+  const [name, setName] = useState('')
+  const [topK, setTopK] = useState(3)
+  const [rerankerEnabled, setRerankerEnabled] = useState(false)
+  const [rerankerModel, setRerankerModel] = useState('')
+  const [rerankerUrl, setRerankerUrl] = useState('')
+  const [llmEnabled, setLlmEnabled] = useState(false)
+  const [llmUrl, setLlmUrl] = useState('')
+  const [llmModel, setLlmModel] = useState('')
+  const [llmPrompt, setLlmPrompt] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleCreate = async () => {
+    setSubmitting(true)
+    setError('')
+    try {
+      const data = {
+        name: name.trim() || null,
+        top_k: topK,
+        vector_enabled: true,
+        reranker_enabled: rerankerEnabled,
+        reranker_model: rerankerEnabled && rerankerModel.trim() ? rerankerModel.trim() : null,
+        reranker_url: rerankerEnabled && rerankerUrl.trim() ? rerankerUrl.trim() : null,
+        llm_judge_enabled: llmEnabled,
+        llm_judge_url: llmEnabled && llmUrl.trim() ? llmUrl.trim() : null,
+        llm_judge_model: llmEnabled && llmModel.trim() ? llmModel.trim() : null,
+        llm_judge_prompt: llmEnabled && llmPrompt.trim() ? llmPrompt.trim() : null,
+      }
+      const run = await onCreated(data)
+      if (!run) return
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message || 'Failed to create run')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">New Run</h2>
+          <p className="text-sm text-gray-500 mt-1">Configure the pipeline for this run. Uses embedded data already stored for this job.</p>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Run name <span className="text-gray-400 font-normal">(optional)</span></label>
+            <input
+              autoFocus
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. with reranker v2"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
-            <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Timings (persisted)</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
-              <div className="space-y-1.5">
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest left</span><span className="font-semibold text-gray-900">{fmtMs(timings?.ingest_left_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Embed left</span><span className="font-semibold text-gray-900">{fmtMs(timings?.embed_left_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Ingest right</span><span className="font-semibold text-gray-900">{fmtMs(timings?.ingest_right_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Embed right</span><span className="font-semibold text-gray-900">{fmtMs(timings?.embed_right_ms)}</span></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Top-K candidates per left row</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={topK}
+              onChange={e => setTopK(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+              className="w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+
+          {/* Reranker section */}
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rerankerEnabled}
+                onChange={e => setRerankerEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm font-medium text-gray-700">Enable reranker</span>
+            </label>
+            {rerankerEnabled && (
+              <div className="space-y-3 pl-6">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Model <span className="text-gray-400 font-normal">(blank = server default)</span></label>
+                  <input
+                    type="text"
+                    value={rerankerModel}
+                    onChange={e => setRerankerModel(e.target.value)}
+                    placeholder="e.g. bbjson/bge-reranker-base:latest"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Endpoint URL <span className="text-gray-400 font-normal">(blank = server default)</span></label>
+                  <input
+                    type="text"
+                    value={rerankerUrl}
+                    onChange={e => setRerankerUrl(e.target.value)}
+                    placeholder="e.g. http://host.docker.internal:11434/v1"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Vector search</span><span className="font-semibold text-gray-900">{fmtMs(timings?.vector_search_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Rerank</span><span className="font-semibold text-gray-900">{fmtMs(timings?.rerank_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Write matches</span><span className="font-semibold text-gray-900">{fmtMs(timings?.write_matches_ms)}</span></div>
-                <div className="flex justify-between gap-4"><span className="text-gray-500">Total</span><span className="font-semibold text-gray-900">{fmtMs(timings?.total_ms)}</span></div>
-              </div>
-            </div>
-            {!timings && (
-              <p className="text-xs text-gray-400 mt-3">
-                Timings will appear after the job is re-run with this version of the server.
-              </p>
             )}
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold">Best-match score (rank=1)</div>
-                <div className="text-sm text-gray-500 mt-1">Min / P50 / P90 / Max</div>
+          {/* LLM Judge section */}
+          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={llmEnabled}
+                onChange={e => setLlmEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-purple-600"
+              />
+              <span className="text-sm font-medium text-gray-700">Enable LLM judge</span>
+              <span className="text-xs text-gray-400">(stacks on top of reranker)</span>
+            </label>
+            {llmEnabled && (
+              <div className="space-y-3 pl-6">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Endpoint URL <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={llmUrl}
+                    onChange={e => setLlmUrl(e.target.value)}
+                    placeholder="e.g. http://host.docker.internal:11434/v1"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Model <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={llmModel}
+                    onChange={e => setLlmModel(e.target.value)}
+                    placeholder="e.g. llama3.2:3b"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    System prompt <span className="text-gray-400 font-normal">(blank = server default)</span>
+                  </label>
+                  <textarea
+                    value={llmPrompt}
+                    onChange={e => setLlmPrompt(e.target.value)}
+                    rows={4}
+                    placeholder={'Leave blank to use the default prompt:\n"Rate how well the right record matches the left record on a scale 0.0–1.0. Reply only with JSON: {\"score\": <float>}"'}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  />
+                </div>
               </div>
-              <div className="flex gap-3 text-sm font-semibold text-gray-900">
-                <span>{fmtPct(stats.best_score_min)}</span>
-                <span className="text-gray-300">·</span>
-                <span>{fmtPct(stats.best_score_p50)}</span>
-                <span className="text-gray-300">·</span>
-                <span>{fmtPct(stats.best_score_p90)}</span>
-                <span className="text-gray-300">·</span>
-                <span>{fmtPct(stats.best_score_max)}</span>
-              </div>
-            </div>
+            )}
           </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={submitting || (llmEnabled && (!llmUrl.trim() || !llmModel.trim()))}
+            className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            {submitting ? 'Creating…' : 'Create & Execute'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Run execute progress ────────────────────────────────────────────────────
+
+function RunProgressView({ jobId, runId, onDone }) {
+  const [events, setEvents] = useState([])
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState(null)
+  const [startedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (done) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [done])
+
+  useEffect(() => {
+    const es = new EventSource(`${API_BASE_URL}/compare/${jobId}/runs/${runId}/execute`)
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data)
+      setEvents(prev => {
+        const last = prev[prev.length - 1]
+        if (last && last.type === data.type) return [...prev.slice(0, -1), data]
+        return [...prev, data]
+      })
+      if (data.type === 'complete') { setDone(true); es.close(); setTimeout(onDone, 1200) }
+      if (data.type === 'error') { setError(data.message || 'Run failed'); es.close() }
+    }
+    es.onerror = () => { setError('Connection lost'); es.close() }
+    return () => es.close()
+  }, [jobId, runId])
+
+  const stages = [
+    { type: 'vector_search', label: 'Vector search' },
+    { type: 'reranking',     label: 'Reranking' },
+    { type: 'llm_judge',     label: 'LLM judge' },
+    { type: 'complete',      label: 'Done' },
+  ]
+
+  const current = events[events.length - 1]
+  const currentType = current?.type
+  const elapsedSec = Math.max(0, Math.floor((now - startedAt) / 1000))
+  const elapsed = elapsedSec >= 60 ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s` : `${elapsedSec}s`
+
+  const activeStages = stages.filter(s =>
+    s.type === 'complete' ||
+    s.type === 'vector_search' ||
+    events.some(ev => ev.type === s.type) ||
+    s.type === currentType
+  )
+
+  return (
+    <div className="space-y-4 py-4">
+      <div className="flex items-baseline justify-between gap-4">
+        <p className="text-sm font-semibold text-gray-700">Executing run…</p>
+        <span className="text-xs text-gray-400">Elapsed: {elapsed}</span>
+      </div>
+      <div className="space-y-2">
+        {activeStages.map(stage => {
+          const isActive = currentType === stage.type
+          const isDone = done || (
+            stages.findIndex(s => s.type === stage.type) <
+            stages.findIndex(s => s.type === currentType)
+          )
+          const event = events.find(ev => ev.type === stage.type)
+
+          return (
+            <div key={stage.type} className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border text-sm
+              ${isDone ? 'bg-emerald-50 border-emerald-200' : isActive ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}
+            >
+              <span>
+                {isDone ? '✓' : isActive ? (
+                  <svg className="animate-spin h-3.5 w-3.5 text-blue-600" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : '○'}
+              </span>
+              <p className={`font-medium ${isDone ? 'text-emerald-700' : isActive ? 'text-blue-700' : 'text-gray-400'}`}>
+                {stage.label}
+                {isActive && event?.processed != null && (
+                  <span className="ml-2 font-normal text-xs text-gray-500">
+                    {event.processed.toLocaleString()} / {event.total?.toLocaleString()} ({event.percent ?? 0}%)
+                  </span>
+                )}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+      {error && <p className="text-red-500 text-sm">{error}</p>}
+    </div>
+  )
+}
+
+// ── Run detail panel ────────────────────────────────────────────────────────
+
+function RunDetailPanel({ job, run, onBack, onRunComplete }) {
+  const [subTab, setSubTab] = useState('review')
+  const [executing, setExecuting] = useState(run.status === 'pending' || run.status === 'running')
+
+  const statusColors = {
+    ready: 'bg-emerald-100 text-emerald-700',
+    pending: 'bg-amber-100 text-amber-700',
+    running: 'bg-blue-100 text-blue-700',
+    error: 'bg-red-100 text-red-700',
+  }
+
+  const pipelineBadges = []
+  if (run.vector_enabled !== false) pipelineBadges.push('Vector')
+  if (run.reranker_enabled) pipelineBadges.push(`Rerank${run.reranker_model ? ': ' + run.reranker_model.split('/').pop() : ''}`)
+  if (run.llm_judge_enabled) pipelineBadges.push(`LLM${run.llm_judge_model ? ': ' + run.llm_judge_model : ''}`)
+
+  return (
+    <div className="space-y-4">
+      {/* Run header */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1"
+        >
+          ← All Runs
+        </button>
+        <span className="text-gray-300">/</span>
+        <span className="text-sm font-semibold text-gray-900">{run.name || `Run #${run.id}`}</span>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
+          {run.status}
+        </span>
+        {pipelineBadges.map(b => (
+          <span key={b} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{b}</span>
+        ))}
+        <span className="text-xs text-gray-400 ml-auto">K={run.top_k}</span>
+      </div>
+
+      {/* Execution progress (auto-starts for pending/running) */}
+      {executing && (
+        <div className="bg-white rounded-xl border border-gray-200 px-5">
+          <RunProgressView
+            jobId={job.id}
+            runId={run.id}
+            onDone={() => { setExecuting(false); onRunComplete() }}
+          />
+        </div>
+      )}
+
+      {/* Sub-tabs (only when ready) */}
+      {!executing && run.status === 'ready' && (
+        <>
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+            {[{ id: 'review', label: '👁 Review' }, { id: 'export', label: '⬇ Export' }].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setSubTab(tab.id)}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${subTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {subTab === 'review' ? (
+            <ReviewTab job={job} run={run} />
+          ) : (
+            <ExportTab job={job} run={run} />
+          )}
         </>
+      )}
+
+      {!executing && run.status === 'error' && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-5 py-4 text-sm">
+          {run.status_message || 'Run failed. Delete this run and try again.'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Runs panel (list) ──────────────────────────────────────────────────────
+
+function RunsPanel({ job, onSelectRun }) {
+  const jobId = job.id
+  const queryClient = useQueryClient()
+  const [showNewRun, setShowNewRun] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+
+  const { data: runs = [], isLoading, refetch } = useQuery({
+    queryKey: ['compare-runs', jobId],
+    queryFn: () => listRuns(jobId),
+    enabled: job.status === 'ready',
+    refetchInterval: (query) => {
+      const list = query.state.data ?? []
+      return list.some(r => r.status === 'pending' || r.status === 'running') ? 3000 : false
+    },
+  })
+
+  const handleCreateRun = async (data) => {
+    try {
+      const run = await createRun(jobId, data)
+      await refetch()
+      queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
+      setShowNewRun(false)
+      onSelectRun(run)
+      return run
+    } catch (e) {
+      throw e
+    }
+  }
+
+  const handleDelete = async (runId, e) => {
+    e.stopPropagation()
+    if (!window.confirm('Delete this run and all its matches and decisions?')) return
+    setDeletingId(runId)
+    try {
+      await deleteRun(jobId, runId)
+      await refetch()
+      queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const statusColors = {
+    ready: 'bg-emerald-100 text-emerald-700',
+    pending: 'bg-amber-100 text-amber-700',
+    running: 'bg-blue-100 text-blue-700',
+    error: 'bg-red-100 text-red-700',
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-gray-600">Each run is an independent pipeline over the same embedded data.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Click a run to review and export its results.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowNewRun(true)}
+          disabled={job.status !== 'ready'}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors disabled:opacity-40"
+        >
+          + New Run
+        </button>
+      </div>
+
+      {isLoading && <p className="text-gray-400 text-sm">Loading runs…</p>}
+
+      {!isLoading && runs.length === 0 && (
+        <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-200">
+          <p className="text-gray-400 font-medium">No runs yet</p>
+          <p className="text-sm text-gray-400 mt-1">Create a run to start matching.</p>
+          <button
+            type="button"
+            onClick={() => setShowNewRun(true)}
+            className="mt-4 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors"
+          >
+            + New Run
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {runs.map(run => {
+          const pipelineBadges = []
+          if (run.vector_enabled !== false) pipelineBadges.push('Vector')
+          if (run.reranker_enabled) pipelineBadges.push('Rerank')
+          if (run.llm_judge_enabled) pipelineBadges.push('LLM judge')
+
+          return (
+            <div
+              key={run.id}
+              onClick={() => onSelectRun(run)}
+              className="bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer p-4"
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-semibold text-gray-900 text-sm">{run.name || `Run #${run.id}`}</span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
+                  {run.status}
+                </span>
+                {pipelineBadges.map(b => (
+                  <span key={b} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{b}</span>
+                ))}
+                <span className="text-xs text-gray-400">K={run.top_k}</span>
+                <span className="flex-1" />
+                <span className="text-xs text-gray-400">{new Date(run.created_at).toLocaleDateString()}</span>
+                <button
+                  type="button"
+                  onClick={(e) => handleDelete(run.id, e)}
+                  disabled={deletingId === run.id}
+                  className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
+                  title="Delete run"
+                >
+                  {deletingId === run.id ? '…' : '✕'}
+                </button>
+              </div>
+              {run.status === 'error' && run.status_message && (
+                <p className="text-xs text-red-600 mt-2">{run.status_message}</p>
+              )}
+              {run.row_count_left != null && (
+                <p className="text-xs text-gray-400 mt-1">{run.row_count_left.toLocaleString()} left rows matched</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {showNewRun && (
+        <NewRunModal
+          onClose={() => setShowNewRun(false)}
+          onCreated={handleCreateRun}
+        />
       )}
     </div>
   )
@@ -985,7 +1261,9 @@ function ConfigStatsTab({ job }) {
 
 export default function CompareJob() {
   const { jobId } = useParams()
-  const [activeTab, setActiveTab] = useState('review')
+  const queryClient = useQueryClient()
+  const [activeTab, setActiveTab] = useState('runs')
+  const [selectedRun, setSelectedRun] = useState(null)
 
   const { data: job, isLoading, error } = useQuery({
     queryKey: ['compare-job', jobId],
@@ -997,20 +1275,15 @@ export default function CompareJob() {
     },
   })
 
-  const { data: headerStats } = useQuery({
-    queryKey: ['compare-review-stats', String(jobId)],
-    queryFn: () => getReviewStats(jobId),
-    enabled: !!jobId && job?.status === 'ready',
-    staleTime: 10_000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  })
+  const handleRunComplete = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['compare-runs', Number(jobId)] })
+    queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
+    setSelectedRun(prev => prev ? { ...prev, status: 'ready' } : prev)
+  }, [jobId, queryClient])
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">
-        Loading…
-      </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Loading…</div>
     )
   }
 
@@ -1031,13 +1304,6 @@ export default function CompareJob() {
     error: 'bg-red-100 text-red-700',
   }
 
-  const totalLeft = headerStats?.total_left ?? null
-  const noMatch = headerStats?.no_match ?? null
-  const noMatchPct =
-    typeof totalLeft === 'number' && totalLeft > 0 && typeof noMatch === 'number'
-      ? Math.round((noMatch / totalLeft) * 100)
-      : null
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -1052,14 +1318,6 @@ export default function CompareJob() {
                 <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full ${statusColors[job.status] || 'bg-gray-100 text-gray-500'}`}>
                   {job.status}
                 </span>
-                {noMatchPct != null && (
-                  <span
-                    className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200"
-                    title={`No match decisions: ${noMatch?.toLocaleString?.() ?? noMatch} / ${totalLeft?.toLocaleString?.() ?? totalLeft}`}
-                  >
-                    No match: {noMatchPct}%
-                  </span>
-                )}
               </div>
               <p className="text-sm text-gray-500 mt-0.5">
                 <span className="font-medium text-gray-700">{job.label_left}</span>
@@ -1073,17 +1331,15 @@ export default function CompareJob() {
               </p>
             </div>
 
-            {/* Tab nav */}
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1 shrink-0">
               {[
-                { id: 'review', label: '👁 Review' },
+                { id: 'runs',   label: '▶ Runs' },
                 { id: 'browse', label: '👀 Browse' },
                 { id: 'config', label: '⚙️ Config' },
-                { id: 'export', label: '⬇ Export' },
               ].map(tab => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => { setActiveTab(tab.id); if (tab.id !== 'runs') setSelectedRun(null) }}
                   disabled={job.status !== 'ready'}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-40
                     ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
@@ -1106,14 +1362,21 @@ export default function CompareJob() {
                 : `Job is ${job.status}… check back in a moment.`}
             </p>
           </div>
-        ) : activeTab === 'review' ? (
-          <ReviewTab job={job} />
+        ) : activeTab === 'runs' ? (
+          selectedRun ? (
+            <RunDetailPanel
+              job={job}
+              run={selectedRun}
+              onBack={() => setSelectedRun(null)}
+              onRunComplete={handleRunComplete}
+            />
+          ) : (
+            <RunsPanel job={job} onSelectRun={setSelectedRun} />
+          )
         ) : activeTab === 'browse' ? (
           <BrowseTab job={job} />
-        ) : activeTab === 'config' ? (
-          <ConfigStatsTab job={job} />
         ) : (
-          <ExportTab job={job} />
+          <ConfigStatsTab job={job} />
         )}
       </div>
     </div>

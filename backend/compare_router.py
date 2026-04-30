@@ -1,18 +1,30 @@
 """
 compare_router.py — FastAPI routes for the Compare project flavor.
 
-Routes:
+Job-level routes:
   POST /compare/preview-left          upload left file → columns + tmp_path
   POST /compare/preview-right         upload right file → columns + tmp_path
-  POST /compare/                      create job
+  POST /compare/preview-context       preview merged text strings
+  POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
-  GET  /compare/{job_id}/ingest       SSE: run full compare pipeline
-  GET  /compare/{job_id}/review       stats {total_left, reviewed, pending}
-  GET  /compare/{job_id}/review/next  next ReviewItem
-  POST /compare/{job_id}/review/{left_id}  submit decision
-  GET  /compare/{job_id}/export       Excel download
-  DELETE /compare/{job_id}            drop job + schema
+  PATCH /compare/{job_id}             update name/notes
+  GET  /compare/{job_id}/ingest       SSE: embed left + right (Phase 1)
+  GET  /compare/{job_id}/browse       browse raw records
+  GET  /compare/{job_id}/browse-raw   browse raw match pairs (legacy/run-scoped)
+  GET  /compare/{job_id}/config-stats config + stats
+  DELETE /compare/{job_id}            drop job + schema + all runs
+
+Run-level routes (under /compare/{job_id}/runs):
+  POST /compare/{job_id}/runs                           create run
+  GET  /compare/{job_id}/runs                           list runs
+  GET  /compare/{job_id}/runs/{run_id}                  run detail
+  GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2)
+  GET  /compare/{job_id}/runs/{run_id}/review           stats
+  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem
+  POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
+  GET  /compare/{job_id}/runs/{run_id}/export           Excel download
+  DELETE /compare/{job_id}/runs/{run_id}                delete run
 """
 import io
 import json
@@ -26,27 +38,31 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from comparator import run_compare_job
+from comparator import run_ingest_job, run_pipeline
 from config import EMBEDDING_DIMS
-from db import create_compare_schema, drop_compare_schema, get_cursor
+from db import create_compare_schema, create_run_tables, drop_compare_schema, drop_run_tables, get_cursor
 from embedder import embed as _embed_probe
-from ingestion import read_excel, build_contextual_content
+from ingestion import build_contextual_content, read_excel
 from models import (
     CandidateItem,
+    CompareContextPreviewRequest,
+    CompareContextPreviewResponse,
     CompareDecision,
     CompareJobCreate,
     CompareJobResponse,
     CompareJobUpdate,
-    CompareContextPreviewRequest,
-    CompareContextPreviewResponse,
+    CompareRunCreate,
+    CompareRunResponse,
     ReviewItem,
 )
 
 logger = logging.getLogger("lens.compare_router")
 router = APIRouter()
 
-# Progress dict: keyed by job_id, same pattern as _ingest_progress in main.py
-_compare_progress: dict[int, dict] = {}
+# Progress for job-level embedding (Phase 1), keyed by job_id
+_job_ingest_progress: dict[int, dict] = {}
+# Progress for run-level pipeline (Phase 2), keyed by run_id
+_run_progress: dict[int, dict] = {}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -182,16 +198,14 @@ async def create_compare_job(data: CompareJobCreate):
                 context_columns_right, content_column_right, display_column_right,
                 source_filename_left, source_filename_right,
                 tmp_path_left, tmp_path_right,
-                embed_dims, embed_url, embed_api_key, embed_model,
-                rerank_enabled, rerank_model
+                embed_dims, embed_url, embed_api_key, embed_model
             ) VALUES (
                 %s, %s, %s, 'compare_placeholder',
                 %s, %s, %s,
                 %s, %s, %s,
                 %s, %s,
                 %s, %s,
-                %s, %s, %s, %s,
-                %s, %s
+                %s, %s, %s, %s
             ) RETURNING id, created_at
             """,
             [
@@ -201,7 +215,6 @@ async def create_compare_job(data: CompareJobCreate):
                 data.source_filename_left, data.source_filename_right,
                 data.tmp_path_left, data.tmp_path_right,
                 resolved_dims, data.embed_url or None, data.embed_api_key or None, data.embed_model or None,
-                data.rerank_enabled, data.rerank_model or None,
             ],
         )
         row = cur.fetchone()
@@ -270,9 +283,10 @@ def delete_compare_job(job_id: int):
 
 @router.get("/{job_id}/ingest")
 def ingest_compare(job_id: int):
+    """SSE — Phase 1: embed left + right files. Does NOT run the match pipeline."""
     job = _job_or_404(job_id)
 
-    tmp_path_left = job.get("tmp_path_left") or ""
+    tmp_path_left  = job.get("tmp_path_left") or ""
     tmp_path_right = job.get("tmp_path_right") or ""
 
     for path, label in [(tmp_path_left, "left"), (tmp_path_right, "right")]:
@@ -282,31 +296,26 @@ def ingest_compare(job_id: int):
                 detail=f"Upload file for {label} not found. Please re-create the job.",
             )
 
-    if job_id in _compare_progress:
+    if job_id in _job_ingest_progress:
         def _stream_existing():
             while True:
-                prog = _compare_progress.get(
-                    job_id, {"type": "starting", "message": "Preparing..."}
-                )
+                prog = _job_ingest_progress.get(job_id, {"type": "starting", "message": "Preparing..."})
                 yield f"data: {json.dumps(prog)}\n\n"
                 if prog.get("type") in ("complete", "error"):
-                    _compare_progress.pop(job_id, None)
+                    _job_ingest_progress.pop(job_id, None)
                     break
                 time.sleep(1)
         return StreamingResponse(_stream_existing(), media_type="text/event-stream")
 
-    _compare_progress[job_id] = {"type": "starting", "message": "Preparing comparison..."}
+    _job_ingest_progress[job_id] = {"type": "starting", "message": "Preparing embedding..."}
 
     def _run():
-        logger.info("Compare thread started for job_id=%d", job_id)
         try:
-            for event in run_compare_job(job_id):
-                _compare_progress[job_id] = event
-                if event.get("type") not in ("ingest_left", "ingest_right"):
-                    logger.debug("compare [job=%d] %s", job_id, event)
+            for event in run_ingest_job(job_id):
+                _job_ingest_progress[job_id] = event
         except Exception as e:
-            logger.exception("Compare job failed job_id=%d", job_id)
-            _compare_progress[job_id] = {"type": "error", "message": str(e)}
+            logger.exception("Ingest job failed job_id=%d", job_id)
+            _job_ingest_progress[job_id] = {"type": "error", "message": str(e)}
         finally:
             for path in [tmp_path_left, tmp_path_right]:
                 if path and os.path.exists(path):
@@ -319,42 +328,153 @@ def ingest_compare(job_id: int):
 
     def event_stream():
         while True:
-            prog = _compare_progress.get(job_id, {"type": "starting", "message": "Preparing..."})
+            prog = _job_ingest_progress.get(job_id, {"type": "starting", "message": "Preparing..."})
             yield f"data: {json.dumps(prog)}\n\n"
             if prog.get("type") in ("complete", "error"):
-                _compare_progress.pop(job_id, None)
+                _job_ingest_progress.pop(job_id, None)
                 break
             time.sleep(1)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# ── Review ────────────────────────────────────────────────────────────────
+# ── Run CRUD ──────────────────────────────────────────────────────────────
 
-@router.get("/{job_id}/review")
-def review_stats(job_id: int):
+@router.post("/{job_id}/runs", response_model=CompareRunResponse)
+def create_run(job_id: int, data: CompareRunCreate):
     job = _job_or_404(job_id)
-    schema = job["schema_name"]
+    if job["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
+    if not data.vector_enabled and not data.reranker_enabled and not data.llm_judge_enabled:
+        raise HTTPException(status_code=422, detail="At least one pipeline stage must be enabled")
 
     with get_cursor() as (cur, _conn):
+        cur.execute("""
+            INSERT INTO public.compare_runs
+                (job_id, name, status, top_k, vector_enabled,
+                 reranker_enabled, reranker_model, reranker_url,
+                 llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, [
+            job_id,
+            data.name or None,
+            data.top_k,
+            data.vector_enabled,
+            data.reranker_enabled,
+            data.reranker_model or None,
+            data.reranker_url or None,
+            data.llm_judge_enabled,
+            data.llm_judge_url or None,
+            data.llm_judge_model or None,
+            data.llm_judge_prompt or None,
+        ])
+        run_id = cur.fetchone()["id"]
+
+    schema_name = job["schema_name"]
+    create_run_tables(schema_name, run_id)
+    return _run_response(run_id)
+
+
+@router.get("/{job_id}/runs", response_model=list[CompareRunResponse])
+def list_runs(job_id: int):
+    _job_or_404(job_id)
+    with get_cursor() as (cur, _conn):
         cur.execute(
-            f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = 'left'"
+            "SELECT * FROM public.compare_runs WHERE job_id = %s ORDER BY created_at DESC",
+            [job_id],
         )
+        rows = [dict(r) for r in cur.fetchall()]
+    return [_serialize_run(r) for r in rows]
+
+
+@router.get("/{job_id}/runs/{run_id}", response_model=CompareRunResponse)
+def get_run(job_id: int, run_id: int):
+    _job_or_404(job_id)
+    return _run_response(run_id)
+
+
+@router.delete("/{job_id}/runs/{run_id}")
+def delete_run(job_id: int, run_id: int):
+    job = _job_or_404(job_id)
+    _run_or_404(run_id, job_id)
+    drop_run_tables(job["schema_name"], run_id)
+    return {"ok": True}
+
+
+# ── Run pipeline SSE ───────────────────────────────────────────────────────
+
+@router.get("/{job_id}/runs/{run_id}/execute")
+def execute_run(job_id: int, run_id: int):
+    """SSE — Phase 2: run the search/rank pipeline for an existing run."""
+    job = _job_or_404(job_id)
+    run = _run_or_404(run_id, job_id)
+
+    if job["status"] != "ready":
+        raise HTTPException(status_code=400, detail=f"Job embeddings not ready (status: {job['status']})")
+    if run["status"] == "running":
+        raise HTTPException(status_code=409, detail="Run already in progress")
+
+    if run_id in _run_progress:
+        def _stream_existing():
+            while True:
+                prog = _run_progress.get(run_id, {"type": "starting", "message": "Preparing..."})
+                yield f"data: {json.dumps(prog)}\n\n"
+                if prog.get("type") in ("complete", "error"):
+                    _run_progress.pop(run_id, None)
+                    break
+                time.sleep(1)
+        return StreamingResponse(_stream_existing(), media_type="text/event-stream")
+
+    _run_progress[run_id] = {"type": "starting", "message": "Starting pipeline..."}
+
+    def _run_thread():
+        try:
+            for event in run_pipeline(job_id, run_id):
+                _run_progress[run_id] = event
+        except Exception as e:
+            logger.exception("run_pipeline failed job_id=%d run_id=%d", job_id, run_id)
+            _run_progress[run_id] = {"type": "error", "message": str(e)}
+
+    threading.Thread(target=_run_thread, daemon=True).start()
+
+    def event_stream():
+        while True:
+            prog = _run_progress.get(run_id, {"type": "starting", "message": "Starting..."})
+            yield f"data: {json.dumps(prog)}\n\n"
+            if prog.get("type") in ("complete", "error"):
+                _run_progress.pop(run_id, None)
+                break
+            time.sleep(1)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ── Run review ────────────────────────────────────────────────────────────
+
+@router.get("/{job_id}/runs/{run_id}/review")
+def run_review_stats(job_id: int, run_id: int):
+    job = _job_or_404(job_id)
+    _run_or_404(run_id, job_id)
+    schema = job["schema_name"]
+    dec_table = f"run_{run_id}_decisions"
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = 'left'")
         total_left = (cur.fetchone() or {}).get("cnt", 0)
 
-        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions")
+        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.{dec_table}")
         reviewed = (cur.fetchone() or {}).get("cnt", 0)
 
-        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions WHERE matched_right_id IS NULL")
+        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.{dec_table} WHERE matched_right_id IS NULL")
         no_match = (cur.fetchone() or {}).get("cnt", 0)
-        matched = max(0, reviewed - no_match)
 
     return {
         "total_left": total_left,
         "reviewed": reviewed,
         "pending": max(0, total_left - reviewed),
         "no_match": no_match,
-        "matched": matched,
+        "matched": max(0, reviewed - no_match),
     }
 
 
@@ -406,18 +526,20 @@ def browse_compare(job_id: int, side: str | None = None, limit: int = 25):
     return {"records": rows, "total": total}
 
 
-@router.get("/{job_id}/browse-raw")
-def browse_compare_raw(job_id: int, limit: int = 50, left_row: int | None = None):
+@router.get("/{job_id}/runs/{run_id}/browse-raw")
+def browse_compare_raw(job_id: int, run_id: int, limit: int = 50, left_row: int | None = None):
     """
-    Browse the raw-pairs report (left × top-k right candidates) with scores.
+    Browse the raw-pairs report (left × top-k right candidates) with scores for a specific run.
     Mirrors the export type=raw query, but returns a limited slice for UI browsing.
     Optional filter: left_row (original_row index from the left file).
     """
     job = _job_or_404(job_id)
+    _run_or_404(run_id, job_id)
     if job["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
 
     schema = job["schema_name"]
+    match_table = f"run_{run_id}_matches"
     limit = max(1, min(int(limit or 50), 500))
 
     where = ""
@@ -439,8 +561,10 @@ def browse_compare_raw(job_id: int, limit: int = 50, left_row: int | None = None
                 rr.display_value       AS right_display,
                 rr.contextual_content  AS right_contextual,
                 m.cosine_score         AS cosine_score,
-                m.rerank_score         AS rerank_score
-            FROM {schema}.matches m
+                m.rerank_score         AS rerank_score,
+                m.llm_score            AS llm_score,
+                m.final_score          AS final_score
+            FROM {schema}.{match_table} m
             JOIN {schema}.records lr ON lr.id = m.left_id
             JOIN {schema}.records rr ON rr.id = m.right_id
             {where}
@@ -455,14 +579,14 @@ def browse_compare_raw(job_id: int, limit: int = 50, left_row: int | None = None
             cur.execute(
                 f"""
                 SELECT COUNT(*) AS cnt
-                FROM {schema}.matches m
+                FROM {schema}.{match_table} m
                 JOIN {schema}.records lr ON lr.id = m.left_id
                 WHERE lr.original_row = %s
                 """,
                 [int(left_row)],
             )
         else:
-            cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.matches")
+            cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.{match_table}")
         total = int((cur.fetchone() or {}).get("cnt", 0) or 0)
 
     return {"records": rows, "total": total}
@@ -489,12 +613,9 @@ def compare_config_stats(job_id: int):
         "schema_name": schema,
         "source_filename_left": job.get("source_filename_left"),
         "source_filename_right": job.get("source_filename_right"),
-        "top_k": job.get("top_k") or 3,
         "embed_dims": job.get("embed_dims"),
         "embed_url": job.get("embed_url"),
         "embed_model": job.get("embed_model"),
-        "rerank_enabled": (job.get("rerank_enabled") if job.get("rerank_enabled") is not None else True),
-        "rerank_model": job.get("rerank_model"),
         "content_column_left": job.get("content_column_left"),
         "context_columns_left": job.get("context_columns_left") or [],
         "display_column_left": job.get("display_column_left"),
@@ -522,7 +643,7 @@ def compare_config_stats(job_id: int):
         "timings_ms": None,
     }
 
-    # Only compute table stats once schema exists and job is at least ingesting.
+    # Record-level stats (always at job level; match/decision stats are per-run)
     if job.get("status") in ("ingesting", "comparing", "ready", "error"):
         try:
             with get_cursor() as (cur, _conn):
@@ -531,63 +652,16 @@ def compare_config_stats(job_id: int):
                 cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.records WHERE side = 'right'")
                 stats["records_right"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
 
-                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.matches")
-                stats["matches_rows"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
-
-                if stats["records_left"]:
-                    stats["candidates_per_left"] = round((stats["matches_rows"] or 0) / max(1, stats["records_left"]), 3)
-
-                cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.decisions")
-                stats["decisions"] = int((cur.fetchone() or {}).get("cnt", 0) or 0)
-                if stats["records_left"] is not None and stats["decisions"] is not None:
-                    stats["pending"] = max(0, stats["records_left"] - stats["decisions"])
-
-                # Best-match score distribution over left rows (rank=1).
-                cur.execute(
-                    f"""
-                    SELECT
-                      COUNT(*) AS n,
-                      MIN(CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END) AS min_s,
-                      MAX(CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END) AS max_s,
-                      percentile_cont(0.5) WITHIN GROUP (ORDER BY (CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END)) AS p50,
-                      percentile_cont(0.9) WITHIN GROUP (ORDER BY (CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE cosine_score END)) AS p90
-                    FROM {schema}.matches
-                    WHERE rank = 1
-                    """
-                )
-                row = cur.fetchone() or {}
-                if row.get("n"):
-                    stats["best_score_min"] = float(row.get("min_s") or 0.0)
-                    stats["best_score_p50"] = float(row.get("p50") or 0.0)
-                    stats["best_score_p90"] = float(row.get("p90") or 0.0)
-                    stats["best_score_max"] = float(row.get("max_s") or 0.0)
-
-                cur.execute(
-                    f"""
-                    SELECT COUNT(*) AS cnt
-                    FROM {schema}.matches
-                    WHERE rerank_score BETWEEN 0 AND 1
-                    """
-                )
-                stats["uses_normalized_rerank"] = int((cur.fetchone() or {}).get("cnt", 0) or 0) > 0
-
-                # Average contextual_content length (chars) per side.
                 cur.execute(f"SELECT AVG(LENGTH(contextual_content)) AS avg_len FROM {schema}.records WHERE side = 'left'")
                 stats["avg_chars_left"] = float((cur.fetchone() or {}).get("avg_len") or 0.0)
                 cur.execute(f"SELECT AVG(LENGTH(contextual_content)) AS avg_len FROM {schema}.records WHERE side = 'right'")
                 stats["avg_chars_right"] = float((cur.fetchone() or {}).get("avg_len") or 0.0)
 
-                # Rough token estimates: ~4 chars per token (rule of thumb).
                 n_left = stats["records_left"] or 0
                 n_right = stats["records_right"] or 0
                 est_embed_chars = (stats["avg_chars_left"] or 0) * n_left + (stats["avg_chars_right"] or 0) * n_right
                 stats["est_embed_tokens"] = int(est_embed_chars / 4) if est_embed_chars else 0
-
-                # Rerank token estimate per pair (query + doc). Very rough.
-                avg_pair_chars = (stats["avg_chars_left"] or 0) + (stats["avg_chars_right"] or 0)
-                stats["est_rerank_pair_tokens"] = int(avg_pair_chars / 4) if avg_pair_chars else 0
         except Exception:
-            # If schema isn't ready yet, still return config.
             pass
 
     # If comparator stored persisted timings in JSON status_message, surface them here.
@@ -601,53 +675,45 @@ def compare_config_stats(job_id: int):
     return {"config": cfg, "stats": stats}
 
 
-@router.get("/{job_id}/review/next", response_model=ReviewItem)
+@router.get("/{job_id}/runs/{run_id}/review/next", response_model=ReviewItem)
 def next_review_item(
     job_id: int,
+    run_id: int,
     min_score: float = 0.0,
     offset: int = 0,
     include_decided: bool = False,
 ):
     job = _job_or_404(job_id)
-    if job["status"] != "ready":
-        raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
+    _run_or_404(run_id, job_id)
+    schema      = job["schema_name"]
+    match_table = f"run_{run_id}_matches"
+    dec_table   = f"run_{run_id}_decisions"
 
-    schema = job["schema_name"]
-    # Some rerank strategies return arbitrary score ranges (e.g., logits or embedding scalars).
-    # For review filtering, prefer rerank_score only when it appears normalized (0..1),
-    # otherwise fall back to cosine_score which is always in [-1, 1] (typically 0..1 here).
-    effective_score_sql = "CASE WHEN m.rerank_score BETWEEN 0 AND 1 THEN m.rerank_score ELSE m.cosine_score END"
-
-    # Find the next left record to review
     if include_decided:
-        # Any left record whose best match meets min_score
         query = f"""
             SELECT r.id, r.contextual_content, r.display_value
             FROM {schema}.records r
-            JOIN {schema}.matches m ON m.left_id = r.id AND m.rank = 1
+            JOIN {schema}.{match_table} m ON m.left_id = r.id AND m.rank = 1
             WHERE r.side = 'left'
-              AND {effective_score_sql} >= %s
+              AND m.final_score >= %s
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
-        params = [min_score, offset]
     else:
-        # Only undecided rows
         query = f"""
             SELECT r.id, r.contextual_content, r.display_value
             FROM {schema}.records r
-            JOIN {schema}.matches m ON m.left_id = r.id AND m.rank = 1
-            LEFT JOIN {schema}.decisions d ON d.left_id = r.id
+            JOIN {schema}.{match_table} m ON m.left_id = r.id AND m.rank = 1
+            LEFT JOIN {schema}.{dec_table} d ON d.left_id = r.id
             WHERE r.side = 'left'
               AND d.left_id IS NULL
-              AND {effective_score_sql} >= %s
+              AND m.final_score >= %s
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
-        params = [min_score, offset]
 
     with get_cursor() as (cur, _conn):
-        cur.execute(query, params)
+        cur.execute(query, [min_score, offset])
         left_row = cur.fetchone()
 
     if not left_row:
@@ -655,13 +721,12 @@ def next_review_item(
 
     left_id = left_row["id"]
 
-    # Fetch top-k candidates
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            SELECT m.right_id, m.cosine_score, m.rerank_score, m.rank,
+            SELECT m.right_id, m.cosine_score, m.rerank_score, m.llm_score, m.final_score, m.rank,
                    r.contextual_content, r.display_value
-            FROM {schema}.matches m
+            FROM {schema}.{match_table} m
             JOIN {schema}.records r ON r.id = m.right_id
             WHERE m.left_id = %s
             ORDER BY m.rank ASC
@@ -676,42 +741,42 @@ def next_review_item(
             contextual_content=mr["contextual_content"] or "",
             display_value=mr["display_value"],
             cosine_score=float(mr["cosine_score"] or 0),
-            rerank_score=float(mr["rerank_score"] or 0),
+            rerank_score=float(mr["rerank_score"]) if mr["rerank_score"] is not None else None,
+            llm_score=float(mr["llm_score"]) if mr["llm_score"] is not None else None,
+            final_score=float(mr["final_score"] or 0),
             rank=mr["rank"],
         )
         for mr in match_rows
     ]
 
-    # Current decision if any
     with get_cursor() as (cur, _conn):
         cur.execute(
-            f"SELECT matched_right_id FROM {schema}.decisions WHERE left_id = %s",
+            f"SELECT matched_right_id FROM {schema}.{dec_table} WHERE left_id = %s",
             [left_id],
         )
         dec = cur.fetchone()
-
-    current_decision = dec["matched_right_id"] if dec else None
-    is_decided = dec is not None
 
     return ReviewItem(
         left_id=left_id,
         contextual_content=left_row["contextual_content"] or "",
         display_value=left_row["display_value"],
         candidates=candidates,
-        current_decision=current_decision,
-        is_decided=is_decided,
+        current_decision=dec["matched_right_id"] if dec else None,
+        is_decided=dec is not None,
     )
 
 
-@router.post("/{job_id}/review/{left_id}", status_code=204)
-def submit_decision(job_id: int, left_id: int, data: CompareDecision):
+@router.post("/{job_id}/runs/{run_id}/review/{left_id}", status_code=204)
+def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecision):
     job = _job_or_404(job_id)
-    schema = job["schema_name"]
+    _run_or_404(run_id, job_id)
+    schema    = job["schema_name"]
+    dec_table = f"run_{run_id}_decisions"
 
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            INSERT INTO {schema}.decisions (left_id, matched_right_id, decided_at)
+            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at)
             VALUES (%s, %s, NOW())
             ON CONFLICT (left_id) DO UPDATE
                 SET matched_right_id = EXCLUDED.matched_right_id,
@@ -721,10 +786,10 @@ def submit_decision(job_id: int, left_id: int, data: CompareDecision):
         )
 
 
-# ── Export ────────────────────────────────────────────────────────────────
+# ── Run export ────────────────────────────────────────────────────────────
 
-@router.get("/{job_id}/export")
-def export_compare(job_id: int, type: str = "confirmed"):
+@router.get("/{job_id}/runs/{run_id}/export")
+def export_run(job_id: int, run_id: int, type: str = "confirmed"):
     job = _job_or_404(job_id)
     if job["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
@@ -737,24 +802,27 @@ def export_compare(job_id: int, type: str = "confirmed"):
     label_r = job.get("label_right", "Right")
     name_slug = job["name"].lower().replace(" ", "-")
 
+    match_table = f"run_{run_id}_matches"
+    dec_table   = f"run_{run_id}_decisions"
     buffer = io.BytesIO()
 
     if type == "raw":
-        # Single sheet: all left × top-k right candidates
         with get_cursor() as (cur, _conn):
             cur.execute(
                 f"""
                 SELECT
-                    lr.original_row    AS left_row,
-                    lr.display_value   AS left_display,
+                    lr.original_row       AS left_row,
+                    lr.display_value      AS left_display,
                     lr.contextual_content AS left_contextual,
                     m.rank,
-                    rr.original_row    AS right_row,
-                    rr.display_value   AS right_display,
+                    rr.original_row       AS right_row,
+                    rr.display_value      AS right_display,
                     rr.contextual_content AS right_contextual,
                     m.cosine_score,
-                    m.rerank_score
-                FROM {schema}.matches m
+                    m.rerank_score,
+                    m.llm_score,
+                    m.final_score
+                FROM {schema}.{match_table} m
                 JOIN {schema}.records lr ON lr.id = m.left_id
                 JOIN {schema}.records rr ON rr.id = m.right_id
                 ORDER BY lr.original_row ASC, m.rank ASC
@@ -762,20 +830,20 @@ def export_compare(job_id: int, type: str = "confirmed"):
             )
             rows = [dict(r) for r in cur.fetchall()]
 
-        df = pd.DataFrame(rows)
-        df.columns = [
-            f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
-            "Rank",
-            f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
-            "Cosine Score", "Rerank Score",
-        ]
+        df = pd.DataFrame(rows) if rows else pd.DataFrame()
+        if not df.empty:
+            df.columns = [
+                f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
+                "Rank",
+                f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
+                "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+            ]
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name="All Matches", index=False)
 
         filename = f"{name_slug}_lens_compare_raw.xlsx"
 
     else:
-        # 3 sheets: Confirmed Matches, Unique Left, Unique Right
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
 
             # Sheet 1: Confirmed Matches
@@ -783,19 +851,21 @@ def export_compare(job_id: int, type: str = "confirmed"):
                 cur.execute(
                     f"""
                     SELECT
-                        lr.original_row    AS left_row,
-                        lr.display_value   AS left_display,
+                        lr.original_row       AS left_row,
+                        lr.display_value      AS left_display,
                         lr.contextual_content AS left_contextual,
-                        rr.original_row    AS right_row,
-                        rr.display_value   AS right_display,
+                        rr.original_row       AS right_row,
+                        rr.display_value      AS right_display,
                         rr.contextual_content AS right_contextual,
                         m.cosine_score,
                         m.rerank_score,
+                        m.llm_score,
+                        m.final_score,
                         d.decided_at
-                    FROM {schema}.decisions d
+                    FROM {schema}.{dec_table} d
                     JOIN {schema}.records lr ON lr.id = d.left_id
                     JOIN {schema}.records rr ON rr.id = d.matched_right_id
-                    JOIN {schema}.matches m
+                    JOIN {schema}.{match_table} m
                         ON m.left_id = d.left_id AND m.right_id = d.matched_right_id
                     WHERE d.matched_right_id IS NOT NULL
                     ORDER BY lr.original_row ASC
@@ -803,44 +873,40 @@ def export_compare(job_id: int, type: str = "confirmed"):
                 )
                 confirmed_rows = [dict(r) for r in cur.fetchall()]
 
-            df_confirmed = pd.DataFrame(confirmed_rows)
+            df_confirmed = pd.DataFrame(confirmed_rows) if confirmed_rows else pd.DataFrame()
             if not df_confirmed.empty:
                 df_confirmed.columns = [
                     f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
-                    "Cosine Score", "Rerank Score", "Decided At",
+                    "Cosine Score", "Rerank Score", "LLM Score", "Final Score", "Decided At",
                 ]
             df_confirmed.to_excel(writer, sheet_name="Confirmed Matches", index=False)
 
-            # Sheet 2: Unique Left (no-match decisions + unreviewed)
+            # Sheet 2: Unique Left (no-match + unreviewed)
             with get_cursor() as (cur, _conn):
                 cur.execute(
                     f"""
                     SELECT
-                        lr.original_row    AS left_row,
-                        lr.display_value   AS left_display,
+                        lr.original_row       AS left_row,
+                        lr.display_value      AS left_display,
                         lr.contextual_content AS left_contextual,
-                        CASE
-                            WHEN d.left_id IS NOT NULL THEN 'no match'
-                            ELSE ''
-                        END AS human_review
+                        CASE WHEN d.left_id IS NOT NULL THEN 'no match' ELSE '' END AS human_review
                     FROM {schema}.records lr
-                    LEFT JOIN {schema}.decisions d
+                    LEFT JOIN {schema}.{dec_table} d
                         ON d.left_id = lr.id AND d.matched_right_id IS NULL
-                    LEFT JOIN {schema}.decisions d2
+                    LEFT JOIN {schema}.{dec_table} d2
                         ON d2.left_id = lr.id AND d2.matched_right_id IS NOT NULL
                     WHERE lr.side = 'left'
-                      AND d2.left_id IS NULL   -- exclude confirmed matches
+                      AND d2.left_id IS NULL
                     ORDER BY lr.original_row ASC
                     """,
                 )
                 unique_left_rows = [dict(r) for r in cur.fetchall()]
 
-            df_unique_left = pd.DataFrame(unique_left_rows)
+            df_unique_left = pd.DataFrame(unique_left_rows) if unique_left_rows else pd.DataFrame()
             if not df_unique_left.empty:
                 df_unique_left.columns = [
-                    f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
-                    "Human Review",
+                    f"{label_l} Row", f"{label_l} Display", f"{label_l} Content", "Human Review",
                 ]
             df_unique_left.to_excel(writer, sheet_name=f"Unique {label_l}", index=False)
 
@@ -848,14 +914,12 @@ def export_compare(job_id: int, type: str = "confirmed"):
             with get_cursor() as (cur, _conn):
                 cur.execute(
                     f"""
-                    SELECT
-                        rr.original_row    AS right_row,
-                        rr.display_value   AS right_display,
-                        rr.contextual_content AS right_contextual
+                    SELECT rr.original_row AS right_row, rr.display_value AS right_display,
+                           rr.contextual_content AS right_contextual
                     FROM {schema}.records rr
                     WHERE rr.side = 'right'
                       AND rr.id NOT IN (
-                          SELECT matched_right_id FROM {schema}.decisions
+                          SELECT matched_right_id FROM {schema}.{dec_table}
                           WHERE matched_right_id IS NOT NULL
                       )
                     ORDER BY rr.original_row ASC
@@ -863,7 +927,7 @@ def export_compare(job_id: int, type: str = "confirmed"):
                 )
                 unique_right_rows = [dict(r) for r in cur.fetchall()]
 
-            df_unique_right = pd.DataFrame(unique_right_rows)
+            df_unique_right = pd.DataFrame(unique_right_rows) if unique_right_rows else pd.DataFrame()
             if not df_unique_right.empty:
                 df_unique_right.columns = [
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
@@ -884,7 +948,6 @@ def export_compare(job_id: int, type: str = "confirmed"):
 
 def _serialize_job(row: dict) -> dict:
     """Strip internal/sensitive fields (tmp_path, embed_api_key) before returning to client."""
-    rerank_enabled = row.get("rerank_enabled")
     return {
         "id": row["id"],
         "name": row["name"],
@@ -896,16 +959,53 @@ def _serialize_job(row: dict) -> dict:
         "status_message": _safe_status_message(row.get("status_message")),
         "row_count_left": row.get("row_count_left"),
         "row_count_right": row.get("row_count_right"),
-        "top_k": row.get("top_k") or 3,
         "embed_url": row.get("embed_url"),
         "embed_model": row.get("embed_model"),
-        # rerank_enabled may be None for legacy rows written before this column existed;
-        # treat None as True (system default = enabled).
-        "rerank_enabled": rerank_enabled if rerank_enabled is not None else True,
-        "rerank_model": row.get("rerank_model"),
         "created_at": row["created_at"],
-        # embed_api_key is intentionally NOT included — same policy as project.pin
     }
+
+
+def _serialize_run(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "job_id": row["job_id"],
+        "name": row.get("name"),
+        "status": row["status"],
+        "status_message": row.get("status_message"),
+        "top_k": row["top_k"],
+        "vector_enabled": row["vector_enabled"],
+        "reranker_enabled": row["reranker_enabled"],
+        "reranker_model": row.get("reranker_model"),
+        "reranker_url": row.get("reranker_url"),
+        "llm_judge_enabled": row["llm_judge_enabled"],
+        "llm_judge_url": row.get("llm_judge_url"),
+        "llm_judge_model": row.get("llm_judge_model"),
+        "llm_judge_prompt": row.get("llm_judge_prompt"),
+        "row_count_left": row.get("row_count_left"),
+        "created_at": row["created_at"],
+        "completed_at": row.get("completed_at"),
+    }
+
+
+def _run_or_404(run_id: int, job_id: int) -> dict:
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            "SELECT * FROM public.compare_runs WHERE id = %s AND job_id = %s",
+            [run_id, job_id],
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return dict(row)
+
+
+def _run_response(run_id: int) -> CompareRunResponse:
+    with get_cursor() as (cur, _conn):
+        cur.execute("SELECT * FROM public.compare_runs WHERE id = %s", [run_id])
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return CompareRunResponse(**_serialize_run(dict(row)))
 
 
 def _safe_status_message(msg: str | None) -> str | None:
@@ -928,5 +1028,4 @@ def _safe_status_message(msg: str | None) -> str | None:
 
 def _job_response(job_id: int) -> CompareJobResponse:
     job = _job_or_404(job_id)
-    d = _serialize_job(job)
-    return CompareJobResponse(**d)
+    return CompareJobResponse(**_serialize_job(job))

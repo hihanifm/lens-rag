@@ -7,11 +7,10 @@ import {
   fetchModels,
   getSystemConfig,
   verifyEmbedding,
-  verifyRerank,
   API_BASE_URL,
 } from '../api/client'
 
-const STEPS = ['Names', 'Upload Left', 'Columns Left', 'Upload Right', 'Columns Right', 'Connection', 'Rerank', 'Review']
+const STEPS = ['Names', 'Upload Left', 'Columns Left', 'Upload Right', 'Columns Right', 'Connection', 'Review']
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -193,7 +192,6 @@ function StepUpload({ side, label, state, setState, onNext }) {
     setLoading(true)
     setError(null)
     try {
-      // Support one-click sample loads from the dropzone.
       if (file && file.__sample) {
         const filename = file.filename
         const res = await fetch(`${API_BASE_URL}/samples/${filename}`)
@@ -206,17 +204,7 @@ function StepUpload({ side, label, state, setState, onNext }) {
       const colsKey = side === 'left' ? 'Left' : 'Right'
       const cols = result.columns || []
       const lower = (s) => String(s || '').toLowerCase()
-      const preferred = [
-        'description',
-        'details',
-        'notes',
-        'summary',
-        'specs',
-        'name',
-        'title',
-        'model',
-        'category',
-      ]
+      const preferred = ['description', 'details', 'notes', 'summary', 'specs', 'name', 'title', 'model', 'category']
       const defaults = []
       for (const p of preferred) {
         const hit = cols.find(c => lower(c) === p || lower(c).includes(p))
@@ -230,7 +218,6 @@ function StepUpload({ side, label, state, setState, onNext }) {
         [`tmpPath${side === 'left' ? 'Left' : 'Right'}`]: result.tmp_path,
         [`filename${side === 'left' ? 'Left' : 'Right'}`]: file.name,
         [`rowCount${side === 'left' ? 'Left' : 'Right'}`]: result.row_count,
-        // Preselect "match columns" so the user can usually just continue.
         [`contextColumns${colsKey}`]: (s[`contextColumns${colsKey}`] && s[`contextColumns${colsKey}`].length > 0)
           ? s[`contextColumns${colsKey}`]
           : defaults.slice(0, 4),
@@ -322,7 +309,7 @@ function StepConnection({
       <StepHeader step={5} total={STEPS.length} title="Embedding Model" />
       <p className="text-sm text-gray-500">
         Override the default embedding model for this job. Leave blank to use the system default.
-        The chosen model will be used for ingestion and comparison.
+        The chosen model will be used for all runs on this job.
       </p>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -448,105 +435,6 @@ function StepConnection({
   )
 }
 
-function StepRerank({
-  rerankEnabled, setRerankEnabled,
-  rerankModel, setRerankModel,
-  rerankAvailableModels, rerankModelLoading, rerankModelError, rerankCheckLoading,
-  onFetchRerankModels, onNext, onBack,
-}) {
-  return (
-    <div className="space-y-5">
-      <StepHeader step={6} total={STEPS.length} title="Reranking Model" />
-      <p className="text-sm text-gray-500">
-        Reranking improves match quality. For most users, leave it enabled with the server default.
-      </p>
-
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <div className="font-semibold mb-0.5">Tip</div>
-        <div>
-          Unless you're testing a new reranker, leave reranking enabled and keep the model blank
-          so the server default is used.
-        </div>
-      </div>
-
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={rerankEnabled}
-          onChange={e => {
-            setRerankEnabled(e.target.checked)
-          }}
-          className="rounded border-gray-300 text-blue-600"
-        />
-        <span className="text-sm font-medium text-gray-700">Enable reranking for this job</span>
-      </label>
-
-      <button
-        type="button"
-        onClick={onFetchRerankModels}
-        disabled={!rerankEnabled || rerankModelLoading}
-        className="w-full border border-gray-200 text-gray-700 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 disabled:opacity-40 transition-colors"
-      >
-        {rerankModelLoading ? 'Fetching models…' : 'Fetch available models'}
-      </button>
-      <p className="text-xs text-gray-400">
-        Lists models from the same OpenAI-compatible URL as the Embedding step (or the system default URL).
-      </p>
-
-      {rerankModelError && <p className="text-sm text-red-600">{rerankModelError}</p>}
-
-      {rerankAvailableModels.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Rerank model id <span className="text-gray-400 font-normal">(optional)</span>
-          </label>
-          <select
-            value={rerankModel}
-            onChange={e => setRerankModel(e.target.value)}
-            disabled={!rerankEnabled}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-100"
-          >
-            {rerankAvailableModels.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-      )}
-
-      {rerankAvailableModels.length === 0 && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Rerank model id <span className="text-gray-400 font-normal">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={rerankModel}
-            onChange={e => setRerankModel(e.target.value)}
-            placeholder="e.g. bbjson/bge-reranker-base:latest"
-            disabled={!rerankEnabled}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-100 disabled:text-gray-400"
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Fetch models above, or enter a rerank-capable model id manually. Blank uses the server default.
-          </p>
-        </div>
-      )}
-
-      <div className="flex gap-3 pt-1">
-        <button onClick={onBack} className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50">
-          ← Back
-        </button>
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={rerankModelLoading || rerankCheckLoading}
-          className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          {rerankCheckLoading ? 'Checking…' : 'Continue →'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function StepReview({ state, onSubmit, onBack, submitting, error }) {
   const leftTitle = state.labelLeft || 'Left'
   const rightTitle = state.labelRight || 'Right'
@@ -588,12 +476,8 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
     ['Identifier column', state.displayColumnLeft || '—', state.displayColumnRight || '—'],
     [
       'Example merged text',
-      ctxLoading
-        ? 'Loading…'
-        : (ctxPreview.left?.samples?.[0] || (ctxError ? ctxError : '—')),
-      ctxLoading
-        ? 'Loading…'
-        : (ctxPreview.right?.samples?.[0] || (ctxError ? ctxError : '—')),
+      ctxLoading ? 'Loading…' : (ctxPreview.left?.samples?.[0] || (ctxError ? ctxError : '—')),
+      ctxLoading ? 'Loading…' : (ctxPreview.right?.samples?.[0] || (ctxError ? ctxError : '—')),
     ],
   ]
 
@@ -603,7 +487,10 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
 
   return (
     <div className="space-y-4">
-      <StepHeader step={7} total={STEPS.length} title="Review & create" />
+      <StepHeader step={6} total={STEPS.length} title="Review & create" />
+      <p className="text-sm text-gray-500">
+        After creation, embeddings will run once. You can then create multiple runs with different pipelines (reranker, LLM judge, top-k) — each run has its own review and export.
+      </p>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="text-sm">
@@ -684,7 +571,7 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
           disabled={submitting}
           className="bg-blue-600 text-white px-8 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-40"
         >
-          {submitting ? 'Creating…' : 'Create & Start Comparison'}
+          {submitting ? 'Creating…' : 'Create & Start Embedding'}
         </button>
       </div>
     </div>
@@ -711,7 +598,6 @@ function ProgressView({ jobId, onDone, onBackground, onHome }) {
     es.onmessage = (e) => {
       const data = JSON.parse(e.data)
       setEvents(prev => {
-        // Update last event of same type or append
         const last = prev[prev.length - 1]
         if (last && last.type === data.type) {
           return [...prev.slice(0, -1), data]
@@ -731,10 +617,8 @@ function ProgressView({ jobId, onDone, onBackground, onHome }) {
   }, [jobId])
 
   const stages = [
-    { type: 'ingest_left',  label: 'Ingesting Left' },
-    { type: 'ingest_right', label: 'Ingesting Right' },
-    { type: 'searching',    label: 'Bidirectional search' },
-    { type: 'reranking',    label: 'Reranking pairs' },
+    { type: 'ingest_left',  label: 'Embedding Left' },
+    { type: 'ingest_right', label: 'Embedding Right' },
     { type: 'complete',     label: 'Done' },
   ]
 
@@ -749,7 +633,7 @@ function ProgressView({ jobId, onDone, onBackground, onHome }) {
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-xl font-bold text-gray-900">Running comparison…</h2>
+        <h2 className="text-xl font-bold text-gray-900">Embedding documents…</h2>
         <span className="text-xs text-gray-400 whitespace-nowrap">Elapsed: {elapsed}</span>
       </div>
       <div className="space-y-3">
@@ -862,20 +746,9 @@ export default function CreateCompareJob() {
   const [modelError, setModelError] = useState('')
   const [connectionCheckLoading, setConnectionCheckLoading] = useState(false)
 
-  // ── Reranking state ─────────────────────────────────────────────────────
-  const [rerankEnabled, setRerankEnabled] = useState(true)
-  const [rerankModel, setRerankModel] = useState('')
-  const [rerankAvailableModels, setRerankAvailableModels] = useState([])
-  const [rerankModelError, setRerankModelError] = useState('')
-  const [rerankModelLoading, setRerankModelLoading] = useState(false)
-  const [rerankCheckLoading, setRerankCheckLoading] = useState(false)
-
-  // Refs for pre-fill logic (mirrors CreateProject pattern)
   const connectionPrefilled = useRef(false)
   const connectionTouched = useRef(false)
   const embedUrlRef = useRef('')
-  const systemEmbedUrlRef = useRef('')
-  const rerankPrefilled = useRef(false)
 
   // Pre-fill Connection step from system config on first visit
   useEffect(() => {
@@ -884,7 +757,6 @@ export default function CreateCompareJob() {
     getSystemConfig().then(cfg => {
       if (connectionTouched.current) return
       const url = cfg.embedding_url || ''
-      if (cfg?.embedding_url) systemEmbedUrlRef.current = cfg.embedding_url
       if (!embedUrlRef.current.trim()) {
         setEmbedUrl(url)
         embedUrlRef.current = url
@@ -911,18 +783,6 @@ export default function CreateCompareJob() {
     }).catch(() => {})
   }, [step])
 
-  // Pre-fill Rerank step from system config on first visit
-  useEffect(() => {
-    if (step !== 6 || rerankPrefilled.current) return
-    rerankPrefilled.current = true
-    getSystemConfig().then(cfg => {
-      if (cfg?.embedding_url) systemEmbedUrlRef.current = cfg.embedding_url
-      if (cfg?.reranker_model) {
-        setRerankModel(prev => (prev.trim() ? prev : cfg.reranker_model))
-      }
-    }).catch(() => {})
-  }, [step])
-
   const handleFetchModels = useCallback(async () => {
     if (!embedUrl.trim()) return
     setModelLoading(true)
@@ -938,32 +798,6 @@ export default function CreateCompareJob() {
       setModelError('Could not reach the endpoint. Check the URL and try again.')
     } finally {
       setModelLoading(false)
-    }
-  }, [embedUrl, embedApiKey])
-
-  const handleFetchRerankModels = useCallback(async () => {
-    const url = embedUrl.trim() || systemEmbedUrlRef.current
-    if (!url) {
-      setRerankModelError('No endpoint to list models from. Enter one on the Embedding step, or type a model id manually.')
-      return
-    }
-    setRerankModelLoading(true)
-    setRerankModelError('')
-    setRerankAvailableModels([])
-    setRerankModel('')
-    try {
-      const cfg = await getSystemConfig().catch(() => ({}))
-      const raw = await fetchModels(url, embedApiKey.trim() || null)
-      const models = Array.isArray(raw) ? raw : []
-      setRerankAvailableModels(models)
-      if (models.length > 0) {
-        const preferred = cfg?.reranker_model
-        setRerankModel(preferred && models.includes(preferred) ? preferred : models[0])
-      }
-    } catch {
-      setRerankModelError('Could not reach the endpoint. Check the embedding URL and try again.')
-    } finally {
-      setRerankModelLoading(false)
     }
   }, [embedUrl, embedApiKey])
 
@@ -989,28 +823,6 @@ export default function CreateCompareJob() {
       setConnectionCheckLoading(false)
     }
   }, [embedUrl, embedApiKey, embedModel])
-
-  const handleRerankContinue = useCallback(async () => {
-    setRerankModelError('')
-    if (!rerankEnabled || !rerankModel.trim()) {
-      setStep(7)
-      return
-    }
-    setRerankCheckLoading(true)
-    try {
-      await verifyRerank({ model: rerankModel.trim() })
-      setStep(7)
-    } catch (e) {
-      const d = e?.response?.data?.detail
-      setRerankModelError(
-        typeof d === 'string'
-          ? d
-          : 'Could not verify reranker model. Use a rerank-capable model id installed on the server.',
-      )
-    } finally {
-      setRerankCheckLoading(false)
-    }
-  }, [rerankEnabled, rerankModel])
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -1047,8 +859,6 @@ export default function CreateCompareJob() {
         embed_url: url || null,
         embed_api_key: url ? (embedApiKey.trim() || null) : null,
         embed_model: url ? (embedModel.trim() || null) : null,
-        rerank_enabled: rerankEnabled,
-        rerank_model: rerankModel.trim() || null,
       })
       setCreatedJobId(job.id)
     } catch (e) {
@@ -1057,8 +867,6 @@ export default function CreateCompareJob() {
     }
   }
 
-  // Enter should behave like clicking the primary action (Continue/Create) in the wizard.
-  // Important: this effect must be declared after the handler callbacks to avoid TDZ issues.
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key !== 'Enter') return
@@ -1076,8 +884,7 @@ export default function CreateCompareJob() {
         (step === 3 && state.tmpPathRight) ||
         (step === 4 && (state.contextColumnsRight?.length ?? 0) > 0) ||
         (step === 5 && !connectionCheckLoading) ||
-        (step === 6 && !rerankModelLoading && !rerankCheckLoading) ||
-        (step === 7 && !submitting)
+        (step === 6 && !submitting)
 
       if (!canProceed) return
       e.preventDefault()
@@ -1088,8 +895,7 @@ export default function CreateCompareJob() {
       if (step === 3) return setStep(4)
       if (step === 4) return setStep(5)
       if (step === 5) return void handleConnectionContinue()
-      if (step === 6) return void handleRerankContinue()
-      if (step === 7) return void handleSubmit()
+      if (step === 6) return void handleSubmit()
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -1104,11 +910,8 @@ export default function CreateCompareJob() {
     state.tmpPathRight,
     state.contextColumnsRight,
     connectionCheckLoading,
-    rerankModelLoading,
-    rerankCheckLoading,
     submitting,
     handleConnectionContinue,
-    handleRerankContinue,
   ])
 
   if (createdJobId) {
@@ -1129,7 +932,7 @@ export default function CreateCompareJob() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-[90%] mx-auto py-12">
-        <div className={`w-full ${step === 7 ? 'max-w-none' : 'max-w-lg'}`}>
+        <div className={`w-full ${step === 6 ? 'max-w-none' : 'max-w-lg'}`}>
 
           {/* Step progress dots */}
           <div className="flex items-center gap-2 mb-8">
@@ -1171,20 +974,7 @@ export default function CreateCompareJob() {
             />
           )}
           {step === 6 && (
-            <StepRerank
-              rerankEnabled={rerankEnabled} setRerankEnabled={setRerankEnabled}
-              rerankModel={rerankModel} setRerankModel={setRerankModel}
-              rerankAvailableModels={rerankAvailableModels}
-              rerankModelLoading={rerankModelLoading}
-              rerankModelError={rerankModelError}
-              rerankCheckLoading={rerankCheckLoading}
-              onFetchRerankModels={handleFetchRerankModels}
-              onNext={handleRerankContinue}
-              onBack={() => setStep(5)}
-            />
-          )}
-          {step === 7 && (
-            <StepReview state={state} onSubmit={handleSubmit} onBack={() => setStep(6)} submitting={submitting} error={submitError} />
+            <StepReview state={state} onSubmit={handleSubmit} onBack={() => setStep(5)} submitting={submitting} error={submitError} />
           )}
 
           {step > 0 && step < 5 && !createdJobId && (

@@ -234,20 +234,42 @@ export const updateCompareJob = (jobId, patch) =>
 export const deleteCompareJob = (jobId) =>
   api.delete(`compare/${jobId}`).then(r => r.data)
 
-export const getReviewStats = (jobId) =>
-  api.get(`compare/${jobId}/review`).then(r => r.data)
+export const browseCompareJob = (jobId, { side = null, limit = 25 } = {}) =>
+  api.get(`compare/${jobId}/browse`, {
+    params: { side: side || undefined, limit },
+  }).then(r => r.data)
 
-export const getNextReviewItem = (jobId, { minScore = 0, offset = 0, includeDecided = false } = {}) =>
-  api.get(`compare/${jobId}/review/next`, {
+export const getCompareConfigStats = (jobId) =>
+  api.get(`compare/${jobId}/config-stats`).then(r => r.data)
+
+// ── Compare Runs ──────────────────────────────────────────────────────────
+
+export const createRun = (jobId, data) =>
+  api.post(`compare/${jobId}/runs`, data).then(r => r.data)
+
+export const listRuns = (jobId) =>
+  api.get(`compare/${jobId}/runs`).then(r => r.data)
+
+export const getRun = (jobId, runId) =>
+  api.get(`compare/${jobId}/runs/${runId}`).then(r => r.data)
+
+export const deleteRun = (jobId, runId) =>
+  api.delete(`compare/${jobId}/runs/${runId}`).then(r => r.data)
+
+export const getRunReviewStats = (jobId, runId) =>
+  api.get(`compare/${jobId}/runs/${runId}/review`).then(r => r.data)
+
+export const getNextRunReviewItem = (jobId, runId, { minScore = 0, offset = 0, includeDecided = false } = {}) =>
+  api.get(`compare/${jobId}/runs/${runId}/review/next`, {
     params: { min_score: minScore, offset, include_decided: includeDecided },
   }).then(r => r.data)
 
-export const submitCompareDecision = (jobId, leftId, matchedRightId) =>
-  api.post(`compare/${jobId}/review/${leftId}`, { matched_right_id: matchedRightId ?? null })
+export const submitRunDecision = (jobId, runId, leftId, matchedRightId) =>
+  api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, { matched_right_id: matchedRightId ?? null })
     .then(r => r.data)
 
-export const downloadCompareExport = async (jobId, type = 'confirmed', jobName = '') => {
-  const response = await api.get(`compare/${jobId}/export`, {
+export const downloadRunExport = async (jobId, runId, type = 'confirmed', jobName = '') => {
+  const response = await api.get(`compare/${jobId}/runs/${runId}/export`, {
     params: { type },
     responseType: 'blob',
   })
@@ -263,15 +285,7 @@ export const downloadCompareExport = async (jobId, type = 'confirmed', jobName =
   link.remove()
 }
 
-export const browseCompareJob = (jobId, { side = null, limit = 25 } = {}) =>
-  api.get(`compare/${jobId}/browse`, {
-    params: { side: side || undefined, limit },
-  }).then(r => r.data)
-
-export const getCompareConfigStats = (jobId) =>
-  api.get(`compare/${jobId}/config-stats`).then(r => r.data)
-
-export const browseCompareRaw = (jobId, { limit = 50, leftRow = null } = {}) =>
-  api.get(`compare/${jobId}/browse-raw`, {
+export const browseRunRaw = (jobId, runId, { limit = 50, leftRow = null } = {}) =>
+  api.get(`compare/${jobId}/runs/${runId}/browse-raw`, {
     params: { limit, left_row: leftRow ?? undefined },
   }).then(r => r.data)

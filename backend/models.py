@@ -225,8 +225,6 @@ class CompareJobCreate(BaseModel):
     embed_url: Optional[str] = None
     embed_api_key: Optional[str] = None
     embed_model: Optional[str] = None
-    rerank_enabled: bool = True
-    rerank_model: Optional[str] = None
 
 
 class CompareJobResponse(BaseModel):
@@ -240,12 +238,42 @@ class CompareJobResponse(BaseModel):
     status_message: Optional[str] = None
     row_count_left: Optional[int] = None
     row_count_right: Optional[int] = None
-    top_k: int
     embed_url: Optional[str] = None
     embed_model: Optional[str] = None
-    rerank_enabled: bool = True
-    rerank_model: Optional[str] = None
     created_at: datetime
+
+
+class CompareRunCreate(BaseModel):
+    name: Optional[str] = None
+    top_k: int = 3
+    vector_enabled: bool = True
+    reranker_enabled: bool = False
+    reranker_model: Optional[str] = None
+    reranker_url: Optional[str] = None
+    llm_judge_enabled: bool = False
+    llm_judge_url: Optional[str] = None
+    llm_judge_model: Optional[str] = None
+    llm_judge_prompt: Optional[str] = None
+
+
+class CompareRunResponse(BaseModel):
+    id: int
+    job_id: int
+    name: Optional[str] = None
+    status: str
+    status_message: Optional[str] = None
+    top_k: int
+    vector_enabled: bool
+    reranker_enabled: bool
+    reranker_model: Optional[str] = None
+    reranker_url: Optional[str] = None
+    llm_judge_enabled: bool
+    llm_judge_url: Optional[str] = None
+    llm_judge_model: Optional[str] = None
+    llm_judge_prompt: Optional[str] = None
+    row_count_left: Optional[int] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
 
 
 class CompareJobUpdate(BaseModel):
@@ -273,6 +301,8 @@ class CandidateItem(BaseModel):
     display_value: Optional[str] = None
     cosine_score: float
     rerank_score: Optional[float] = None
+    llm_score: Optional[float] = None
+    final_score: Optional[float] = None
     rank: int
 
 

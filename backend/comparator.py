@@ -3,22 +3,25 @@ comparator.py — Core Compare pipeline.
 
 Reuses:
   - read_excel(), build_contextual_content() from ingestion.py
-  - embed() from embedder.py
-  - rerank() from embedder.py
+  - embed() / rerank() from embedder.py
   - get_cursor() from db.py
 
-All heavy lifting (embed + rerank) stays on the existing Ollama/OpenAI setup.
-No new models, no external calls.
+Pipeline is split into two phases:
+  1. run_ingest_job()  — embed left + right and store in compare_{id}.records
+  2. run_pipeline()    — vector search + optional rerank + optional LLM judge → write per-run matches
 """
+import json
 import logging
 import time
-import json
+from collections import defaultdict
 from typing import Generator
 
+from openai import OpenAI
+
+from config import EMBEDDING_DIMS, RERANKER_ENABLED
 from db import get_cursor, create_compare_schema
 from embedder import embed, rerank
-from ingestion import read_excel, build_contextual_content
-from config import EMBEDDING_DIMS, RERANKER_ENABLED
+from ingestion import build_contextual_content, read_excel
 
 logger = logging.getLogger("lens.comparator")
 
@@ -235,46 +238,117 @@ def run_reranking(
 
 def write_matches(
     schema_name: str,
-    scored_pairs: list[tuple[int, int, float, float]],
+    table_name: str,
+    scored_tuples: list,
     top_k: int,
 ) -> None:
     """
-    Per left_id: sort by rerank_score desc, take top_k, insert into matches with rank 1..top_k.
+    Per left_id: sort by final_score desc, take top_k, insert into {schema_name}.{table_name}.
+    scored_tuples: (left_id, right_id, cosine_score, rerank_score, llm_score, final_score)
     """
-    from collections import defaultdict
-
-    groups: dict[int, list[tuple[int, float, float]]] = defaultdict(list)
-    for left_id, right_id, cosine, rerank_score in scored_pairs:
-        groups[left_id].append((right_id, cosine, rerank_score))
+    groups: dict[int, list] = defaultdict(list)
+    for row in scored_tuples:
+        left_id = row[0]
+        groups[left_id].append(row)
 
     rows_to_insert = []
     for left_id, pairs in groups.items():
-        sorted_pairs = sorted(pairs, key=lambda x: x[2], reverse=True)[:top_k]
-        for rank, (right_id, cosine, rerank_score) in enumerate(sorted_pairs, start=1):
-            rows_to_insert.append((left_id, right_id, cosine, rerank_score, rank))
+        sorted_pairs = sorted(pairs, key=lambda x: x[5], reverse=True)[:top_k]
+        for rank, (lid, right_id, cosine, rerank_score, llm_score, final_score) in enumerate(sorted_pairs, start=1):
+            rows_to_insert.append((lid, right_id, cosine, rerank_score, llm_score, final_score, rank))
 
-    logger.info("write_matches() schema=%s inserting %d match rows", schema_name, len(rows_to_insert))
+    logger.info("write_matches() table=%s.%s inserting %d rows", schema_name, table_name, len(rows_to_insert))
     with get_cursor() as (cur, _conn):
         cur.executemany(
             f"""
-            INSERT INTO {schema_name}.matches (left_id, right_id, cosine_score, rerank_score, rank)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO {schema_name}.{table_name}
+                (left_id, right_id, cosine_score, rerank_score, llm_score, final_score, rank)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             rows_to_insert,
         )
 
 
-# ── Orchestrator ───────────────────────────────────────────────────────────
+# ── LLM Judge ─────────────────────────────────────────────────────────────
 
-def run_compare_job(job_id: int) -> Generator[dict, None, None]:
-    """
-    Full pipeline for a compare job. Yields SSE-style progress dicts.
-    Reads job config from public.compare_jobs.
-    Updates status at each phase.
-    """
-    logger.info("run_compare_job() start job_id=%d", job_id)
+_DEFAULT_LLM_JUDGE_PROMPT = (
+    "You are a relevance judge. Given a query text and a candidate text, "
+    "return a relevance score from 0.0 to 1.0. "
+    "A score of 1.0 means an exact or near-exact match. "
+    "A score of 0.0 means completely unrelated. "
+    'Reply with ONLY valid JSON in this format: {"score": <float>}'
+)
 
-    # Load job config
+
+def run_llm_judge(
+    schema_name: str,
+    candidates: list,
+    *,
+    url: str,
+    model: str,
+    prompt: str | None = None,
+) -> list:
+    """
+    Score each (left_id, right_id, cosine, rerank_score) tuple using an LLM judge.
+    Returns list of (left_id, right_id, cosine, rerank_score, llm_score).
+    Falls back to rerank_score (or cosine) on any API error.
+    """
+    system_prompt = prompt or _DEFAULT_LLM_JUDGE_PROMPT
+    client = OpenAI(base_url=url, api_key="ollama")
+
+    # Fetch content for all referenced record IDs
+    all_ids = list({row[0] for row in candidates} | {row[1] for row in candidates})
+    content_map: dict[int, str] = {}
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            f"SELECT id, contextual_content FROM {schema_name}.records WHERE id = ANY(%s)",
+            [all_ids],
+        )
+        for row in cur.fetchall():
+            content_map[row["id"]] = row["contextual_content"] or ""
+
+    results = []
+    for left_id, right_id, cosine, rerank_score in candidates:
+        query_text = content_map.get(left_id, "")
+        doc_text = content_map.get(right_id, "")
+        fallback = float(rerank_score) if rerank_score is not None else float(cosine)
+
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Query: {query_text}\n\nDocument: {doc_text}"},
+                ],
+                max_tokens=50,
+                temperature=0,
+            )
+            text = resp.choices[0].message.content.strip()
+            data = json.loads(text)
+            llm_score = float(data.get("score", fallback))
+            llm_score = max(0.0, min(1.0, llm_score))
+        except Exception as e:
+            logger.warning(
+                "run_llm_judge() fallback for left_id=%d right_id=%d — %s", left_id, right_id, e
+            )
+            llm_score = fallback
+
+        results.append((left_id, right_id, cosine, rerank_score, llm_score))
+
+    logger.info("run_llm_judge() done pairs=%d", len(results))
+    return results
+
+
+# ── Job ingest orchestrator (Phase 1 — embed only) ─────────────────────────
+
+def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
+    """
+    Phase 1: embed left + right files and store in compare_{job_id}.records.
+    Does NOT run vector search or reranking.
+    Yields SSE-style progress dicts.
+    """
+    logger.info("run_ingest_job() start job_id=%d", job_id)
+
     with get_cursor() as (cur, _conn):
         cur.execute("SELECT * FROM public.compare_jobs WHERE id = %s", [job_id])
         job = cur.fetchone()
@@ -284,10 +358,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
 
     job = dict(job)
     schema_name = job["schema_name"]
-
-    # Resolve dims + per-job embed/rerank config
     dims = job.get("embed_dims") or EMBEDDING_DIMS
-    top_k = job.get("top_k") or 3
 
     embed_url   = job.get("embed_url") or None
     embed_key   = job.get("embed_api_key") or None
@@ -300,9 +371,6 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
         if embed_model:
             embed_kwargs["model"] = embed_model
 
-    job_rerank_enabled = job.get("rerank_enabled")   # may be None for legacy rows
-    job_rerank_model   = job.get("rerank_model") or None
-
     def _set_status(status: str, message: str | None = None):
         with get_cursor() as (cur, _conn):
             cur.execute(
@@ -313,6 +381,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
     try:
         t_total0 = time.monotonic()
         metrics: dict = {}
+
         # ── Ingest left ──────────────────────────────────────────────────
         _set_status("ingesting")
         yield {"type": "ingest_left", "processed": 0, "total": 0, "percent": 0,
@@ -321,9 +390,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
         df_left, _, _ = read_excel(job["tmp_path_left"])
         t0 = time.monotonic()
         for event in ingest_side(
-            job_id=job_id,
-            side="left",
-            df=df_left,
+            job_id=job_id, side="left", df=df_left,
             content_column=job["content_column_left"],
             context_columns=job["context_columns_left"] or [],
             display_column=job.get("display_column_left"),
@@ -341,9 +408,7 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
         df_right, _, _ = read_excel(job["tmp_path_right"])
         t0 = time.monotonic()
         for event in ingest_side(
-            job_id=job_id,
-            side="right",
-            df=df_right,
+            job_id=job_id, side="right", df=df_right,
             content_column=job["content_column_right"],
             context_columns=job["context_columns_right"] or [],
             display_column=job.get("display_column_right"),
@@ -353,43 +418,133 @@ def run_compare_job(job_id: int) -> Generator[dict, None, None]:
         ):
             yield event
         metrics["ingest_right_ms"] = int((time.monotonic() - t0) * 1000)
+        metrics["total_ms"] = int((time.monotonic() - t_total0) * 1000)
 
-        # ── Bidirectional search ──────────────────────────────────────────
-        _set_status("comparing")
-        yield {"type": "searching", "message": "Running bidirectional vector search..."}
+        _set_status("ready", json.dumps({"message": "Embeddings ready.", "metrics": metrics}))
+        yield {"type": "complete", "message": "Embeddings ready. Create a run to search and rank."}
+        logger.info("run_ingest_job() done job_id=%d", job_id)
+
+    except Exception as e:
+        logger.exception("run_ingest_job() FAILED job_id=%d", job_id)
+        _set_status("error", str(e))
+        yield {"type": "error", "message": str(e)}
+
+
+# ── Run pipeline orchestrator (Phase 2 — search + rank) ────────────────────
+
+def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
+    """
+    Phase 2: vector search + optional rerank + optional LLM judge → write per-run matches.
+    Reads run config from public.compare_runs.
+    Yields SSE-style progress dicts.
+    """
+    logger.info("run_pipeline() start job_id=%d run_id=%d", job_id, run_id)
+
+    with get_cursor() as (cur, _conn):
+        cur.execute("SELECT * FROM public.compare_jobs WHERE id = %s", [job_id])
+        job = cur.fetchone()
+        cur.execute("SELECT * FROM public.compare_runs WHERE id = %s", [run_id])
+        run = cur.fetchone()
+
+    if not job or not run:
+        yield {"type": "error", "message": f"Job {job_id} or run {run_id} not found"}
+        return
+
+    job = dict(job)
+    run = dict(run)
+    schema_name = job["schema_name"]
+    table_name  = f"run_{run_id}_matches"
+    top_k       = run["top_k"]
+
+    def _set_run_status(status: str, message: str | None = None):
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                "UPDATE public.compare_runs SET status = %s, status_message = %s WHERE id = %s",
+                [status, message, run_id],
+            )
+
+    try:
+        t_total0 = time.monotonic()
+        metrics: dict = {}
+
+        # ── Vector search ─────────────────────────────────────────────────
+        _set_run_status("running")
+        yield {"type": "searching", "message": "Running vector search..."}
 
         t0 = time.monotonic()
         candidates = run_bidirectional_search(schema_name, top_k)
         metrics["vector_search_ms"] = int((time.monotonic() - t0) * 1000)
-        metrics["candidate_pairs"] = len(candidates)
+        metrics["candidate_pairs"]  = len(candidates)
 
-        yield {"type": "reranking", "message": f"Reranking {len(candidates)} candidate pairs..."}
+        # candidates at this point: [(left_id, right_id, cosine_score), ...]
+        # Extend to include rerank_score placeholder
+        pairs_with_rerank = [(l, r, c, None) for l, r, c in candidates]
 
-        # ── Reranking ─────────────────────────────────────────────────────
-        t0 = time.monotonic()
-        scored_pairs = run_reranking(
-            schema_name,
-            candidates,
-            rerank_enabled=job_rerank_enabled,
-            rerank_model=job_rerank_model,
-        )
-        metrics["rerank_ms"] = int((time.monotonic() - t0) * 1000)
+        # ── Reranker ──────────────────────────────────────────────────────
+        if run["reranker_enabled"]:
+            yield {"type": "reranking", "message": f"Reranking {len(candidates)} pairs..."}
+            t0 = time.monotonic()
+            reranked = run_reranking(
+                schema_name,
+                candidates,
+                rerank_enabled=True,
+                rerank_model=run.get("reranker_model") or None,
+            )
+            metrics["rerank_ms"] = int((time.monotonic() - t0) * 1000)
+            # reranked: [(left_id, right_id, cosine, rerank_score), ...]
+            pairs_with_rerank = reranked
+        else:
+            # Passthrough: treat cosine as rerank_score
+            pairs_with_rerank = [(l, r, c, c) for l, r, c in candidates]
+
+        # ── LLM Judge ─────────────────────────────────────────────────────
+        if run["llm_judge_enabled"]:
+            url   = run.get("llm_judge_url") or ""
+            model = run.get("llm_judge_model") or ""
+            if not url or not model:
+                yield {"type": "error", "message": "LLM judge enabled but url/model not configured"}
+                _set_run_status("error", "LLM judge url or model missing")
+                return
+
+            yield {"type": "llm_judging", "message": f"LLM judging {len(pairs_with_rerank)} pairs..."}
+            t0 = time.monotonic()
+            judged = run_llm_judge(
+                schema_name,
+                pairs_with_rerank,
+                url=url,
+                model=model,
+                prompt=run.get("llm_judge_prompt") or None,
+            )
+            metrics["llm_judge_ms"] = int((time.monotonic() - t0) * 1000)
+            # judged: [(left_id, right_id, cosine, rerank_score, llm_score), ...]
+            # final_score = llm_score
+            scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
+        else:
+            # final_score = rerank_score (which may equal cosine when reranker off)
+            scored_tuples = [(l, r, c, rs, None, rs) for l, r, c, rs in pairs_with_rerank]
 
         # ── Write matches ─────────────────────────────────────────────────
         t0 = time.monotonic()
-        write_matches(schema_name, scored_pairs, top_k)
+        write_matches(schema_name, table_name, scored_tuples, top_k)
         metrics["write_matches_ms"] = int((time.monotonic() - t0) * 1000)
-        metrics["total_ms"] = int((time.monotonic() - t_total0) * 1000)
+        metrics["total_ms"]         = int((time.monotonic() - t_total0) * 1000)
 
-        # ── Done ──────────────────────────────────────────────────────────
-        _set_status("ready", json.dumps({
-            "message": "Comparison complete. Ready for review.",
-            "metrics": metrics,
-        }))
-        yield {"type": "complete", "message": "Comparison complete. Ready for review."}
-        logger.info("run_compare_job() done job_id=%d", job_id)
+        # Update row_count_left on the run
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                f"SELECT COUNT(*) AS cnt FROM {schema_name}.records WHERE side = 'left'"
+            )
+            cnt = (cur.fetchone() or {}).get("cnt", 0)
+            cur.execute(
+                "UPDATE public.compare_runs SET row_count_left = %s, completed_at = NOW() WHERE id = %s",
+                [cnt, run_id],
+            )
+
+        _set_run_status("ready", json.dumps({"message": "Run complete.", "metrics": metrics}))
+        yield {"type": "complete", "message": "Run complete. Ready for review."}
+        logger.info("run_pipeline() done job_id=%d run_id=%d", job_id, run_id)
 
     except Exception as e:
-        logger.exception("run_compare_job() FAILED job_id=%d", job_id)
-        _set_status("error", str(e))
+        logger.exception("run_pipeline() FAILED job_id=%d run_id=%d", job_id, run_id)
+        _set_run_status("error", str(e))
         yield {"type": "error", "message": str(e)}

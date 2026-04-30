@@ -10,8 +10,8 @@ A generic, on-premise RAG search portal for any Excel-based knowledge base.
 Not a chatbot. Not a reasoning engine. Just smart search — fast and accurate.
 
 Two project flavors:
-- **Search** — upload one Excel, embed it, query it with vector + BM25 + RRF + reranker.
-- **Compare** — upload two Excels (Left and Right), embed both, run bidirectional vector search + reranker, then do card-by-card human review to confirm matches; export decisions as a 3-sheet Excel.
+- **Search** — upload one Excel, embed it, query it with vector + BM25 + RRF + reranker (topic mode); optional legacy single-step retrieval; ID mode when an ID column is set.
+- **Compare** — upload two Excels (Left and Right), create a **job** whose schema holds embedded **records** only. **Phase 1** (`GET /compare/{job_id}/ingest`): embed both sides. **Phase 2**: create one or more **runs** under the job; each run stores `top_k` plus toggles for vector similarity, reranker, and optional **LLM judge** scoring, then `GET .../execute` runs the pipeline into per-run `matches` / `decisions` tables. Human review and Excel export are **per run** (`/compare/{job_id}/runs/{run_id}/...`).
 
 ---
 
@@ -39,7 +39,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 2. **Garbage In, Garbage Out** — Read what's there, store what's there, show what's there. Never clean or judge user data.
 3. **On-Premise Only** — Zero external API calls. Zero data leaves the network. No exceptions. Ever.
 4. **User Drives, System Follows** — User decides context columns, display columns, ID column, K value.
-5. **No LLM in Query Path** — Search returns results. No explanation, synthesis, or summarization.
+5. **No LLM in Query Path** — Search returns ranked rows only (no answer synthesis). Compare **may** optionally call a user-configured OpenAI-compatible chat endpoint to score candidate pairs inside a **run** (off by default); that is separate from Search retrieval.
 6. **Defer Complexity** — Build simplest thing first. Add complexity only when real users hit real limits.
 7. **One Job, Done Well** — LENS is search + structured comparison. Not compliance, not knowledge graph, not reasoning.
 
@@ -53,6 +53,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 - **All config in config.py** — never hardcode URLs or model names in logic files
 - **Ollama runs on HOST** — not inside Docker (needs direct GPU access)
 - **Docker Compose** manages: FastAPI + PostgreSQL only
+- **Compare LLM judge (optional)** — if enabled on a run, scores candidates via a user-configured OpenAI-compatible URL (same trust model as per-project embedding overrides); intended for on-prem inference, not mandatory for Compare.
 
 ---
 
@@ -118,6 +119,9 @@ DB_PASSWORD=changeme
 
 # Reverse proxy — set when serving under a sub-path (e.g. /lens-rag)
 ROOT_PATH=          # e.g. /lens-rag  (empty = serve at root)
+
+# Logging — set DEBUG for verbose output (defaults to DEBUG in dev, INFO in prod)
+LOG_LEVEL=INFO
 ```
 
 ### Switching to OpenAI (e.g. testing from home)
@@ -128,32 +132,43 @@ EMBEDDING_PROVIDER=openai OPENAI_API_KEY=sk-... EMBEDDING_DIMS=1536 RERANKER_ENA
 
 Or set in a local `.env` file (never commit it).
 
+Candidate pool sizes for Search (`TOP_K_RETRIEVAL`, `TOP_K_DEFAULT`, `TOP_K_MAX`) and related limits live as constants in `config.py` (not all exposed as env vars). Compare **`top_k`** is stored per **run** in `public.compare_runs`; `COMPARE_TOP_K` / thresholds still apply to defaults and UI coloring.
+
 ---
 
 ## Database Design
 
 ### Search flavor — one schema per project
 
+Authoritative DDL and migrations: `db.py` (`init_db`). Summary:
+
 ```sql
 CREATE TABLE public.projects (
-  id              SERIAL PRIMARY KEY,
-  name            TEXT NOT NULL,
-  schema_name     TEXT NOT NULL,       -- project_{id}
-  context_columns TEXT[],
-  id_column       TEXT,
-  content_column  TEXT NOT NULL,
-  display_columns TEXT[],
-  has_id_column   BOOLEAN DEFAULT FALSE,
-  default_k       INTEGER DEFAULT 10,
-  status          TEXT DEFAULT 'pending', -- pending | ingesting | ready | error
-  row_count       INTEGER,
-  pin             TEXT,
-  source_filename TEXT,
-  embed_url       TEXT,
-  embed_api_key   TEXT,
-  embed_model     TEXT,
-  embed_dims      INTEGER,
-  created_at      TIMESTAMP DEFAULT NOW()
+  id                  SERIAL PRIMARY KEY,
+  name                TEXT NOT NULL,
+  schema_name         TEXT NOT NULL,       -- project_{id}
+  stored_columns      TEXT[] NOT NULL DEFAULT '{}',
+  context_columns     TEXT[] NOT NULL DEFAULT '{}',
+  id_column           TEXT,
+  content_column      TEXT NOT NULL,
+  display_columns     TEXT[] NOT NULL DEFAULT '{}',
+  has_id_column       BOOLEAN DEFAULT FALSE,
+  default_k           INTEGER DEFAULT 5,
+  status              TEXT DEFAULT 'pending', -- pending | ingesting | ready | error
+  row_count           INTEGER,
+  total_rows          INTEGER,
+  pin                 TEXT,
+  source_filename     TEXT,
+  embed_url           TEXT,
+  embed_api_key       TEXT,
+  embed_model         TEXT,
+  embed_dims          INTEGER,
+  rerank_enabled      BOOLEAN DEFAULT TRUE,
+  rerank_model        TEXT,
+  ingested_at         TIMESTAMP,
+  ingestion_ms        INTEGER,
+  ingestion_started_at TIMESTAMP,
+  created_at          TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE project_{id}.records (
@@ -171,38 +186,17 @@ CREATE INDEX ON project_{id}.records USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX ON project_{id}.records USING gin  (search_vector);
 ```
 
-### Compare flavor — one schema per job
+### Compare flavor — `public.compare_jobs` + `public.compare_runs` + per-job schema
+
+- **`public.compare_jobs`** — job metadata, column mapping, optional per-job `embed_url` / `embed_api_key` / `embed_model` / `embed_dims`, optional `notes`. Legacy `top_k` / `rerank_*` columns may exist for migrated rows; new jobs store pipeline settings on **runs**.
+- **`public.compare_runs`** — one row per pipeline execution: `top_k`, `vector_enabled`, `reranker_*`, `llm_judge_*`, `status`, timestamps.
+- **Schema `compare_{job_id}`** — shared **`records`** table (left + right embeddings only). Per-run tables: **`run_{run_id}_matches`** (candidates + `cosine_score`, `rerank_score`, `llm_score`, `final_score`, `rank`) and **`run_{run_id}_decisions`** (`left_id` PK, `matched_right_id` nullable for explicit no-match).
 
 ```sql
-CREATE TABLE public.compare_jobs (
-  id                       SERIAL PRIMARY KEY,
-  name                     TEXT NOT NULL,
-  label_left               TEXT NOT NULL,   -- user-chosen name for left file
-  label_right              TEXT NOT NULL,   -- user-chosen name for right file
-  schema_name              TEXT NOT NULL,   -- compare_{id}
-  status                   TEXT DEFAULT 'pending', -- pending|ingesting|comparing|ready|error
-  status_message           TEXT,
-  row_count_left           INTEGER,
-  row_count_right          INTEGER,
-  context_columns_left     TEXT[],
-  content_column_left      TEXT NOT NULL,
-  display_column_left      TEXT,
-  context_columns_right    TEXT[],
-  content_column_right     TEXT NOT NULL,
-  display_column_right     TEXT,
-  source_filename_left     TEXT,
-  source_filename_right    TEXT,
-  tmp_path_left            TEXT,            -- transient; deleted after ingestion
-  tmp_path_right           TEXT,
-  top_k                    INTEGER DEFAULT 3,
-  embed_dims               INTEGER,
-  created_at               TIMESTAMP DEFAULT NOW()
-);
-
--- Per-job schema compare_{id}:
+-- Per-job schema compare_{id} — embeddings only
 CREATE TABLE compare_{id}.records (
   id                  SERIAL PRIMARY KEY,
-  side                TEXT NOT NULL,        -- 'left' or 'right'
+  side                TEXT NOT NULL CHECK (side IN ('left','right')),
   original_row        INTEGER,
   sheet_name          TEXT,
   contextual_content  TEXT,
@@ -212,24 +206,27 @@ CREATE TABLE compare_{id}.records (
 CREATE INDEX ON compare_{id}.records USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX ON compare_{id}.records (side);
 
-CREATE TABLE compare_{id}.matches (
-  id           SERIAL PRIMARY KEY,
-  left_id      INTEGER NOT NULL,
-  right_id     INTEGER NOT NULL,
-  cosine_score FLOAT,
-  rerank_score FLOAT,
-  rank         INTEGER NOT NULL    -- 1 = best
+-- Per-run tables (created when a run is inserted)
+CREATE TABLE compare_{id}.run_{run_id}_matches (
+  id              SERIAL PRIMARY KEY,
+  left_id         INTEGER NOT NULL,
+  right_id        INTEGER NOT NULL,
+  cosine_score    FLOAT,
+  rerank_score    FLOAT,
+  llm_score       FLOAT,
+  final_score     FLOAT NOT NULL DEFAULT 0,
+  rank            INTEGER NOT NULL
 );
-CREATE INDEX ON compare_{id}.matches (left_id, rank);
+CREATE INDEX ON compare_{id}.run_{run_id}_matches (left_id, rank);
 
-CREATE TABLE compare_{id}.decisions (
-  left_id          INTEGER PRIMARY KEY,
-  matched_right_id INTEGER,         -- NULL = explicit "no match"
-  decided_at       TIMESTAMP DEFAULT NOW()
+CREATE TABLE compare_{id}.run_{run_id}_decisions (
+  left_id           INTEGER PRIMARY KEY,
+  matched_right_id  INTEGER,
+  decided_at        TIMESTAMP DEFAULT NOW()
 );
 ```
 
-`matches` is written once during the comparison phase and never mutated. `decisions` is the only mutable table; `POST /compare/{id}/review/{left_id}` upserts via `ON CONFLICT (left_id) DO UPDATE`.
+`run_*_matches` is written when a run’s pipeline completes and is not mutated afterward. `run_*_decisions` is mutable; `POST /compare/{job_id}/runs/{run_id}/review/{left_id}` upserts decisions. Startup runs `migrate_legacy_compare_jobs()` to wrap pre-runs jobs that still had flat `matches` / `decisions` tables into a synthetic `compare_runs` row + `run_1_*` tables.
 
 ---
 
@@ -254,13 +251,16 @@ def read_excel(filepath):
 ### Contextual content builder
 
 ```python
-def build_contextual_content(row, context_columns, sheet_name, content_column):
+def build_contextual_content(row, context_columns, content_column, sheet_name):
     parts = [str(sheet_name)]
     for col in context_columns:
-        val = str(row.get(col, ''))
-        if val and val != 'nan':
+        val = str(row.get(col, '')) if row.get(col) is not None else ''
+        if val and val.lower() != 'nan':
             parts.append(val)
-    parts.append(str(row.get(content_column, '')))
+    if content_column:
+        content = str(row.get(content_column, '')) if row.get(content_column) is not None else ''
+        if content and content.lower() != 'nan':
+            parts.append(content)
     return ' | '.join(parts)
 ```
 
@@ -301,17 +301,18 @@ def rrf_merge(vector_results, bm25_results, k=60):
 
 ## Compare Architecture
 
-`comparator.py` orchestrates the full pipeline via `run_compare_job(job_id)` (a generator):
+**Phase 1 — job embedding** (`comparator.run_ingest_job`, driven by `GET /compare/{job_id}/ingest`):
 
-1. `ingest_side(job_id, 'left', ...)` — embeds left rows one at a time into `compare_{id}.records`
-2. `ingest_side(job_id, 'right', ...)` — same for right rows
-3. `run_bidirectional_search(schema_name, top_k)` — for each left record, `ORDER BY embedding <=> $1 WHERE side='right' LIMIT top_k`; returns `(left_id, right_id, cosine)`
-4. `run_reranking(schema_name, candidates)` — groups by left_id, calls `rerank(query=left_contextual, candidates=[right_contextuals...])` once per group
-5. `write_matches(schema_name, scored_pairs, top_k)` — sorts per left_id by rerank desc, inserts with rank 1..top_k
+1. Ingest left and right rows into `compare_{job_id}.records` (shared embedder + `ingestion.read_excel` / `build_contextual_content`).
+2. Deletes temp upload files when complete. Job status ends in `ready` (or `error`).
 
-Status transitions: `pending → ingesting → comparing → ready/error`
+**Phase 2 — run pipeline** (`comparator.run_pipeline`, driven by `GET /compare/{job_id}/runs/{run_id}/execute`):
 
-The SSE progress pattern in `compare_router.py` mirrors the `_ingest_progress` pattern in `main.py`: a module-level `_compare_progress: dict[int, dict]` is written by the background thread and polled by the SSE endpoint every 0.5 s.
+1. For each left row, optional vector retrieval against right embeddings (`top_k` from the run).
+2. Optional reranker (Ollama cross-encoder) and optional LLM judge merge into `final_score` per candidate.
+3. Writes `compare_{job_id}.run_{run_id}_matches` (immutable) with ranks 1..top_k.
+
+SSE progress: `compare_router.py` uses `_job_ingest_progress[job_id]` for Phase 1 and `_run_progress[run_id]` for Phase 2 (background thread updates dict; stream polls ~1 s — similar spirit to `_ingest_progress` in `main.py`).
 
 ---
 
@@ -324,66 +325,85 @@ The SSE progress pattern in `compare_router.py` mirrors the `_ingest_progress` p
 | GET    | `/projects`                             | List all projects                                                |
 | GET    | `/projects/{id}`                        | Get project detail (includes `has_pin`, never returns raw `pin`) |
 | POST   | `/projects`                             | Create project metadata                                          |
-| PATCH  | `/projects/{id}`                        | Update name / display_columns / default_k (no re-ingest)         |
+| PATCH  | `/projects/{id}`                        | Update name / display_columns / default_k / `rerank_enabled` / `rerank_model` (no re-ingest) |
 | DELETE | `/projects/{id}`                        | Delete project + schema                                          |
 | GET    | `/projects/{id}/columns`                | All original column names for the project schema                 |
-| GET    | `/projects/{id}/ingest?tmp_path=...`    | SSE ingestion stream                                             |
-| GET    | `/projects/{id}/search/stream`          | Streaming search SSE (query params)                              |
-| POST   | `/projects/{id}/search`                 | Non-streaming search (id or topic mode)                          |
+| GET    | `/projects/{id}/ingest?tmp_path=...`  | SSE ingestion stream                                             |
+| GET    | `/projects/{id}/search/stream`          | Streaming search SSE (query params; topic / id / legacy)         |
+| POST   | `/projects/{id}/search`                 | Non-streaming search                                             |
 | POST   | `/projects/{id}/export`                 | Search + return Excel download                                   |
 | GET    | `/projects/{id}/browse`                 | First 10 raw records (SELECT * LIMIT 10)                         |
 | POST   | `/projects/{id}/evaluate`               | SSE RAGAS export stream                                          |
 | POST   | `/projects/{id}/cluster`                | SSE cluster stream (KMeans/DBSCAN over embeddings)               |
-| POST   | `/projects/{id}/system-config`          | Embedding + reranker config locked at ingestion time             |
-| POST   | `/projects/{id}/verify-pin`             | Verify PIN for a protected project                               |
-| POST   | `/projects/preview`                     | Parse Excel → return columns + row count                         |
-| GET    | `/models?url=...&api_key=...`           | Proxy /v1/models from any OpenAI-compatible endpoint             |
-| GET    | `/system-config`                        | Live system config                                               |
-| GET    | `/health`                               | Liveness check                                                   |
+| POST   | `/projects/{id}/cluster/export`         | Same clustering as POST cluster, returns Excel download          |
+| GET    | `/projects/{id}/column-values`          | Distinct values for a column (cluster filter picker; max 100)    |
+| GET    | `/projects/{id}/system-config`          | Read-only retrieval stack summary (PIN if project locked)        |
+| POST   | `/projects/{id}/verify-pin`             | Body `{ "pin": "..." }` → `{ "ok": true }` or 401                 |
+| POST   | `/projects/preview`                     | Multipart Excel → columns, sheet_names, row_count, tmp_path        |
+| GET    | `/models?url=...&api_key=...`           | Proxy `/v1/models` from an OpenAI-compatible endpoint            |
+| POST   | `/embedding/verify`                     | Probe embed with optional URL/key/model (Create flow)            |
+| POST   | `/rerank/verify`                        | Probe reranker model (returns strategy)                          |
+| GET    | `/system-config`                        | Global live system config (no PIN)                             |
+| GET    | `/health`                               | Liveness + API `version`                                         |
 
 ### Compare routes (registered at `/compare` prefix via `compare_router.py`)
 
-| Method | Path                                               | Description                                              |
-| ------ | -------------------------------------------------- | -------------------------------------------------------- |
-| POST   | `/compare/preview-left`                            | Multipart upload → columns, sheet_names, row_count, tmp_path |
-| POST   | `/compare/preview-right`                           | Same for right file                                      |
-| POST   | `/compare/preview-context`                         | `{tmp_path, match_columns, n}` → sample merged-text strings (pre-ingest preview of what will be embedded) |
-| POST   | `/compare/`                                        | Create compare job → `{id, schema_name, status, ...}`    |
-| GET    | `/compare/`                                        | List all jobs                                            |
-| GET    | `/compare/{job_id}`                                | Job detail (tmp_path fields stripped from response)      |
-| GET    | `/compare/{job_id}/ingest`                         | SSE — drives full pipeline (ingest → search → rerank)    |
-| GET    | `/compare/{job_id}/review`                         | `{total_left, reviewed, pending}`                        |
-| GET    | `/compare/{job_id}/review/next?min_score&offset&include_decided` | Next ReviewItem (404 if none)              |
-| POST   | `/compare/{job_id}/review/{left_id}`               | Upsert decision `{matched_right_id}` (null = no match)   |
-| GET    | `/compare/{job_id}/export?type=raw`                | All left × top-N right pairs (single sheet)              |
-| GET    | `/compare/{job_id}/export?type=confirmed`          | 3-sheet report (post-review)                             |
-| DELETE | `/compare/{job_id}`                                | Drop schema + delete row                                 |
+See module docstring in `compare_router.py` for the full list. Summary:
 
-**Export details:**
-- `?type=raw` — available immediately after job is ready; one row per (left, right candidate, rank); columns: `left_row, left_display, left_contextual, rank, right_row, right_display, right_contextual, cosine, rerank`.
-- `?type=confirmed` — 3 sheets: `Confirmed Matches` (decided pairs), `Unique {label_left}` (no-match + unreviewed), `Unique {label_right}` (right rows never selected). Unreviewed left rows have a blank `human_review` column; explicit no-match rows have `"no match"`.
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| POST | `/compare/preview-left` / `preview-right` | Multipart upload → columns, sheet_names, row_count, tmp_path |
+| POST | `/compare/preview-context` | `{ tmp_path, match_columns, n }` → sample merged strings (server splits match_columns into context vs content heuristically for preview) |
+| POST | `/compare/` | Create job + schema (embed settings only; no pipeline yet) |
+| GET | `/compare/` | List jobs |
+| GET | `/compare/{job_id}` | Job detail (secrets / tmp paths stripped) |
+| PATCH | `/compare/{job_id}` | Update `name` / `notes` |
+| DELETE | `/compare/{job_id}` | Drop job schema + job + all runs |
+| GET | `/compare/{job_id}/ingest` | SSE Phase 1 — embed left + right into `records` |
+| POST | `/compare/{job_id}/runs` | Create run (`top_k`, vector / reranker / llm_judge flags + URLs/models) |
+| GET | `/compare/{job_id}/runs` | List runs |
+| GET | `/compare/{job_id}/runs/{run_id}` | Run detail |
+| DELETE | `/compare/{job_id}/runs/{run_id}` | Drop run tables + row |
+| GET | `/compare/{job_id}/runs/{run_id}/execute` | SSE Phase 2 — populate `run_{run_id}_matches` |
+| GET | `/compare/{job_id}/runs/{run_id}/review` | `{ total_left, reviewed, pending, no_match, matched }` |
+| GET | `/compare/{job_id}/runs/{run_id}/review/next` | Next `ReviewItem` (same query params as before; **run-scoped**) |
+| POST | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `{ matched_right_id }` (null = no match) |
+| GET | `/compare/{job_id}/runs/{run_id}/export` | Excel download; `type=raw` or `type=confirmed` (per run) |
+| GET | `/compare/{job_id}/browse` | Paginated raw `records` (optional `side=left\|right`) |
+| GET | `/compare/{job_id}/runs/{run_id}/browse-raw` | Slice of match pairs + scores for UI |
+| GET | `/compare/{job_id}/config-stats` | Job config + stats blob for UI / debugging |
+
+**Export details** (`export?type=` on a **run**):
+
+- `type=raw` — one row per (left, candidate right, rank); includes cosine, rerank, LLM, and **final** scores when present.
+- `type=confirmed` — same three-sheet semantics as before (`Confirmed Matches`, unique left including `human_review`, unique right), scoped to that run’s `matches` / `decisions`.
 
 ### Per-project PIN protection
 
 Projects can optionally be created with a PIN (`public.projects.pin`, stored as plain text).
 
-- **If a PIN is set**: `PATCH`, `GET /columns`, `GET /browse`, `POST /search`, `POST /export`, `POST /evaluate/run` all require `X-Project-Pin: <pin>` header (401 otherwise).
+- **If a PIN is set**, these require header `X-Project-Pin: <pin>` (401 otherwise): `PATCH /projects/{id}`, `DELETE /projects/{id}`, `GET /projects/{id}/columns`, `GET /projects/{id}/browse`, `GET /projects/{id}/search/stream`, `POST /projects/{id}/search`, `POST /projects/{id}/export`, `POST /projects/{id}/cluster`, `POST /projects/{id}/cluster/export`, `GET /projects/{id}/column-values`, `GET /projects/{id}/system-config`, `POST /projects/{id}/evaluate`.
+- **`GET /projects/{id}/ingest`** is not PIN-gated (used right after create with a fresh `tmp_path`); treat project URLs accordingly.
+- `POST /projects/{id}/verify-pin` checks the PIN in the JSON body (no `X-Project-Pin` required on that route).
 - Compare Jobs have no PIN in v1.
 
 ---
 
 ## Per-Project Embedding Config
 
-Projects can override the system-level embedding model. The config is locked at creation time.
+Projects can override the system-level embedding model. Embedding URL / key / model / dims are fixed at **project create** (ingestion uses those fields).
 
 **Flow:**
 1. User provides `embed_url` + optional `embed_api_key` in the Connection step
 2. Frontend calls `GET /models?url=...` — backend proxies `/v1/models` and returns model IDs
-3. At ingestion start, if `embed_url` is set but `embed_dims` is null, a probe `embed("probe")` call determines actual dims and writes them to `public.projects.embed_dims`
-4. `create_project_schema()` uses the resolved dims for the pgvector `vector(N)` column
-5. Every `embed()` call passes `base_url`, `api_key`, `model` kwargs; `embedder.py` constructs a fresh OpenAI client for overrides, falls back to module singleton for nulls
+3. `POST /embedding/verify` can validate the endpoint before submit
+4. At ingestion start, if `embed_url` is set but `embed_dims` is null, a probe `embed("probe")` call determines dims and writes `public.projects.embed_dims`
+5. `create_project_schema()` uses the resolved dims for the pgvector `vector(N)` column
+6. Every `embed()` call passes `base_url`, `api_key`, `model` kwargs; `embedder.py` builds a client for overrides or falls back to the module singleton
 
-**Fallback:** null fields fall through to system config (`OLLAMA_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIMS`).
+**Rerank:** `public.projects.rerank_enabled` + `rerank_model` gate Search/export/eval/cluster reranking (`PATCH` from Settings or `RerankConfigModal`). Null/empty `rerank_model` → system `RERANKER_MODEL`.
+
+**Fallback:** null embed fields fall through to system config (`OLLAMA_BASE_URL` / OpenAI settings + `EMBEDDING_MODEL` + `EMBEDDING_DIMS` from `config.py`).
 
 ---
 
@@ -446,17 +466,19 @@ Two-tab layout: **Search Projects** | **Compare Jobs** (tabs switch the main lis
 
 Name → Upload Excel → Store columns → Context columns → ID column (optional) → Display columns → Connection (override embedding URL/key/model) → Settings (default K + optional PIN) → SSE progress → redirect to search.
 
-### Create Compare Job (`/compare/new`) — 6 steps
+### Create Compare Job (`/compare/new`) — 7 steps
 
-Names (job name + label_left + label_right) → Upload Left → Columns Left (context multi-select, content required, display optional) → Upload Right → Columns Right → Review summary → SSE progress (ingest_left → ingest_right → searching → reranking → complete) → redirect to job page.
+Names → Upload Left → Columns Left (multi-select “match columns” merged for embedding + optional display column) → Upload Right → Columns Right → **Connection** (optional per-job embedding URL / key / model; dims probed at create) → Review & create → **redirect to job page** (`/compare/:jobId`).
 
-Both the Search and Compare upload steps have **one-click sample loaders** (Products / IT Assets / Books / HR). Clicking a sample fetches from `GET /samples/{filename}` (static files served by FastAPI) and passes the downloaded blob through the same preview flow as a real upload. No special backend handling needed.
+Embedding runs on the job page via `GET /compare/{job_id}/ingest` (SSE). After the job is `ready`, users create **runs** (vector / reranker / LLM judge / `top_k`) and execute each with `GET .../runs/{run_id}/execute` (SSE). Review and export are scoped to the selected run.
 
-The Compare Review step calls `POST /compare/preview-context` on the already-uploaded `tmp_path` to show 2 example merged-text strings, so users can verify their column picks before committing.
+Both the Search and Compare upload steps have **one-click sample loaders** (Products / IT Assets / Books / HR). Clicking a sample fetches from `GET /samples/{filename}` (static files under `backend/samples/`, mount path configurable with `SAMPLES_DIR`) and passes the downloaded blob through the same preview flow as a real upload.
+
+The Compare Review step calls `POST /compare/preview-context` on the chosen side’s `tmp_path` with `{ match_columns, n }` so users see sample merged strings before create.
 
 ### Search (`/projects/:id/search`) — tab 1 of 5
 
-Mode toggle (ID / Topic), pipeline toggles (vector/BM25/RRF/rerank), K selector, live SSE stream via `fetch`+`ReadableStream`, results table + stats panel, Excel export.
+Mode toggle (ID / Topic / **Legacy**), pipeline toggles (vector/BM25/RRF/rerank) for topic mode, K selector, live SSE stream via `fetch` + `ReadableStream`, results table + stats panel, Excel export.
 
 ### Evaluate (`/projects/:id/evaluate`) — tab 2 of 5
 
@@ -472,80 +494,78 @@ KMeans or DBSCAN over embeddings, per-column substring filters, streaming SSE.
 
 ### Settings (`/projects/:id/settings`) — tab 5 of 5
 
-Read-only ingestion config + editable name/k/display columns; PATCH on save.
+Read-only ingestion config + editable name / default K / display columns; rerank enable + model override (with `RerankConfigModal` + `POST /rerank/verify`); PATCH on save. Uses `GET /system-config` and `GET /projects/{id}/system-config` for readouts.
 
 ### Compare Job (`/compare/:jobId`)
 
-Two tabs:
+Job-level: ingest status, optional **Browse** embedded rows, **Config / stats** panel (`GET /compare/{job_id}/config-stats`), **Runs** list (create / delete / select). Each run: **Execute** pipeline (SSE), then **Review** (same card UX as before; primary score prefers `final_score`, then normalized rerank, else cosine). Candidate badges can show **C / R / LLM** when scores exist. **Export** raw vs confirmed is **per run**. Top-k and pipeline toggles are chosen when creating the run, not at job create time.
 
-**Review tab** — Left card (~38% width) with `contextual_content` + `display_value` chip. Right area with 3 candidate cards in a row, each showing content, display chip, score badge (≥0.85 green / ≥0.60 amber / else gray), rank badge. Click card = confirm match; "No match" button = explicit rejection. Top bar: progress counter, score filter dropdown, "include decided" checkbox. Prev/Next navigation with offset. Auto-advances to next undecided row after a decision when `include_decided=false`.
-
-**Export tab** — stats grid (reviewed/pending/total left), "Download Raw" button (available immediately), "Download Confirmed" button (3-sheet post-review report).
-
-### History (`/history`), System (`/system`), Per-project System Info (`/projects/:id/system`)
+### History (`/history`), System (`/system`)
 
 History: localStorage-backed table with type filter, expand-to-results, re-run button, CSV export.
-System pages: read-only config viewers.
+
+Global **System** (`/system`): read-only `GET /system-config`. Per-project retrieval detail uses `GET /projects/{id}/system-config` from Settings (no separate route in `App.jsx`).
 
 ---
 
 ## Project Structure
 
+Repository root (not a `lens/` subfolder):
+
 ```
-lens/
-  backend/
-    config.py          ← ALL config; never call os.environ in logic files
-    main.py            ← FastAPI app; registers all routers; _ingest_progress dict
-    db.py              ← get_cursor(), init_db(), create/drop project+compare schemas
-    embedder.py        ← embed(), rerank(), list_models(); shared by search + compare
-    ingestion.py       ← read_excel(), build_contextual_content(), ingest() for Search
-    comparator.py      ← ingest_side(), run_bidirectional_search(), run_reranking(),
-                         write_matches(), run_compare_job(); reuses embedder + ingestion
-    compare_router.py  ← FastAPI router for /compare/*; _compare_progress dict;
-                         registered in main.py with prefix="/compare"
-    search.py          ← vector + BM25 + RRF + reranker (streaming SSE)
-    clustering.py      ← KMeans/DBSCAN over stored embeddings
-    projects.py        ← project CRUD helpers
-    models.py          ← all Pydantic models (Search + Compare)
-    evaluate.py        ← RAGAS export builder + SSE streamer
-    samples/           ← small Excel files used in e2e tests
-  frontend/
-    src/
-      pages/
-        Home.jsx               ← two-tab home (SearchTab + CompareTab)
-        CreateProject.jsx      ← 8-step Search project wizard
-        CreateCompareJob.jsx   ← 6-step Compare job wizard
-        CompareJob.jsx         ← review + export tabs
-        Search.jsx
-        EvaluateProject.jsx
-        Browse.jsx
-        Cluster.jsx
-        Settings.jsx
-        SystemConfig.jsx       ← per-project system config (read-only)
-        System.jsx             ← global system config (read-only)
-        History.jsx
-      components/
-        ResultsTable.jsx
-        StatsPanel.jsx
-        BottomBar.jsx          ← LENS home link + API status + History link
-        Layout.jsx
-        PinGate.jsx            ← PIN entry card rendered when project is locked
-      contexts/
-        ProjectStateContext.jsx ← persists search + eval state across tab nav
-      hooks/
-        useProjectPin.js       ← { isLocked, unlockWithPin }
-      utils/
-        history.js             ← localStorage helpers
-        clusterRunManager.js   ← cluster job lifecycle
-      api/
-        client.js              ← ALL axios/fetch calls; never inline in components
-      App.jsx
-      main.jsx
-    vite.config.js     ← catch-all proxy: all non-HTML/non-asset requests → backend
-    playwright.config.ts
-  docker-compose.yml   ← --profile dev / --profile prod
-  Makefile
-  BEST_PRACTICES.md
+backend/
+  config.py          ← ALL config; never call os.environ in logic files
+  main.py            ← FastAPI app; registers routers; _ingest_progress; static/samples mounts
+  db.py              ← get_cursor(), init_db(), project + compare schemas + per-run tables;
+                       migrate_legacy_compare_jobs()
+  embedder.py        ← embed(), rerank(), list_models(); shared by search + compare
+  ingestion.py       ← read_excel(), build_contextual_content(), ingest() for Search
+  comparator.py      ← run_ingest_job(), run_pipeline(), vector/rerank/LLM stages;
+                       reuses embedder + ingestion
+  compare_router.py  ← /compare/*; _job_ingest_progress, _run_progress
+  search.py          ← vector + BM25 + RRF + reranker (streaming SSE)
+  clustering.py      ← KMeans/DBSCAN over stored embeddings
+  projects.py        ← project CRUD helpers
+  models.py          ← Pydantic models (Search + Compare)
+  evaluate.py        ← RAGAS export builder + SSE streamer
+  samples/           ← small Excel files for e2e + UI sample loaders
+frontend/
+  src/
+    pages/
+      Home.jsx
+      CreateProject.jsx
+      CreateCompareJob.jsx
+      CompareJob.jsx
+      Search.jsx
+      EvaluateProject.jsx
+      Browse.jsx
+      Cluster.jsx
+      Settings.jsx
+      System.jsx
+      History.jsx
+    components/
+      ResultsTable.jsx
+      StatsPanel.jsx
+      BottomBar.jsx
+      Layout.jsx
+      PinGate.jsx
+      RerankConfigModal.jsx
+    contexts/
+      ProjectStateContext.jsx
+    hooks/
+      useProjectPin.js
+    utils/
+      history.js
+      clusterRunManager.js
+    api/
+      client.js
+    App.jsx
+    main.jsx
+  vite.config.js
+  playwright.config.ts
+docker-compose.yml
+Makefile
+BEST_PRACTICES.md
 ```
 
 ---
@@ -590,7 +610,7 @@ python scripts/your_script.py
 
 **Dev:** Vite dev server (`localhost:37001`) proxies all non-HTML/non-asset requests to FastAPI (`localhost:37002`) via a catch-all `/` rule in `vite.config.js`. Adding new backend routes does not require updating `vite.config.js`.
 
-**Lab setup (Linux host, Windows browsers):** Keep `VITE_API_URL` empty so the browser always calls the Vite origin and the proxy handles routing. If `VITE_API_URL` points at `:37002` directly you bypass the proxy and hit CORS/firewall issues.
+**Lab setup (Linux host, Windows browsers):** Keep `VITE_API_PROXY_TARGET` unset (or pointing at the container name) so the Vite proxy handles routing. If the browser directly calls `:37002` you bypass the proxy and hit CORS/firewall issues.
 
 **Prod — single port, FastAPI serves static files:**
 
@@ -614,6 +634,9 @@ your.server {
 | `make down`           | Stop dev stack                                                |
 | `make build`          | Rebuild dev Docker images                                     |
 | `make logs`           | Follow all container logs                                     |
+| `make logs-api`       | Follow API container logs only                                |
+| `make logs-frontend`  | Follow frontend container logs only                           |
+| `make logs-db`        | Follow Postgres container logs only                           |
 | `make logs-split`     | Split logs into 3 tmux panes (requires tmux)                  |
 | `make restart`        | Stop + start dev stack (no rebuild)                           |
 | `make ps`             | Show container status                                         |
@@ -647,6 +670,7 @@ Test files in `frontend/e2e/`:
 - `eval_export.spec.ts` — evaluation run + JSON export
 - `cluster.spec.ts` — clustering flow
 - `pin_gate.spec.ts` — PIN protection flow
+- `compare_flow.spec.ts` — compare job creation + review + export flow
 - `major_flows.spec.ts` — end-to-end user journeys (covers create+ingest+search+export)
 
 Sample Excel files used by tests live in `backend/samples/`.
@@ -657,8 +681,8 @@ Sample Excel files used by tests live in `backend/samples/`.
 
 - pgvector over dedicated vector DB — sufficient at this scale
 - HNSW over IVFFlat/exact search — fast enough; no maintenance overhead
-- Hybrid BM25 + vector + RRF + reranker pipeline for Search
-- Compare uses left→right vector search only (bidirectional stored, v1 uses left→right)
-- Compare `top_k` stored per-job and fixed at creation; changing it for an existing job requires deleting `matches` and re-running (no UI for this in v1)
-- `records` in compare schemas holds both sides in one table with a `side` column — single HNSW index, cheap SQL filter at our scale
-- On-premise constraint: bge-m3 + bge-reranker-base via Ollama on A4000 GPU
+- Hybrid BM25 + vector + RRF + reranker pipeline for Search (plus optional legacy single-shot mode)
+- Compare embeddings live once per job (`records`); **runs** recompute candidate sets and scores into `run_{id}_matches` so operators can A/B pipelines (`top_k`, reranker, LLM judge) without re-embedding
+- Compare vector stage is left→right nearest-neighbor over the shared `records` table (`side` filter)
+- `records` in compare job schemas holds both sides with a `side` column — single HNSW index per job
+- On-premise default: bge-m3 + bge-reranker-base via Ollama on host GPU; OpenAI embedding path is opt-in for development only

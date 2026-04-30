@@ -29,7 +29,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("lens.main")
-from db import init_db, get_cursor
+from db import init_db, get_cursor, migrate_legacy_compare_jobs
 from models import (
     ProjectCreate,
     ProjectUpdate,
@@ -82,6 +82,7 @@ def startup():
     mimetypes.add_type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx")
     mimetypes.add_type("application/vnd.ms-excel", ".xls")
     init_db()
+    migrate_legacy_compare_jobs()
     logger.info("DB initialised")
 
 _SAMPLES_DIR = os.environ.get(

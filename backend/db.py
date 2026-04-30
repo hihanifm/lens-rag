@@ -93,13 +93,10 @@ def init_db():
                 source_filename_right    TEXT,
                 tmp_path_left            TEXT,
                 tmp_path_right           TEXT,
-                top_k                    INTEGER DEFAULT 3,
                 embed_dims               INTEGER,
                 embed_url                TEXT,
                 embed_api_key            TEXT,
                 embed_model              TEXT,
-                rerank_enabled           BOOLEAN DEFAULT TRUE,
-                rerank_model             TEXT,
                 created_at               TIMESTAMP DEFAULT NOW()
             );
         """)
@@ -108,12 +105,37 @@ def init_db():
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_url TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_model TEXT;")
+        # Legacy columns kept for migrate_legacy_compare_jobs() to read initial run config
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS top_k INTEGER DEFAULT 3;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_model TEXT;")
 
+        # ── Compare runs table ─────────────────────────────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.compare_runs (
+                id                    SERIAL PRIMARY KEY,
+                job_id                INTEGER NOT NULL REFERENCES public.compare_jobs(id),
+                name                  TEXT,
+                status                TEXT NOT NULL DEFAULT 'pending',
+                status_message        TEXT,
+                top_k                 INTEGER NOT NULL DEFAULT 3,
+                vector_enabled        BOOLEAN NOT NULL DEFAULT TRUE,
+                reranker_enabled      BOOLEAN NOT NULL DEFAULT FALSE,
+                reranker_model        TEXT,
+                reranker_url          TEXT,
+                llm_judge_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
+                llm_judge_url         TEXT,
+                llm_judge_model       TEXT,
+                llm_judge_prompt      TEXT,
+                row_count_left        INTEGER,
+                created_at            TIMESTAMP DEFAULT NOW(),
+                completed_at          TIMESTAMP
+            );
+        """)
+
 
 def create_compare_schema(job_id: int, dims: int):
-    """Create per-job schema with records, matches, and decisions tables."""
+    """Create per-job schema with records table only. Matches/decisions are per-run."""
     schema = f"compare_{job_id}"
     with get_cursor() as (cur, conn):
         cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
@@ -138,20 +160,38 @@ def create_compare_schema(job_id: int, dims: int):
             CREATE INDEX IF NOT EXISTS {schema}_records_side_idx
                 ON {schema}.records (side);
         """)
+
+
+def drop_compare_schema(job_id: int):
+    """Drop the per-job schema and delete compare_jobs + compare_runs rows."""
+    schema = f"compare_{job_id}"
+    with get_cursor() as (cur, conn):
+        cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE;")
+        cur.execute("DELETE FROM public.compare_runs WHERE job_id = %s;", (job_id,))
+        cur.execute("DELETE FROM public.compare_jobs WHERE id = %s;", (job_id,))
+
+
+def create_run_tables(schema_name: str, run_id: int):
+    """Create per-run matches and decisions tables inside the job schema."""
+    with get_cursor() as (cur, conn):
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {schema}.matches (
+            CREATE TABLE IF NOT EXISTS {schema_name}.run_{run_id}_matches (
                 id              SERIAL PRIMARY KEY,
                 left_id         INTEGER NOT NULL,
                 right_id        INTEGER NOT NULL,
                 cosine_score    FLOAT,
                 rerank_score    FLOAT,
+                llm_score       FLOAT,
+                final_score     FLOAT NOT NULL DEFAULT 0,
                 rank            INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS {schema}_matches_left_rank_idx
-                ON {schema}.matches (left_id, rank);
         """)
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {schema}.decisions (
+            CREATE INDEX IF NOT EXISTS {schema_name}_run_{run_id}_matches_left_rank_idx
+                ON {schema_name}.run_{run_id}_matches (left_id, rank);
+        """)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema_name}.run_{run_id}_decisions (
                 left_id          INTEGER PRIMARY KEY,
                 matched_right_id INTEGER,
                 decided_at       TIMESTAMP DEFAULT NOW()
@@ -159,12 +199,91 @@ def create_compare_schema(job_id: int, dims: int):
         """)
 
 
-def drop_compare_schema(job_id: int):
-    """Drop the per-job schema and delete the compare_jobs row."""
-    schema = f"compare_{job_id}"
+def drop_run_tables(schema_name: str, run_id: int):
+    """Drop per-run matches and decisions tables."""
     with get_cursor() as (cur, conn):
-        cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE;")
-        cur.execute("DELETE FROM public.compare_jobs WHERE id = %s;", (job_id,))
+        cur.execute(f"DROP TABLE IF EXISTS {schema_name}.run_{run_id}_matches CASCADE;")
+        cur.execute(f"DROP TABLE IF EXISTS {schema_name}.run_{run_id}_decisions CASCADE;")
+        cur.execute("DELETE FROM public.compare_runs WHERE id = %s;", (run_id,))
+
+
+def migrate_legacy_compare_jobs():
+    """
+    One-time migration: jobs that were created before the Runs feature was added
+    have a flat matches/decisions table at schema level. Wrap them in a run_1 row.
+    Safe to call on every startup — skips jobs that already have runs.
+    """
+    import logging
+    logger = logging.getLogger("lens.db.migrate")
+
+    # Find compare jobs with no runs
+    with get_cursor() as (cur, _conn):
+        cur.execute("""
+            SELECT cj.id, cj.schema_name,
+                   COALESCE(cj.top_k, 3)              AS top_k,
+                   COALESCE(cj.rerank_enabled, TRUE)   AS rerank_enabled,
+                   cj.rerank_model
+            FROM public.compare_jobs cj
+            LEFT JOIN public.compare_runs cr ON cr.job_id = cj.id
+            WHERE cr.id IS NULL
+        """)
+        candidates = [dict(r) for r in cur.fetchall()]
+
+    for job in candidates:
+        schema = job["schema_name"]
+        # Check schema exists and has a legacy 'matches' table
+        with get_cursor() as (cur, _conn):
+            cur.execute("""
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = 'matches'
+            """, [schema])
+            has_matches = cur.fetchone() is not None
+
+        if not has_matches:
+            continue
+
+        logger.info("migrate_legacy_compare_jobs: migrating job_id=%d schema=%s", job["id"], schema)
+
+        with get_cursor() as (cur, _conn):
+            # Create a legacy run row
+            cur.execute("""
+                INSERT INTO public.compare_runs
+                    (job_id, name, status, top_k, vector_enabled,
+                     reranker_enabled, reranker_model, created_at, completed_at)
+                VALUES (%s, 'Legacy run', 'ready', %s, TRUE, %s, %s, NOW(), NOW())
+                RETURNING id
+            """, [
+                job["id"],
+                job["top_k"],
+                bool(job["rerank_enabled"]),
+                job.get("rerank_model"),
+            ])
+            run_id = cur.fetchone()["id"]
+
+            # Rename legacy tables into per-run namespace
+            cur.execute(f"ALTER TABLE {schema}.matches RENAME TO run_{run_id}_matches;")
+
+            # Add new score columns if missing
+            cur.execute(f"ALTER TABLE {schema}.run_{run_id}_matches ADD COLUMN IF NOT EXISTS llm_score FLOAT;")
+            cur.execute(f"ALTER TABLE {schema}.run_{run_id}_matches ADD COLUMN IF NOT EXISTS final_score FLOAT;")
+            cur.execute(f"""
+                UPDATE {schema}.run_{run_id}_matches
+                SET final_score = COALESCE(
+                    CASE WHEN rerank_score BETWEEN 0 AND 1 THEN rerank_score ELSE NULL END,
+                    cosine_score, 0
+                )
+                WHERE final_score IS NULL;
+            """)
+
+            # Rename decisions if it exists
+            cur.execute("""
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = 'decisions'
+            """, [schema])
+            if cur.fetchone():
+                cur.execute(f"ALTER TABLE {schema}.decisions RENAME TO run_{run_id}_decisions;")
+
+        logger.info("migrate_legacy_compare_jobs: done job_id=%d run_id=%d", job["id"], run_id)
 
 
 def create_project_schema(schema_name: str, columns: list, id_column: str = None, dims: int = None):
