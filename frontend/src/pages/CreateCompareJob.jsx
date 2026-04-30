@@ -851,6 +851,59 @@ export default function CreateCompareJob() {
   const systemEmbedUrlRef = useRef('')
   const rerankPrefilled = useRef(false)
 
+  // Enter should behave like clicking the primary action (Continue/Create) in the wizard.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Enter') return
+      if (e.isComposing) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      const el = document.activeElement
+      if (el?.tagName === 'TEXTAREA') return
+      if (el?.isContentEditable) return
+
+      const canProceed =
+        (step === 0 && state.name.trim() && state.labelLeft.trim() && state.labelRight.trim()) ||
+        (step === 1 && state.tmpPathLeft) ||
+        (step === 2 && (state.contextColumnsLeft?.length ?? 0) > 0) ||
+        (step === 3 && state.tmpPathRight) ||
+        (step === 4 && (state.contextColumnsRight?.length ?? 0) > 0) ||
+        (step === 5 && !connectionCheckLoading) ||
+        (step === 6 && !rerankModelLoading && !rerankCheckLoading) ||
+        (step === 7 && !submitting)
+
+      if (!canProceed) return
+      e.preventDefault()
+
+      if (step === 0) return setStep(1)
+      if (step === 1) return setStep(2)
+      if (step === 2) return setStep(3)
+      if (step === 3) return setStep(4)
+      if (step === 4) return setStep(5)
+      if (step === 5) return void handleConnectionContinue()
+      if (step === 6) return void handleRerankContinue()
+      if (step === 7) return void handleSubmit()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    step,
+    state.name,
+    state.labelLeft,
+    state.labelRight,
+    state.tmpPathLeft,
+    state.contextColumnsLeft,
+    state.tmpPathRight,
+    state.contextColumnsRight,
+    connectionCheckLoading,
+    rerankModelLoading,
+    rerankCheckLoading,
+    submitting,
+    handleConnectionContinue,
+    handleRerankContinue,
+  ])
+
   // Pre-fill Connection step from system config on first visit
   useEffect(() => {
     if (step !== 5 || connectionPrefilled.current) return
