@@ -61,17 +61,18 @@ function scoreBorder(score, selected, confirmed) {
 
 // ── Candidate card (right side) ────────────────────────────────────────────
 
-function CandidateCard({ candidate, isSelected, onClick }) {
+function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
   const { score, source } = effectiveScoreInfo(candidate)
   const cosine = candidate?.cosine_score
   const rerank = candidate?.rerank_score
   const rerankIsNorm = isNormalized01(rerank)
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`relative flex-1 text-left rounded-xl border-2 p-4 transition-all cursor-pointer
-        bg-white
-        ${scoreBorder(score, isSelected, false)}`}
+        ${isSaved ? 'bg-emerald-50' : 'bg-white'}
+        ${scoreBorder(score, isSelected, isSaved)}`}
     >
       {/* Score badges (show both) */}
       <div
@@ -89,7 +90,10 @@ function CandidateCard({ candidate, isSelected, onClick }) {
       </div>
 
       {/* Rank badge */}
-      <span className="absolute top-3 left-3 text-xs text-gray-400 font-medium">
+      <span
+        className="absolute top-3 left-3 text-xs text-gray-400 font-medium"
+        title={`Original rank: #${candidate.rank}`}
+      >
         #{candidate.rank}
       </span>
 
@@ -104,9 +108,13 @@ function CandidateCard({ candidate, isSelected, onClick }) {
       </p>
 
       {/* Selected indicator */}
-      {isSelected && (
-        <div className="absolute bottom-3 right-3 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          ✓ Selected
+      {(isSaved || isSelected) && (
+        <div
+          className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${
+            isSaved ? 'bg-emerald-600' : 'bg-blue-600'
+          }`}
+        >
+          {isSaved ? '✓ Saved' : '✓ Selected'}
         </div>
       )}
     </button>
@@ -229,6 +237,12 @@ function ReviewTab({ job }) {
       const tag = el?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
 
+      if (e.key === 'x' || e.key === 'X') {
+        e.preventDefault()
+        handleNoMatch()
+        return
+      }
+
       if (e.key === 'ArrowLeft') {
         if (offset > 0) {
           e.preventDefault()
@@ -243,7 +257,7 @@ function ReviewTab({ job }) {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [offset, saving, loading, handlePrev, handleNext])
+  }, [offset, saving, loading, handlePrev, handleNext, handleNoMatch])
 
   return (
     <div className="space-y-4">
@@ -349,11 +363,14 @@ function ReviewTab({ job }) {
                   No candidates found for this row.
                 </div>
               ) : (
-                item.candidates.map(c => (
+                [...item.candidates]
+                  .sort((a, b) => (Number(b?.cosine_score) || 0) - (Number(a?.cosine_score) || 0))
+                  .map(c => (
                   <CandidateCard
                     key={c.right_id}
                     candidate={c}
                     isSelected={selectedRightId === c.right_id}
+                    isSaved={item.is_decided && item.current_decision === c.right_id}
                     onClick={() => handleSelect(c.right_id)}
                   />
                 ))
@@ -364,18 +381,20 @@ function ReviewTab({ job }) {
           {/* No match + nav */}
           <div className="flex items-center justify-between">
             <button
+              type="button"
               onClick={handleNoMatch}
               disabled={saving}
               className={`px-5 py-2 rounded-lg text-sm font-medium border transition-colors
                 ${item.is_decided && item.current_decision === null
-                  ? 'bg-gray-700 text-white border-gray-700'
-                  : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300'}`}
             >
               {saving ? '…' : '✕ No match'}
             </button>
 
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={handlePrev}
                 disabled={offset === 0}
                 className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30"
@@ -384,6 +403,7 @@ function ReviewTab({ job }) {
               </button>
               <span className="text-xs text-gray-400">row {offset + 1}</span>
               <button
+                type="button"
                 onClick={handleNext}
                 className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50"
               >

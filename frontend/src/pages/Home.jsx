@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useQueries } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { getProjects, deleteProject, listCompareJobs, deleteCompareJob } from '../api/client'
+import { getProjects, deleteProject, listCompareJobs, deleteCompareJob, getReviewStats } from '../api/client'
 import { loadHistory, subscribeHistoryUpdates } from '../utils/history'
 
 const statusColor = {
@@ -152,12 +152,32 @@ function CompareTab() {
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ['compare-jobs'],
     queryFn: listCompareJobs,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     refetchInterval: (query) => {
       const list = query.state.data
       if (!Array.isArray(list)) return false
       return list.some((j) => ['ingesting', 'comparing'].includes(j.status)) ? 3000 : false
     },
   })
+
+  const reviewStatsQueries = useQueries({
+    queries: jobs.map((j) => ({
+      queryKey: ['compare-review-stats', String(j.id)],
+      queryFn: () => getReviewStats(j.id),
+      enabled: j.status === 'ready',
+      // Home tiles: fetch once when Home is shown; no background refreshing.
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    })),
+  })
+
+  const statsByJobId = new Map(
+    reviewStatsQueries
+      .map((q, idx) => [jobs[idx]?.id, q.data])
+      .filter(([id]) => id != null)
+  )
 
   const handleDelete = async (e, job) => {
     e.preventDefault()
@@ -208,6 +228,21 @@ function CompareTab() {
                 {' · '}
                 {new Date(j.created_at).toLocaleDateString()}
               </p>
+              {j.status === 'ready' && (() => {
+                const s = statsByJobId.get(j.id)
+                if (!s) return null
+                return (
+                  <p className="text-xs text-gray-400 mt-1">
+                    <span className="font-medium text-gray-700">{s.reviewed?.toLocaleString?.() ?? s.reviewed}</span>
+                    {' / '}
+                    <span>{s.total_left?.toLocaleString?.() ?? s.total_left}</span>
+                    {' reviewed'}
+                    <span className="ml-2 text-amber-600">
+                      {s.pending?.toLocaleString?.() ?? s.pending} pending
+                    </span>
+                  </p>
+                )
+              })()}
             </div>
             <div className="flex items-center gap-2">
               <StatusBadge status={j.status} />
