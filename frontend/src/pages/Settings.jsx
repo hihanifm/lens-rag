@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getProject, getProjectColumns, updateProject, deleteProject } from '../api/client'
+import { getProject, getProjectColumns, updateProject, deleteProject, getSystemConfig } from '../api/client'
 import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import RerankConfigModal from '../components/RerankConfigModal'
@@ -48,6 +48,15 @@ export default function Settings() {
     queryKey: ['project-columns', projectId],
     queryFn: () => getProjectColumns(projectId),
     enabled: !!project && !isLocked,
+  })
+
+  const { data: systemCfg } = useQuery({
+    queryKey: ['system-config'],
+    queryFn: getSystemConfig,
+    enabled: !isLocked,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const [name, setName] = useState('')
@@ -110,6 +119,8 @@ export default function Settings() {
     defaultK !== project.default_k ||
     JSON.stringify([...displayColumns].sort()) !== JSON.stringify([...project.display_columns].sort())
   )
+
+  const systemDefaultReranker = (systemCfg?.reranker_model || '').trim()
 
   if (!project) return <div className="p-8 text-gray-400">Loading...</div>
   if (isLocked) return <PinGate onUnlock={unlockWithPin} />
@@ -321,7 +332,9 @@ export default function Settings() {
                       <span className="mx-2 text-gray-300">·</span>
                       <span className="font-semibold">Model:</span>{' '}
                       <span className="font-mono break-all">
-                        {(project.rerank_model || '').trim() ? project.rerank_model : 'system default'}
+                        {(project.rerank_model || '').trim()
+                          ? project.rerank_model
+                          : (systemDefaultReranker || 'system default')}
                       </span>
                     </p>
                     <p className="text-xs text-gray-400 mt-1">

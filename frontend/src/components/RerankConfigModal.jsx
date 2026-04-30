@@ -17,6 +17,7 @@ export default function RerankConfigModal({
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [systemDefaultModel, setSystemDefaultModel] = useState('')
 
   const hasModelList = availableModels.length > 0
 
@@ -29,7 +30,15 @@ export default function RerankConfigModal({
     setModelLoading(false)
     setChecking(false)
     setSaving(false)
+    setSystemDefaultModel('')
   }, [open, currentEnabled, currentModel])
+
+  useEffect(() => {
+    if (!open) return
+    getSystemConfig()
+      .then(cfg => setSystemDefaultModel((cfg?.reranker_model || '').trim()))
+      .catch(() => {})
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -170,7 +179,7 @@ export default function RerankConfigModal({
                 disabled={!enabled}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               >
-                <option value="">system default</option>
+                <option value="">{systemDefaultModel ? `system default (${systemDefaultModel})` : 'system default'}</option>
                 {availableModels.map(m => (
                   <option key={m} value={m}>{m}</option>
                 ))}
@@ -181,7 +190,7 @@ export default function RerankConfigModal({
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 disabled={!enabled}
-                placeholder="Blank = system default"
+                placeholder={systemDefaultModel ? `Blank = ${systemDefaultModel}` : 'Blank = system default'}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               />
             )}
