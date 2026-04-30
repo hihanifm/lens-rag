@@ -76,15 +76,17 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
     >
       {/* Score badges (show both) */}
       <div
-        className="absolute top-3 right-3 flex flex-col items-end gap-1"
+        className="absolute top-3 right-3 flex items-center justify-end gap-1.5 flex-wrap max-w-[70%]"
         title={`Filter/order uses: ${source}${source === 'rerank' ? '' : ' (fallback)'} • cosine=${fmtMaybeNumber(cosine)} • rerank=${rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}`}
       >
-        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-white text-gray-700 border-gray-200">
+        <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-white text-gray-700 border-gray-200 whitespace-nowrap">
           C {fmtPct01(cosine, 0)}
         </span>
-        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
-          rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
-        }`}>
+        <span
+          className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+            rerankIsNorm ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+          }`}
+        >
           R {rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}
         </span>
       </div>
@@ -99,11 +101,11 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick }) {
 
       {/* Display value chip */}
       {candidate.display_value && (
-        <p className="text-xs text-blue-600 font-medium mt-5 mb-1 truncate">{candidate.display_value}</p>
+        <p className="text-xs text-blue-600 font-medium mt-10 mb-1 truncate">{candidate.display_value}</p>
       )}
 
       {/* Contextual content */}
-      <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-5' : ''}`}>
+      <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-10' : ''}`}>
         {candidate.contextual_content}
       </p>
 
@@ -128,17 +130,19 @@ function ReviewTab({ job }) {
   const queryClient = useQueryClient()
 
   const [minScore, setMinScore] = useState(0)
-  const [offset, setOffset] = useState(0)
-  const [item, setItem] = useState(null)
+  const [offset, setOffset] = useState(0) // page offset (0-based) in left rows list
+  const [rowsShown, setRowsShown] = useState(3) // 1 | 3 | 5
+  const [items, setItems] = useState([])
+  const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(false)
   const [noMore, setNoMore] = useState(false)
-  const [selectedRightId, setSelectedRightId] = useState(null)
-  const [saving, setSaving] = useState(false)
+  const [selectedByLeft, setSelectedByLeft] = useState(() => new Map())
+  const [savingLeftId, setSavingLeftId] = useState(null)
   const [rowStartedAt, setRowStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
 
   const scoringMode = (() => {
-    const cands = item?.candidates || []
+    const cands = items?.[activeIdx]?.candidates || items?.[0]?.candidates || []
     const hasNormalizedRerank = cands.some(c => {
       const r = c?.rerank_score
       return typeof r === 'number' && r >= 0 && r <= 1
@@ -152,28 +156,48 @@ function ReviewTab({ job }) {
     refetchInterval: false,
   })
 
-  const fetchItem = useCallback(async (newOffset) => {
+  const fetchPage = useCallback(async (newOffset) => {
     setLoading(true)
     setNoMore(false)
     try {
-      const result = await getNextReviewItem(jobId, {
-        minScore,
-        offset: newOffset,
-        includeDecided: true,
+      const start = newOffset * rowsShown
+      const reqs = Array.from({ length: rowsShown }, (_, i) => (
+        getNextReviewItem(jobId, {
+          minScore,
+          offset: start + i,
+          includeDecided: true,
+        })
+      ))
+
+      const results = await Promise.allSettled(reqs)
+      const pageItems = results
+        .map(r => (r.status === 'fulfilled' ? r.value : null))
+        .filter(Boolean)
+
+      if (pageItems.length === 0) {
+        setNoMore(true)
+        setItems([])
+        return
+      }
+
+      setItems(pageItems)
+      setActiveIdx(0)
+      setSelectedByLeft(() => {
+        const m = new Map()
+        for (const it of pageItems) m.set(it.left_id, it.current_decision ?? null)
+        return m
       })
-      setItem(result)
-      setSelectedRightId(result.current_decision ?? null)
       setOffset(newOffset)
       setRowStartedAt(Date.now())
     } catch (e) {
       if (e?.response?.status === 404) {
         setNoMore(true)
-        setItem(null)
+        setItems([])
       }
     } finally {
       setLoading(false)
     }
-  }, [jobId, minScore])
+  }, [jobId, minScore, rowsShown])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -182,52 +206,59 @@ function ReviewTab({ job }) {
 
   // Load first item on mount and when filters change
   useEffect(() => {
-    fetchItem(0)
-  }, [minScore])
+    fetchPage(0)
+  }, [minScore, rowsShown])
 
-  const handleSelect = async (rightId) => {
-    if (saving) return
-    setSelectedRightId(rightId)
-    setSaving(true)
+  const handleSelect = async (leftId, rightId) => {
+    if (savingLeftId != null) return
+    setSelectedByLeft(prev => {
+      const next = new Map(prev)
+      next.set(leftId, rightId)
+      return next
+    })
+    setSavingLeftId(leftId)
     try {
-      await submitCompareDecision(jobId, item.left_id, rightId)
+      await submitCompareDecision(jobId, leftId, rightId)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      // Stay on the current row; mark it as decided for immediate feedback.
-      setItem(prev => prev ? { ...prev, is_decided: true, current_decision: rightId } : prev)
+      setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId } : it))
     } finally {
-      setSaving(false)
+      setSavingLeftId(null)
     }
   }
 
-  const handleNoMatch = async () => {
-    if (saving) return
-    setSelectedRightId(null)
-    setSaving(true)
+  const handleNoMatch = async (leftId) => {
+    if (savingLeftId != null) return
+    setSelectedByLeft(prev => {
+      const next = new Map(prev)
+      next.set(leftId, null)
+      return next
+    })
+    setSavingLeftId(leftId)
     try {
-      await submitCompareDecision(jobId, item.left_id, null)
+      await submitCompareDecision(jobId, leftId, null)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      setItem(prev => prev ? { ...prev, is_decided: true, current_decision: null } : prev)
+      setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: null } : it))
     } finally {
-      setSaving(false)
+      setSavingLeftId(null)
     }
   }
 
   const handlePrev = () => {
-    if (saving || loading) return
-    if (offset > 0) fetchItem(offset - 1)
+    if (savingLeftId != null || loading) return
+    if (offset > 0) fetchPage(offset - 1)
   }
 
   const handleNext = () => {
-    if (saving || loading) return
-    fetchItem(offset + 1)
+    if (savingLeftId != null || loading) return
+    fetchPage(offset + 1)
   }
 
   // Keyboard shortcuts: ← Prev, → Next (ignore while typing in inputs)
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (saving || loading) return
+      if (savingLeftId != null || loading) return
       if (e.isComposing) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
@@ -237,7 +268,8 @@ function ReviewTab({ job }) {
 
       if (e.key === 'x' || e.key === 'X') {
         e.preventDefault()
-        handleNoMatch()
+        const it = items?.[activeIdx]
+        if (it) handleNoMatch(it.left_id)
         return
       }
 
@@ -255,7 +287,7 @@ function ReviewTab({ job }) {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [offset, saving, loading, handlePrev, handleNext, handleNoMatch])
+  }, [offset, savingLeftId, loading, activeIdx, items, handlePrev, handleNext, handleNoMatch])
 
   return (
     <div className="space-y-4">
@@ -278,6 +310,18 @@ function ReviewTab({ job }) {
 
         <div className="text-xs text-gray-400 whitespace-nowrap">
           Elapsed: {Math.max(0, Math.floor((now - rowStartedAt) / 1000))}s
+        </div>
+
+        {/* Rows shown */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500 whitespace-nowrap">Rows shown</label>
+          <select
+            value={rowsShown}
+            onChange={(e) => setRowsShown(parseInt(e.target.value, 10))}
+            className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+          >
+            {[1, 3, 5].map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
         </div>
 
         {/* Score filter */}
@@ -320,77 +364,98 @@ function ReviewTab({ job }) {
               : 'No more rows match the current filter. Try lowering the min score.'}
           </p>
         </div>
-      ) : item ? (
+      ) : items.length > 0 ? (
         <>
-          <div className="flex gap-4 items-stretch">
-            {/* Left card (~40%) */}
-            <div className="w-[38%] shrink-0 bg-white rounded-xl border-2 border-blue-200 p-4 relative">
-              <span className="absolute top-3 left-3 text-xs font-semibold text-blue-600 uppercase tracking-wide">
-                {job.label_left}
-              </span>
-              {item.display_value && (
-                <p className="text-xs text-blue-600 font-medium mt-6 mb-1 truncate">{item.display_value}</p>
-              )}
-              <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-64 ${!item.display_value ? 'mt-6' : ''}`}>
-                {item.contextual_content}
-              </p>
-              {item.is_decided && (
-                <span className="absolute bottom-3 right-3 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                  {item.current_decision ? 'matched' : 'no match'}
-                </span>
-              )}
-            </div>
+          <div className="space-y-4">
+            {items.map((it, idx) => {
+              const isActive = idx === activeIdx
+              const selectedRightId = selectedByLeft.get(it.left_id) ?? null
+              const isSaving = savingLeftId === it.left_id
+              return (
+                <div
+                  key={it.left_id}
+                  onClick={() => setActiveIdx(idx)}
+                  className={`rounded-2xl p-3 border transition-colors ${isActive ? 'border-blue-300 bg-blue-50/30' : 'border-transparent'}`}
+                >
+                  <div className="flex gap-4 items-stretch">
+                    {/* Left card (~40%) */}
+                    <div className="w-[38%] shrink-0 bg-white rounded-xl border-2 border-blue-200 p-4 relative">
+                      <span className="absolute top-3 left-3 text-xs font-semibold text-blue-600 uppercase tracking-wide">
+                        {job.label_left} · row {offset * rowsShown + idx + 1}
+                      </span>
+                      {it.display_value && (
+                        <p className="text-xs text-blue-600 font-medium mt-6 mb-1 truncate">{it.display_value}</p>
+                      )}
+                      <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-64 ${!it.display_value ? 'mt-6' : ''}`}>
+                        {it.contextual_content}
+                      </p>
+                      {it.is_decided && (
+                        <span className="absolute bottom-3 right-3 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                          {it.current_decision ? 'matched' : 'no match'}
+                        </span>
+                      )}
+                    </div>
 
-            {/* Right candidates (~60%) */}
-            <div className="flex-1 flex gap-3 min-w-0">
-              {item.candidates.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
-                  No candidates found for this row.
+                    {/* Right candidates (~60%) */}
+                    <div className="flex-1 flex gap-3 min-w-0">
+                      {it.candidates.length === 0 ? (
+                        <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+                          No candidates found for this row.
+                        </div>
+                      ) : (
+                        [...it.candidates]
+                          .sort((a, b) => (Number(b?.cosine_score) || 0) - (Number(a?.cosine_score) || 0))
+                          .map(c => (
+                          <CandidateCard
+                            key={c.right_id}
+                            candidate={c}
+                            isSelected={selectedRightId === c.right_id}
+                            isSaved={it.is_decided && it.current_decision === c.right_id}
+                            onClick={() => handleSelect(it.left_id, c.right_id)}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNoMatch(it.left_id) }}
+                      disabled={isSaving || savingLeftId != null}
+                      className={`px-5 py-2 rounded-lg text-sm font-medium border transition-colors
+                        ${it.is_decided && it.current_decision === null
+                          ? 'bg-rose-600 text-white border-rose-600'
+                          : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300'} disabled:opacity-40`}
+                    >
+                      {isSaving ? '…' : '✕ No match'} <span className="ml-1 text-xs opacity-70">(X)</span>
+                    </button>
+
+                    {isActive && (
+                      <div className="text-xs text-gray-400">Active</div>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                [...item.candidates]
-                  .sort((a, b) => (Number(b?.cosine_score) || 0) - (Number(a?.cosine_score) || 0))
-                  .map(c => (
-                  <CandidateCard
-                    key={c.right_id}
-                    candidate={c}
-                    isSelected={selectedRightId === c.right_id}
-                    isSaved={item.is_decided && item.current_decision === c.right_id}
-                    onClick={() => handleSelect(c.right_id)}
-                  />
-                ))
-              )}
-            </div>
+              )
+            })}
           </div>
 
-          {/* No match + nav */}
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handleNoMatch}
-              disabled={saving}
-              className={`px-5 py-2 rounded-lg text-sm font-medium border transition-colors
-                ${item.is_decided && item.current_decision === null
-                  ? 'bg-rose-600 text-white border-rose-600'
-                  : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300'}`}
-            >
-              {saving ? '…' : '✕ No match'}
-            </button>
-
+          {/* Page nav */}
+          <div className="flex items-center justify-end">
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={handlePrev}
-                disabled={offset === 0 || saving || loading}
+                disabled={offset === 0 || savingLeftId != null || loading}
                 className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30"
               >
                 ← Prev
               </button>
-              <span className="text-xs text-gray-400">row {offset + 1}</span>
+              <span className="text-xs text-gray-400">page {offset + 1}</span>
               <button
                 type="button"
                 onClick={handleNext}
-                disabled={saving || loading}
+                disabled={savingLeftId != null || loading}
                 className="px-3 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30"
               >
                 Next →
