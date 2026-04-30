@@ -51,7 +51,7 @@ export default function ResultsTable({ results, displayColumns }) {
           : null
 
         return (
-          <div className="flex flex-wrap gap-1.5 items-start pt-0.5">
+          <div className="flex flex-col gap-1 items-start pt-0.5">
             <ScoreBubble
               label="cos"
               value={cos}
