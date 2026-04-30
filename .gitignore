@@ -18,8 +18,3 @@ test-results/
 pip-cache/*.whl
 pip-cache/*.tar.gz
 pip-cache/*.gz
-
-# Hugging Face / local model downloads (do not commit)
-.hf-cache/
-.hf-download-venv/
-models/
