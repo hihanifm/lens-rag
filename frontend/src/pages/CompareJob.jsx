@@ -798,8 +798,8 @@ function ReviewTab({ job, run }) {
                       )}
                     </div>
                   </div>
-                  <div className="mt-3 px-1 max-w-3xl flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-gray-500 font-medium w-full sm:w-auto">Outcome</span>
+                  <div className="mt-3 px-1 flex flex-nowrap items-center gap-x-2 overflow-x-auto max-w-full pb-0.5 [-webkit-overflow-scrolling:touch]">
+                    <span className="text-xs text-gray-500 font-medium shrink-0">Outcome</span>
                     {REVIEW_OUTCOME_CHIPS.map(({ value, label }) => {
                       const curOc = outcomeByLeft.get(it.left_id) ?? null
                       const active = value === null ? curOc == null : curOc === value
@@ -816,7 +816,7 @@ function ReviewTab({ job, run }) {
                             e.stopPropagation()
                             handleSetOutcome(it.left_id, value)
                           }}
-                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors shrink-0 ${
                             active
                               ? 'bg-blue-600 text-white border-blue-600'
                               : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
@@ -826,13 +826,9 @@ function ReviewTab({ job, run }) {
                         </button>
                       )
                     })}
-                  </div>
-                  <div className="mt-2 px-1 max-w-3xl">
-                    <label htmlFor={`review-comment-${it.left_id}`} className="block text-xs font-medium text-gray-500 mb-1">
-                      Review comment
-                    </label>
                     <textarea
                       id={`review-comment-${it.left_id}`}
+                      aria-label="Review comment"
                       rows={1}
                       value={commentByLeft.get(it.left_id) ?? ''}
                       disabled={isSaving}
@@ -862,15 +858,13 @@ function ReviewTab({ job, run }) {
                           })
                           .finally(() => setSavingLeftId(null))
                       }}
-                      placeholder="Optional note — saved with your decision."
-                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 leading-normal focus:outline-none focus:ring-1 focus:ring-blue-300 resize-y bg-white disabled:opacity-50"
+                      placeholder="Optional note"
+                      className="min-w-[12rem] flex-1 basis-[min(18rem,45vw)] text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 leading-normal focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none bg-white disabled:opacity-50"
                     />
+                    {isActive && (
+                      <span className="text-xs text-gray-400 shrink-0">Active</span>
+                    )}
                   </div>
-                  {isActive && (
-                    <div className="mt-2 px-1 flex justify-end">
-                      <span className="text-xs text-gray-400">Active</span>
-                    </div>
-                  )}
                 </div>
               )
             })}
