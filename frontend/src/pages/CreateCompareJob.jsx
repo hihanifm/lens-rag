@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   previewCompareFile,
   previewCompareContext,
+  previewCompareRowStats,
   createCompareJob,
   fetchModels,
   getSystemConfig,
@@ -11,6 +12,45 @@ import {
 } from '../api/client'
 
 const STEPS = ['Names', 'Upload Left', 'Columns Left', 'Upload Right', 'Columns Right', 'Connection', 'Review']
+
+const FILTER_OPS = [
+  { id: 'contains', label: 'contains' },
+  { id: 'not_contains', label: 'does not contain' },
+  { id: 'equals', label: 'equals' },
+  { id: 'not_equals', label: 'does not equal' },
+  { id: 'empty', label: 'is empty' },
+  { id: 'not_empty', label: 'is not empty' },
+  { id: 'regex', label: 'matches regex' },
+]
+
+function pickDefaultContextColumns(cols) {
+  const lower = (s) => String(s || '').toLowerCase()
+  const preferred = ['description', 'details', 'notes', 'summary', 'specs', 'name', 'title', 'model', 'category']
+  const defaults = []
+  for (const p of preferred) {
+    const hit = cols.find(c => lower(c) === p || lower(c).includes(p))
+    if (hit && !defaults.includes(hit)) defaults.push(hit)
+  }
+  if (defaults.length === 0 && cols.length > 0) defaults.push(cols[0])
+  return defaults.slice(0, 4)
+}
+
+/** Strip UI `id` keys for API bodies; drops incomplete filter rows. */
+function compareFiltersForApi(list) {
+  return (list || [])
+    .filter(f => f.column && String(f.column).trim())
+    .filter(f => {
+      const op = f.op || 'contains'
+      if (['contains', 'not_contains', 'regex'].includes(op))
+        return String(f.value || '').trim().length > 0
+      return true
+    })
+    .map(({ column, op, value }) => ({
+      column: String(column).trim(),
+      op: op || 'contains',
+      value: ['empty', 'not_empty'].includes(op) ? null : (String(value || '').trim() || null),
+    }))
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -69,6 +109,79 @@ function ColumnSingleSelect({ columns, value, onChange, label, required = false 
           <option key={col} value={col}>{col}</option>
         ))}
       </select>
+    </div>
+  )
+}
+
+function RowFiltersEditor({ columns, filters, onChange }) {
+  const add = () => onChange([...filters, { id: crypto.randomUUID(), column: '', op: 'contains', value: '' }])
+  const remove = (id) => onChange(filters.filter(f => f.id !== id))
+  const patch = (id, part) => onChange(filters.map(f => (f.id === id ? { ...f, ...part } : f)))
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <label className="block text-sm font-medium text-gray-700">Row filters (optional)</label>
+        <button
+          type="button"
+          onClick={add}
+          className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+        >
+          + Add filter
+        </button>
+      </div>
+      <p className="text-xs text-gray-400">Only rows matching every filter are embedded. Text compares case-insensitive except regex.</p>
+      {filters.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No filters — all rows from the sheet are used.</p>
+      ) : (
+        <div className="space-y-2">
+          {filters.map(f => (
+            <div key={f.id} className="flex flex-wrap items-end gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50/80">
+              <div className="min-w-[140px] flex-1">
+                <label className="block text-[11px] text-gray-400 mb-0.5">Column</label>
+                <select
+                  value={f.column || ''}
+                  onChange={e => patch(f.id, { column: e.target.value })}
+                  className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+                >
+                  <option value="">—</option>
+                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="min-w-[130px]">
+                <label className="block text-[11px] text-gray-400 mb-0.5">Condition</label>
+                <select
+                  value={f.op || 'contains'}
+                  onChange={e => patch(f.id, { op: e.target.value })}
+                  className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+                >
+                  {FILTER_OPS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              {!['empty', 'not_empty'].includes(f.op) && (
+                <div className="min-w-[160px] flex-1">
+                  <label className="block text-[11px] text-gray-400 mb-0.5">Value</label>
+                  <input
+                    type="text"
+                    value={f.value || ''}
+                    onChange={e => patch(f.id, { value: e.target.value })}
+                    placeholder={f.op === 'regex' ? 'pattern' : 'text'}
+                    className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => remove(f.id)}
+                className="text-xs text-gray-400 hover:text-red-600 px-1 py-1"
+                title="Remove"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -202,25 +315,28 @@ function StepUpload({ side, label, state, setState, onNext }) {
       const result = await previewCompareFile(file, side)
       if (result.detail) throw new Error(result.detail)
       const colsKey = side === 'left' ? 'Left' : 'Right'
-      const cols = result.columns || []
-      const lower = (s) => String(s || '').toLowerCase()
-      const preferred = ['description', 'details', 'notes', 'summary', 'specs', 'name', 'title', 'model', 'category']
-      const defaults = []
-      for (const p of preferred) {
-        const hit = cols.find(c => lower(c) === p || lower(c).includes(p))
-        if (hit && !defaults.includes(hit)) defaults.push(hit)
-      }
-      if (defaults.length === 0 && cols.length > 0) defaults.push(cols[0])
+      const perSheet = result.per_sheet || []
+      const sheetNames = result.sheet_names || []
+      const firstName = sheetNames[0] || ''
+      const firstRow = perSheet.find(p => p.sheet_name === firstName) || perSheet[0]
+      const cols = firstRow?.columns || result.columns || []
+      const defaults = pickDefaultContextColumns(cols)
 
       setState(s => ({
         ...s,
-        [`columns${side === 'left' ? 'Left' : 'Right'}`]: result.columns,
-        [`tmpPath${side === 'left' ? 'Left' : 'Right'}`]: result.tmp_path,
-        [`filename${side === 'left' ? 'Left' : 'Right'}`]: file.name,
-        [`rowCount${side === 'left' ? 'Left' : 'Right'}`]: result.row_count,
+        [`perSheet${colsKey}`]: perSheet,
+        [`sheetNames${colsKey}`]: sheetNames,
+        [`sheet${colsKey}`]: firstName,
+        [`columns${colsKey}`]: cols,
+        [`tmpPath${colsKey}`]: result.tmp_path,
+        [`filename${colsKey}`]: file.name,
+        [`rowsTotal${colsKey}`]: result.row_count,
+        [`rowCount${colsKey}`]: firstRow?.row_count ?? result.row_count,
+        [`rowFilters${colsKey}`]: [],
         [`contextColumns${colsKey}`]: (s[`contextColumns${colsKey}`] && s[`contextColumns${colsKey}`].length > 0)
           ? s[`contextColumns${colsKey}`]
-          : defaults.slice(0, 4),
+          : defaults,
+        [`displayColumn${colsKey}`]: null,
       }))
     } catch (e) {
       setError(e.message || 'Failed to read file')
@@ -243,7 +359,11 @@ function StepUpload({ side, label, state, setState, onNext }) {
       )}
       {error && <p className="text-red-500 text-sm">{error}</p>}
       {tmpPath && (
-        <p className="text-xs text-gray-400">{state[`rowCount${side === 'left' ? 'Left' : 'Right'}`]?.toLocaleString()} rows detected</p>
+        <p className="text-xs text-gray-400">
+          {(state[`sheetNames${side === 'left' ? 'Left' : 'Right'}`]?.length ?? 0) > 1
+            ? (<>{state[`rowsTotal${side === 'left' ? 'Left' : 'Right'}`]?.toLocaleString()} rows in file ({state[`sheetNames${side === 'left' ? 'Left' : 'Right'}`]?.length} sheets). Pick a sheet on the next step.</>)
+            : (<>{state[`rowCount${side === 'left' ? 'Left' : 'Right'}`]?.toLocaleString()} rows detected</>)}
+        </p>
       )}
       <button
         onClick={onNext}
@@ -261,14 +381,79 @@ function StepColumns({ side, label, state, setState, onNext }) {
   const columns = state[`columns${key}`] || []
   const ctx = state[`contextColumns${key}`]
   const display = state[`displayColumn${key}`]
+  const sheetNames = state[`sheetNames${key}`] || []
+  const sheet = state[`sheet${key}`] || ''
+  const perSheet = state[`perSheet${key}`] || []
+  const filters = state[`rowFilters${key}`] || []
+  const tmpPath = state[`tmpPath${key}`]
+  const rowCountSheet = state[`rowCount${key}`]
   const stepIdx = side === 'left' ? 2 : 4
+
+  const [filteredCount, setFilteredCount] = useState(null)
 
   const setCtx = (v) => setState(s => ({ ...s, [`contextColumns${key}`]: v }))
   const setDisplay = (v) => setState(s => ({ ...s, [`displayColumn${key}`]: v }))
+  const setFilters = (next) => setState(s => ({
+    ...s,
+    [`rowFilters${key}`]: typeof next === 'function' ? next(s[`rowFilters${key}`] || []) : next,
+  }))
+
+  const applySheetChange = (sn) => {
+    const row = perSheet.find(p => p.sheet_name === sn)
+    if (!row) return
+    const cols = row.columns
+    const defaults = pickDefaultContextColumns(cols)
+    setState(s => ({
+      ...s,
+      [`sheet${key}`]: sn,
+      [`columns${key}`]: cols,
+      [`rowCount${key}`]: row.row_count,
+      [`contextColumns${key}`]: defaults,
+      [`displayColumn${key}`]: null,
+      [`rowFilters${key}`]: [],
+    }))
+  }
+
+  useEffect(() => {
+    if (!tmpPath || !sheet) return
+    const apiFilters = compareFiltersForApi(filters)
+    let cancelled = false
+    const t = setTimeout(() => {
+      previewCompareRowStats(tmpPath, {
+        sheetName: sheetNames.length > 1 ? sheet : null,
+        rowFilters: apiFilters,
+      })
+        .then((res) => {
+          if (!cancelled) setFilteredCount(res?.row_count_filtered ?? null)
+        })
+        .catch(() => {
+          if (!cancelled) setFilteredCount(null)
+        })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [tmpPath, sheet, sheetNames.length, filters])
 
   return (
     <div className="space-y-5">
       <StepHeader step={stepIdx} total={STEPS.length} title={`Column setup for "${label}"`} />
+
+      {sheetNames.length > 1 && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Excel sheet</label>
+          <select
+            value={sheet}
+            onChange={e => applySheetChange(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          >
+            {sheetNames.map(sn => (
+              <option key={sn} value={sn}>{sn}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            Only this sheet is embedded for this side ({rowCountSheet?.toLocaleString?.() ?? rowCountSheet} rows before filters).
+          </p>
+        </div>
+      )}
 
       <ColumnMultiSelect
         columns={columns}
@@ -283,6 +468,17 @@ function StepColumns({ side, label, state, setState, onNext }) {
         onChange={setDisplay}
         label="Identifier column (shown in review card & export — one column only)"
       />
+
+      <RowFiltersEditor columns={columns} filters={filters} onChange={setFilters} />
+
+      <p className="text-xs text-gray-500">
+        Rows after filters
+        {filteredCount != null ? (
+          <>: <strong>{filteredCount.toLocaleString()}</strong> (of {rowCountSheet?.toLocaleString?.() ?? rowCountSheet} on this sheet)</>
+        ) : (
+          <>…</>
+        )}
+      </p>
 
       <button
         onClick={onNext}
@@ -451,9 +647,17 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
       setCtxLoading(true)
       setCtxError('')
       try {
+        const leftOpts = {
+          sheetName: state.sheetNamesLeft?.length > 1 ? state.sheetLeft : null,
+          rowFilters: compareFiltersForApi(state.rowFiltersLeft),
+        }
+        const rightOpts = {
+          sheetName: state.sheetNamesRight?.length > 1 ? state.sheetRight : null,
+          rowFilters: compareFiltersForApi(state.rowFiltersRight),
+        }
         const [left, right] = await Promise.all([
-          previewCompareContext(state.tmpPathLeft, state.contextColumnsLeft, 1),
-          previewCompareContext(state.tmpPathRight, state.contextColumnsRight, 1),
+          previewCompareContext(state.tmpPathLeft, state.contextColumnsLeft, 1, leftOpts),
+          previewCompareContext(state.tmpPathRight, state.contextColumnsRight, 1, rightOpts),
         ])
         if (!alive) return
         setCtxPreview({ left, right })
@@ -467,11 +671,28 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
     }
     run()
     return () => { alive = false }
-  }, [state.tmpPathLeft, state.tmpPathRight, state.contextColumnsLeft, state.contextColumnsRight])
+  }, [
+    state.tmpPathLeft,
+    state.tmpPathRight,
+    state.contextColumnsLeft,
+    state.contextColumnsRight,
+    state.sheetLeft,
+    state.sheetRight,
+    state.sheetNamesLeft,
+    state.sheetNamesRight,
+    state.rowFiltersLeft,
+    state.rowFiltersRight,
+  ])
 
   const fields = [
     ['File', state.filenameLeft, state.filenameRight],
-    ['Rows', state.rowCountLeft?.toLocaleString(), state.rowCountRight?.toLocaleString()],
+    ['Excel sheet', state.sheetLeft || '—', state.sheetRight || '—'],
+    ['Rows on sheet', state.rowCountLeft?.toLocaleString(), state.rowCountRight?.toLocaleString()],
+    [
+      'Row filters',
+      state.rowFiltersLeft?.length ? `${state.rowFiltersLeft.length} rule(s)` : 'None',
+      state.rowFiltersRight?.length ? `${state.rowFiltersRight.length} rule(s)` : 'None',
+    ],
     ['Match columns', state.contextColumnsLeft.join(', ') || '—', state.contextColumnsRight.join(', ') || '—'],
     ['Identifier column', state.displayColumnLeft || '—', state.displayColumnRight || '—'],
     [
@@ -719,14 +940,24 @@ const INITIAL = {
   filenameRight: '',
   tmpPathLeft: '',
   tmpPathRight: '',
+  rowsTotalLeft: null,
+  rowsTotalRight: null,
   rowCountLeft: null,
   rowCountRight: null,
+  perSheetLeft: [],
+  perSheetRight: [],
+  sheetNamesLeft: [],
+  sheetNamesRight: [],
+  sheetLeft: '',
+  sheetRight: '',
   columnsLeft: [],
   columnsRight: [],
   contextColumnsLeft: [],
   contextColumnsRight: [],
   displayColumnLeft: null,
   displayColumnRight: null,
+  rowFiltersLeft: [],
+  rowFiltersRight: [],
 }
 
 export default function CreateCompareJob() {
@@ -848,6 +1079,10 @@ export default function CreateCompareJob() {
         label_right: state.labelRight,
         tmp_path_left: state.tmpPathLeft,
         tmp_path_right: state.tmpPathRight,
+        sheet_name_left: state.sheetNamesLeft?.length > 1 ? (state.sheetLeft || null) : null,
+        sheet_name_right: state.sheetNamesRight?.length > 1 ? (state.sheetRight || null) : null,
+        row_filters_left: compareFiltersForApi(state.rowFiltersLeft),
+        row_filters_right: compareFiltersForApi(state.rowFiltersRight),
         source_filename_left: state.filenameLeft,
         source_filename_right: state.filenameRight,
         context_columns_left: ctxLeft,

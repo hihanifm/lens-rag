@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import pandas as pd
@@ -42,6 +43,100 @@ def read_excel(filepath: str) -> tuple[pd.DataFrame, list[str], list[str]]:
     logger.info("read_excel() total_rows=%d columns=%s elapsed_ms=%d",
                 len(combined), original_columns, int((time.monotonic() - t0) * 1000))
     return combined, original_columns, sheet_names
+
+
+def read_excel_single_sheet(filepath: str, sheet_name: str) -> pd.DataFrame:
+    """Read one sheet with the same ffill / drop-all-empty rules as read_excel."""
+    df = pd.read_excel(filepath, sheet_name=sheet_name, dtype=str)
+    df = df.ffill()
+    df = df.dropna(how="all")
+    df["sheet_name"] = sheet_name
+    return df
+
+
+def excel_sheet_previews(filepath: str) -> list[dict]:
+    """Per-sheet column names and row counts (no concat)."""
+    all_sheets = pd.read_excel(filepath, sheet_name=None, dtype=str)
+    out: list[dict] = []
+    for sn, df in all_sheets.items():
+        d2 = df.ffill().dropna(how="all")
+        out.append({
+            "sheet_name": str(sn),
+            "columns": [str(c) for c in d2.columns],
+            "row_count": len(d2),
+        })
+    return out
+
+
+def read_compare_dataframe(filepath: str, sheet_name: str | None) -> pd.DataFrame:
+    """
+    Load data for compare ingestion.
+    sheet_name None: all sheets concatenated (legacy).
+    sheet_name set: that sheet only.
+    """
+    if sheet_name:
+        return read_excel_single_sheet(filepath, sheet_name)
+    df, _cols, _sheets = read_excel(filepath)
+    return df
+
+
+def _row_cell_str(row: dict, col: str) -> str:
+    v = row.get(col)
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip()
+    if s.lower() == "nan":
+        return ""
+    return s
+
+
+def apply_compare_row_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
+    """
+    AND-combine row filters. All values compared as plain text (case-insensitive for contains/equals).
+    """
+    if not filters:
+        return df
+
+    def row_ok(row: pd.Series) -> bool:
+        rd = row.to_dict()
+        for f in filters:
+            col = str(f.get("column") or "").strip()
+            if not col or col not in df.columns:
+                return False
+            op = str(f.get("op") or "contains").strip().lower()
+            val = _row_cell_str(rd, col)
+            needle = str(f.get("value") if f.get("value") is not None else "").strip()
+
+            if op == "empty":
+                if val != "":
+                    return False
+            elif op == "not_empty":
+                if val == "":
+                    return False
+            elif op == "contains":
+                if needle.lower() not in val.lower():
+                    return False
+            elif op == "not_contains":
+                if needle.lower() in val.lower():
+                    return False
+            elif op == "equals":
+                if val.lower() != needle.lower():
+                    return False
+            elif op == "not_equals":
+                if val.lower() == needle.lower():
+                    return False
+            elif op == "regex":
+                try:
+                    if not re.search(needle, val):
+                        return False
+                except re.error:
+                    return False
+            else:
+                return False
+        return True
+
+    mask = df.apply(row_ok, axis=1)
+    return df.loc[mask].reset_index(drop=True)
 
 
 def build_contextual_content(

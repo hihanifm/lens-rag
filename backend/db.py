@@ -109,6 +109,14 @@ def init_db():
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS top_k INTEGER DEFAULT 3;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_model TEXT;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS sheet_name_left TEXT;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS sheet_name_right TEXT;")
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS row_filters_left TEXT DEFAULT '[]';"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS row_filters_right TEXT DEFAULT '[]';"
+        )
 
         # ── Compare runs table ─────────────────────────────────────────────
         cur.execute("""

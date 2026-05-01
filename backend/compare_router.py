@@ -5,6 +5,7 @@ Job-level routes:
   POST /compare/preview-left          upload left file → columns + tmp_path
   POST /compare/preview-right         upload right file → columns + tmp_path
   POST /compare/preview-context       preview merged text strings
+  POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -30,6 +31,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -42,17 +44,25 @@ from comparator import run_ingest_job, run_pipeline
 from config import EMBEDDING_DIMS
 from db import create_compare_schema, create_run_tables, drop_compare_schema, drop_run_tables, get_cursor
 from embedder import embed as _embed_probe
-from ingestion import build_contextual_content, read_excel
+from ingestion import (
+    apply_compare_row_filters,
+    build_contextual_content,
+    excel_sheet_previews,
+    read_compare_dataframe,
+)
 from models import (
     CandidateItem,
     CompareContextPreviewRequest,
     CompareContextPreviewResponse,
-    CompareDecision,
     CompareJobCreate,
     CompareJobResponse,
     CompareJobUpdate,
+    CompareDecision,
+    ComparePreviewRowStatsRequest,
+    ComparePreviewRowStatsResponse,
     CompareRunCreate,
     CompareRunResponse,
+    CompareRowFilter,
     ReviewItem,
 )
 
@@ -81,6 +91,74 @@ def _job_or_404(job_id: int) -> dict:
     return job
 
 
+def _filters_to_dicts(filters: list[CompareRowFilter] | None) -> list[dict]:
+    if not filters:
+        return []
+    out: list[dict] = []
+    for f in filters:
+        d = f.model_dump()
+        if not str(d.get("column") or "").strip():
+            continue
+        out.append(d)
+    return out
+
+
+def _decode_job_filters(raw) -> list[CompareRowFilter]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [CompareRowFilter(**x) for x in raw if isinstance(x, dict)]
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [CompareRowFilter(**x) for x in data if isinstance(x, dict)]
+    return []
+
+
+def _excel_sheet_names(tmp_path: str) -> list[str]:
+    return [p["sheet_name"] for p in excel_sheet_previews(tmp_path)]
+
+
+def _require_sheet_if_multi(tmp_path: str, sheet_name: str | None, label: str) -> str | None:
+    names = _excel_sheet_names(tmp_path)
+    if len(names) <= 1:
+        return (sheet_name or "").strip() or None
+    sn = (sheet_name or "").strip()
+    if not sn:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: choose an Excel sheet (workbook has multiple sheets).",
+        )
+    if sn not in names:
+        raise HTTPException(status_code=422, detail=f"{label}: unknown sheet {sn!r}.")
+    return sn
+
+
+def _validate_filters_against_df(df, filters: list[dict], label: str) -> None:
+    cols = set(df.columns)
+    for f in filters:
+        c = str(f.get("column") or "").strip()
+        op = str(f.get("op") or "").strip().lower()
+        if c not in cols:
+            raise HTTPException(status_code=422, detail=f"{label}: filter column {c!r} not found.")
+        if op in ("contains", "not_contains", "regex"):
+            raw_pat = str(f.get("value") or "").strip()
+            if not raw_pat:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{label}: filter on {c!r} needs a value for op \"{op}\".",
+                )
+            if op == "regex":
+                try:
+                    re.compile(raw_pat)
+                except re.error as e:
+                    raise HTTPException(status_code=422, detail=f"{label}: invalid regex: {e}") from e
+
+
 # ── File preview ──────────────────────────────────────────────────────────
 
 async def _preview_file(file: UploadFile) -> dict:
@@ -91,11 +169,15 @@ async def _preview_file(file: UploadFile) -> dict:
         tmp.write(content)
         tmp_path = tmp.name
     try:
-        df, columns, sheet_names = read_excel(tmp_path)
+        per_sheet = excel_sheet_previews(tmp_path)
+        sheet_names = [p["sheet_name"] for p in per_sheet]
+        total_rows = sum(int(p["row_count"]) for p in per_sheet)
+        first = per_sheet[0]
         return {
-            "columns": columns,
+            "columns": first["columns"],
             "sheet_names": sheet_names,
-            "row_count": len(df),
+            "per_sheet": per_sheet,
+            "row_count": total_rows,
             "tmp_path": tmp_path,
         }
     except Exception as e:
@@ -138,7 +220,11 @@ def preview_context(body: CompareContextPreviewRequest):
     content_col = _pick_content(match_columns)
     context_cols = [c for c in match_columns if c != content_col]
 
-    df, _columns, _sheets = read_excel(tmp_path)
+    sheet_resolved = _require_sheet_if_multi(tmp_path, body.sheet_name, "Preview")
+    df = read_compare_dataframe(tmp_path, sheet_resolved)
+    fl = _filters_to_dicts(body.row_filters)
+    _validate_filters_against_df(df, fl, "Preview")
+    df = apply_compare_row_filters(df, fl)
     records = df.to_dict(orient="records")
 
     samples: list[str] = []
@@ -155,6 +241,25 @@ def preview_context(body: CompareContextPreviewRequest):
         content_column=content_col,
         context_columns=context_cols,
         samples=samples,
+    )
+
+
+@router.post("/preview-row-stats", response_model=ComparePreviewRowStatsResponse)
+def preview_row_stats(body: ComparePreviewRowStatsRequest):
+    """Row counts before/after filters for one uploaded Excel file."""
+    tmp_path = (body.tmp_path or "").strip()
+    if not tmp_path or not os.path.exists(tmp_path):
+        raise HTTPException(status_code=400, detail="Uploaded file not found. Please re-upload.")
+
+    sheet_resolved = _require_sheet_if_multi(tmp_path, body.sheet_name, "Preview")
+    df0 = read_compare_dataframe(tmp_path, sheet_resolved)
+    n0 = len(df0)
+    fl = _filters_to_dicts(body.row_filters)
+    _validate_filters_against_df(df0, fl, "Preview")
+    df1 = apply_compare_row_filters(df0, fl)
+    return ComparePreviewRowStatsResponse(
+        row_count_unfiltered=n0,
+        row_count_filtered=len(df1),
     )
 
 
@@ -189,6 +294,18 @@ async def create_compare_job(data: CompareJobCreate):
                 detail=f"Could not verify embedding endpoint: {e}",
             )
 
+    lf = _filters_to_dicts(data.row_filters_left)
+    rf = _filters_to_dicts(data.row_filters_right)
+    sheet_left = _require_sheet_if_multi(data.tmp_path_left, data.sheet_name_left, "Left file")
+    sheet_right = _require_sheet_if_multi(data.tmp_path_right, data.sheet_name_right, "Right file")
+    df_l = read_compare_dataframe(data.tmp_path_left, sheet_left)
+    df_r = read_compare_dataframe(data.tmp_path_right, sheet_right)
+    _validate_filters_against_df(df_l, lf, "Left file")
+    _validate_filters_against_df(df_r, rf, "Right file")
+
+    filters_left_json = json.dumps(lf)
+    filters_right_json = json.dumps(rf)
+
     with get_cursor() as (cur, _conn):
         cur.execute(
             """
@@ -196,6 +313,8 @@ async def create_compare_job(data: CompareJobCreate):
                 name, label_left, label_right, schema_name,
                 context_columns_left, content_column_left, display_column_left,
                 context_columns_right, content_column_right, display_column_right,
+                sheet_name_left, sheet_name_right,
+                row_filters_left, row_filters_right,
                 source_filename_left, source_filename_right,
                 tmp_path_left, tmp_path_right,
                 embed_dims, embed_url, embed_api_key, embed_model
@@ -205,6 +324,8 @@ async def create_compare_job(data: CompareJobCreate):
                 %s, %s, %s,
                 %s, %s,
                 %s, %s,
+                %s, %s,
+                %s, %s,
                 %s, %s, %s, %s
             ) RETURNING id, created_at
             """,
@@ -212,6 +333,10 @@ async def create_compare_job(data: CompareJobCreate):
                 data.name, data.label_left, data.label_right,
                 data.context_columns_left, data.content_column_left, data.display_column_left,
                 data.context_columns_right, data.content_column_right, data.display_column_right,
+                sheet_left,
+                sheet_right,
+                filters_left_json,
+                filters_right_json,
                 data.source_filename_left, data.source_filename_right,
                 data.tmp_path_left, data.tmp_path_right,
                 resolved_dims, data.embed_url or None, data.embed_api_key or None, data.embed_model or None,
@@ -634,9 +759,13 @@ def compare_config_stats(job_id: int):
         "content_column_left": job.get("content_column_left"),
         "context_columns_left": job.get("context_columns_left") or [],
         "display_column_left": job.get("display_column_left"),
+        "sheet_name_left": job.get("sheet_name_left"),
         "content_column_right": job.get("content_column_right"),
         "context_columns_right": job.get("context_columns_right") or [],
         "display_column_right": job.get("display_column_right"),
+        "sheet_name_right": job.get("sheet_name_right"),
+        "row_filters_left": [f.model_dump() for f in _decode_job_filters(job.get("row_filters_left"))],
+        "row_filters_right": [f.model_dump() for f in _decode_job_filters(job.get("row_filters_right"))],
     }
 
     stats: dict = {
@@ -969,6 +1098,10 @@ def _serialize_job(row: dict) -> dict:
         "notes": row.get("notes"),
         "label_left": row["label_left"],
         "label_right": row["label_right"],
+        "sheet_name_left": row.get("sheet_name_left"),
+        "sheet_name_right": row.get("sheet_name_right"),
+        "row_filters_left": _decode_job_filters(row.get("row_filters_left")),
+        "row_filters_right": _decode_job_filters(row.get("row_filters_right")),
         "schema_name": row["schema_name"],
         "status": row["status"],
         "status_message": _safe_status_message(row.get("status_message")),

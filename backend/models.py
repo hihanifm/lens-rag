@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
 
@@ -208,12 +208,32 @@ class EvalRequest(BaseModel):
 
 # ── Compare models ─────────────────────────────────────────────────────────
 
+class CompareRowFilter(BaseModel):
+    """Plain-text row filter applied after loading the sheet (AND-combined)."""
+
+    column: str
+    op: Literal[
+        "contains",
+        "not_contains",
+        "equals",
+        "not_equals",
+        "empty",
+        "not_empty",
+        "regex",
+    ] = "contains"
+    value: Optional[str] = None
+
+
 class CompareJobCreate(BaseModel):
     name: str
     label_left: str
     label_right: str
     tmp_path_left: str
     tmp_path_right: str
+    sheet_name_left: Optional[str] = None
+    sheet_name_right: Optional[str] = None
+    row_filters_left: List[CompareRowFilter] = Field(default_factory=list)
+    row_filters_right: List[CompareRowFilter] = Field(default_factory=list)
     source_filename_left: Optional[str] = None
     source_filename_right: Optional[str] = None
     context_columns_left: List[str]
@@ -233,6 +253,10 @@ class CompareJobResponse(BaseModel):
     notes: Optional[str] = None
     label_left: str
     label_right: str
+    sheet_name_left: Optional[str] = None
+    sheet_name_right: Optional[str] = None
+    row_filters_left: List[CompareRowFilter] = Field(default_factory=list)
+    row_filters_right: List[CompareRowFilter] = Field(default_factory=list)
     schema_name: str
     status: str
     status_message: Optional[str] = None
@@ -287,12 +311,25 @@ class CompareContextPreviewRequest(BaseModel):
     tmp_path: str
     match_columns: List[str]
     n: int = 3
+    sheet_name: Optional[str] = None
+    row_filters: List[CompareRowFilter] = Field(default_factory=list)
 
 
 class CompareContextPreviewResponse(BaseModel):
     content_column: str
     context_columns: List[str]
     samples: List[str]
+
+
+class ComparePreviewRowStatsRequest(BaseModel):
+    tmp_path: str
+    sheet_name: Optional[str] = None
+    row_filters: List[CompareRowFilter] = Field(default_factory=list)
+
+
+class ComparePreviewRowStatsResponse(BaseModel):
+    row_count_unfiltered: int
+    row_count_filtered: int
 
 
 class CandidateItem(BaseModel):

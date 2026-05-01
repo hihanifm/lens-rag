@@ -916,6 +916,8 @@ function ConfigStatsTab({ job }) {
             <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Left ({cfg.label_left})</div>
             <div className="space-y-2 text-sm">
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Source file</span><span className="font-medium text-gray-900">{cfg.source_filename_left || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Excel sheet</span><span className="font-medium text-gray-900">{cfg.sheet_name_left || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Row filters</span><span className="font-medium text-gray-900 text-xs break-words">{cfg.row_filters_left?.length ? cfg.row_filters_left.map((f) => `${f.column} ${f.op}${f.value != null && f.value !== '' ? ` "${f.value}"` : ''}`).join(' · ') : 'None'}</span></div>
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Match columns</span><span className="font-medium text-gray-900">{[...(cfg.context_columns_left || []), cfg.content_column_left].filter(Boolean).join(', ') || '—'}</span></div>
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Identifier column</span><span className="font-medium text-gray-900">{cfg.display_column_left || '—'}</span></div>
             </div>
@@ -925,6 +927,8 @@ function ConfigStatsTab({ job }) {
             <div className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-3">Right ({cfg.label_right})</div>
             <div className="space-y-2 text-sm">
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Source file</span><span className="font-medium text-gray-900">{cfg.source_filename_right || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Excel sheet</span><span className="font-medium text-gray-900">{cfg.sheet_name_right || '—'}</span></div>
+              <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Row filters</span><span className="font-medium text-gray-900 text-xs break-words">{cfg.row_filters_right?.length ? cfg.row_filters_right.map((f) => `${f.column} ${f.op}${f.value != null && f.value !== '' ? ` "${f.value}"` : ''}`).join(' · ') : 'None'}</span></div>
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Match columns</span><span className="font-medium text-gray-900">{[...(cfg.context_columns_right || []), cfg.content_column_right].filter(Boolean).join(', ') || '—'}</span></div>
               <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Identifier column</span><span className="font-medium text-gray-900">{cfg.display_column_right || '—'}</span></div>
             </div>

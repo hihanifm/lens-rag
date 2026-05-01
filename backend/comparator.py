@@ -2,7 +2,7 @@
 comparator.py — Core Compare pipeline.
 
 Reuses:
-  - read_excel(), build_contextual_content() from ingestion.py
+  - read_compare_dataframe(), apply_compare_row_filters(), build_contextual_content() from ingestion.py
   - embed() / rerank() from embedder.py
   - get_cursor() from db.py
 
@@ -21,9 +21,23 @@ from openai import OpenAI
 from config import EMBEDDING_DIMS, RERANKER_ENABLED
 from db import get_cursor, create_compare_schema
 from embedder import embed, rerank
-from ingestion import build_contextual_content, read_excel
+from ingestion import apply_compare_row_filters, build_contextual_content, read_compare_dataframe
 
 logger = logging.getLogger("lens.comparator")
+
+
+def _job_row_filters(job: dict, key: str) -> list[dict]:
+    raw = job.get(key)
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [dict(x) for x in raw]
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return []
 
 
 # ── Ingestion ──────────────────────────────────────────────────────────────
@@ -519,7 +533,8 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
         yield {"type": "ingest_left", "processed": 0, "total": 0, "percent": 0,
                "message": f"Reading {job['source_filename_left'] or 'left file'}..."}
 
-        df_left, _, _ = read_excel(job["tmp_path_left"])
+        df_left = read_compare_dataframe(job["tmp_path_left"], job.get("sheet_name_left") or None)
+        df_left = apply_compare_row_filters(df_left, _job_row_filters(job, "row_filters_left"))
         t0 = time.monotonic()
         for event in ingest_side(
             job_id=job_id, side="left", df=df_left,
@@ -537,7 +552,8 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
         yield {"type": "ingest_right", "processed": 0, "total": 0, "percent": 0,
                "message": f"Reading {job['source_filename_right'] or 'right file'}..."}
 
-        df_right, _, _ = read_excel(job["tmp_path_right"])
+        df_right = read_compare_dataframe(job["tmp_path_right"], job.get("sheet_name_right") or None)
+        df_right = apply_compare_row_filters(df_right, _job_row_filters(job, "row_filters_right"))
         t0 = time.monotonic()
         for event in ingest_side(
             job_id=job_id, side="right", df=df_right,

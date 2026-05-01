@@ -218,9 +218,21 @@ export const previewCompareFile = (file, side) => {
 export const createCompareJob = (data) =>
   api.post('compare/', data).then(r => r.data)
 
-export const previewCompareContext = (tmpPath, matchColumns, n = 3) =>
-  api.post('compare/preview-context', { tmp_path: tmpPath, match_columns: matchColumns, n })
-    .then(r => r.data)
+export const previewCompareContext = (tmpPath, matchColumns, n = 3, options = {}) =>
+  api.post('compare/preview-context', {
+    tmp_path: tmpPath,
+    match_columns: matchColumns,
+    n,
+    sheet_name: options.sheetName ?? null,
+    row_filters: options.rowFilters ?? [],
+  }).then(r => r.data)
+
+export const previewCompareRowStats = (tmpPath, { sheetName = null, rowFilters = [] } = {}) =>
+  api.post('compare/preview-row-stats', {
+    tmp_path: tmpPath,
+    sheet_name: sheetName || null,
+    row_filters: rowFilters,
+  }).then(r => r.data)
 
 export const listCompareJobs = () =>
   api.get('compare/').then(r => r.data)
