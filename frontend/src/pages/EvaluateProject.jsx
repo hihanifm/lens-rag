@@ -8,6 +8,7 @@ import { useProjectPin } from '../hooks/useProjectPin'
 import PinGate from '../components/PinGate'
 import { useProjectState } from '../contexts/ProjectStateContext'
 import RerankConfigModal from '../components/RerankConfigModal'
+import { FileDropZone } from '../components/FileDropZone'
 
 export default function EvaluateProject() {
   const { projectId } = useParams()
@@ -192,23 +193,26 @@ export default function EvaluateProject() {
             Upload a CSV with <code className="bg-gray-100 px-1 rounded text-xs">question</code> and <code className="bg-gray-100 px-1 rounded text-xs">ground_truth</code> columns.
           </p>
 
-          <div
-            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
-            onClick={() => document.getElementById('eval-file-input').click()}
-          >
-            {ev.testCases ? (
-              <p className="text-gray-700 font-medium">{ev.testCases.length} question{ev.testCases.length !== 1 ? 's' : ''} loaded</p>
-            ) : (
-              <div className="space-y-1">
-                <p className="text-gray-700 text-sm font-medium">Click to choose a test set CSV</p>
-                <p className="text-gray-400 text-xs">
-                  Required columns: <span className="font-mono">question</span>, <span className="font-mono">ground_truth</span>
+          <FileDropZone
+            accept=".csv"
+            formatLabel=".csv"
+            inputId="eval-file-input"
+            onFile={(f) => handleFileUpload({ target: { files: [f] } })}
+            selectedDisplay={
+              ev.testCases?.length ? (
+                <p className="text-gray-800 font-medium">
+                  {ev.testCases.length} question{ev.testCases.length !== 1 ? 's' : ''} loaded
                 </p>
-              </div>
+              ) : null
+            }
+            tailHint={(
+              <>
+                Columns <code className="bg-gray-100 px-1 rounded text-[11px]">question</code>
+                {' '}and <code className="bg-gray-100 px-1 rounded text-[11px]">ground_truth</code> required
+              </>
             )}
-            <input id="eval-file-input" type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-
-            <div className="mt-4 pt-4 border-t border-gray-100">
+          >
+            <div className="border-t border-gray-200 pt-4">
               <button
                 type="button"
                 data-testid="eval-load-sample"
@@ -235,7 +239,7 @@ export default function EvaluateProject() {
                 Or load the product catalog sample test set →
               </button>
             </div>
-          </div>
+          </FileDropZone>
 
           {/* K selector */}
           <div className="flex items-center gap-3 mt-6 mb-6">

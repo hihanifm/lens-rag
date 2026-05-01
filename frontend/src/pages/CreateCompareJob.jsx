@@ -12,6 +12,7 @@ import {
   verifyEmbedding,
   API_BASE_URL,
 } from '../api/client'
+import { FileDropZone } from '../components/FileDropZone'
 
 const STEPS = ['Names', 'Upload Left', 'Setup Left', 'Upload Right', 'Setup Right', 'Connection', 'Review']
 
@@ -395,67 +396,6 @@ function RowFiltersEditor({ columns, filters, onChange, tmpPath, sheetForApi }) 
   )
 }
 
-function FileDropZone({ side, onFile, filename }) {
-  const inputRef = useRef(null)
-  const [dragging, setDragging] = useState(false)
-
-  const handleDrop = (e) => {
-    e.preventDefault()
-    setDragging(false)
-    const f = e.dataTransfer.files[0]
-    if (f) onFile(f)
-  }
-
-  return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDragOver={e => { e.preventDefault(); setDragging(true) }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-      className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors
-        ${dragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'}`}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".xlsx,.xls"
-        className="hidden"
-        onChange={e => e.target.files[0] && onFile(e.target.files[0])}
-      />
-      {filename ? (
-        <p className="text-green-600 font-medium">✓ {filename}</p>
-      ) : (
-        <>
-          <p className="text-gray-500 font-medium">Drop your Excel file here</p>
-          <p className="text-xs text-gray-400 mt-1">or click to browse — .xlsx / .xls</p>
-          <div className="mt-5">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Or try a sample</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {[
-                { label: 'Products', file: 'product_catalog.xlsx', icon: '📦' },
-                { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
-                { label: 'Books', file: 'book_library.xlsx', icon: '📚' },
-                { label: 'HR', file: 'hr_directory.xlsx', icon: '👥' },
-              ].map(s => (
-                <button
-                  key={`${side}-${s.file}`}
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onFile({ __sample: true, filename: s.file }) }}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:border-blue-300 hover:text-blue-700 transition-colors"
-                  title={`Load sample: ${s.file}`}
-                >
-                  <span aria-hidden>{s.icon}</span>
-                  <span>{s.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 // ── Steps ──────────────────────────────────────────────────────────────────
 
 function StepNames({ state, setState, onNext }) {
@@ -565,7 +505,37 @@ function StepUpload({ side, label, state, setState, onNext }) {
       {loading ? (
         <div className="text-center py-10 text-gray-400">Reading file…</div>
       ) : (
-        <FileDropZone side={side} onFile={handleFile} filename={filename} />
+        <FileDropZone
+          accept=".xlsx,.xls"
+          formatLabel=".xlsx / .xls"
+          onFile={handleFile}
+          selectedDisplay={filename ? <p className="text-green-600 font-medium">✓ {filename}</p> : null}
+        >
+          {!filename && (
+            <div className="mt-0">
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Or try a sample</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {[
+                  { label: 'Products', file: 'product_catalog.xlsx', icon: '📦' },
+                  { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
+                  { label: 'Books', file: 'book_library.xlsx', icon: '📚' },
+                  { label: 'HR', file: 'hr_directory.xlsx', icon: '👥' },
+                ].map(s => (
+                  <button
+                    key={`${side}-${s.file}`}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleFile({ __sample: true, filename: s.file }) }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                    title={`Load sample: ${s.file}`}
+                  >
+                    <span aria-hidden>{s.icon}</span>
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </FileDropZone>
       )}
       {error && <p className="text-red-500 text-sm">{error}</p>}
       {tmpPath && (

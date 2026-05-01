@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedding, verifyRerank, API_BASE_URL } from '../api/client'
+import { FileDropZone } from '../components/FileDropZone'
 
 const STEPS = [
   'Name',
@@ -427,68 +428,46 @@ export default function CreateProject() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Upload Excel</h2>
             <p className="text-gray-500 mb-8">Upload your .xlsx file. All sheets will be read.</p>
-            <div
-              className={`border-2 rounded-xl p-8 text-center cursor-pointer transition-colors ${
-                file
-                  ? 'border-blue-400 bg-blue-50'
-                  : 'border-dashed border-gray-300 hover:border-blue-400 hover:bg-blue-50'
-              }`}
-              onClick={() => document.getElementById('file-input').click()}
+            <FileDropZone
+              accept=".xlsx,.xls"
+              formatLabel=".xlsx / .xls"
+              inputId="file-input"
+              inputTestId="file-input"
+              onFile={(f) => {
+                setFile(f)
+                setPreview(null)
+                setPreviewFileName('')
+              }}
+              selectedDisplay={
+                file ? <p className="text-emerald-700 font-semibold">{file.name}</p> : null
+              }
+              tailHint="All sheets are concatenated for search."
             >
-              {file ? (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-2xl">📄</span>
-                  <p className="text-blue-700 font-semibold">{file.name}</p>
-                  <p className="text-xs text-blue-400">Click to change</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-3">
-                  <span className="text-3xl">📂</span>
-                  <button
-                    type="button"
-                    className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors pointer-events-none"
-                  >
-                    Choose file
-                  </button>
-                  <p className="text-xs text-gray-400">.xlsx or .xls</p>
-                  <div className="pt-2">
-                    <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Or try a sample</p>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {[
-                        { label: 'Products', file: 'product_catalog.xlsx', icon: '📦' },
-                        { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
-                        { label: 'Books', file: 'book_library.xlsx', icon: '📚' },
-                        { label: 'HR', file: 'hr_directory.xlsx', icon: '👥' },
-                      ].map(s => (
-                        <button
-                          key={s.file}
-                          type="button"
-                          disabled={loading}
-                          onClick={(e) => { e.stopPropagation(); handleLoadSample(s.file) }}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 transition-colors"
-                        >
-                          <span aria-hidden>{s.icon}</span>
-                          <span>{s.label}</span>
-                        </button>
-                      ))}
-                    </div>
+              {!file && (
+                <div>
+                  <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Or try a sample</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {[
+                      { label: 'Products', file: 'product_catalog.xlsx', icon: '📦' },
+                      { label: 'IT Assets', file: 'it_assets.xlsx', icon: '🖥' },
+                      { label: 'Books', file: 'book_library.xlsx', icon: '📚' },
+                      { label: 'HR', file: 'hr_directory.xlsx', icon: '👥' },
+                    ].map(s => (
+                      <button
+                        key={s.file}
+                        type="button"
+                        disabled={loading}
+                        onClick={(e) => { e.stopPropagation(); handleLoadSample(s.file) }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-gray-200 bg-white text-xs text-gray-600 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 transition-colors"
+                      >
+                        <span aria-hidden>{s.icon}</span>
+                        <span>{s.label}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
-              <input
-                id="file-input"
-                data-testid="file-input"
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={e => {
-                  const f = e.target.files[0]
-                  setFile(f || null)
-                  setPreview(null)
-                  setPreviewFileName('')
-                }}
-              />
-            </div>
+            </FileDropZone>
 
             <div className="flex gap-3 mt-6">
               <button onClick={back} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50">
