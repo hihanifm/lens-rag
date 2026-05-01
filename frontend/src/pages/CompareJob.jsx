@@ -429,6 +429,7 @@ function ReviewTab({ job, run }) {
   const [now, setNow] = useState(() => Date.now())
   const [textDraft, setTextDraft] = useState('')
   const [textContains, setTextContains] = useState('')
+  const [commentByLeft, setCommentByLeft] = useState(() => new Map())
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['run-review-stats', jobId, runId],
@@ -455,6 +456,7 @@ function ReviewTab({ job, run }) {
       if (pageItems.length === 0) {
         setNoMore(true)
         setItems([])
+        setCommentByLeft(() => new Map())
         return
       }
 
@@ -465,12 +467,18 @@ function ReviewTab({ job, run }) {
         for (const it of pageItems) m.set(it.left_id, it.current_decision ?? null)
         return m
       })
+      setCommentByLeft(() => {
+        const m = new Map()
+        for (const it of pageItems) m.set(it.left_id, it.review_comment ?? '')
+        return m
+      })
       setOffset(newOffset)
       setRowStartedAt(Date.now())
     } catch (e) {
       if (e?.response?.status === 404) {
         setNoMore(true)
         setItems([])
+        setCommentByLeft(() => new Map())
       }
     } finally {
       setLoading(false)
@@ -500,9 +508,10 @@ function ReviewTab({ job, run }) {
           m.set(leftId, null)
           return m
         })
+        setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
         setItems(prev =>
           prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null } : it,
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '' } : it,
           ),
         )
       } finally {
@@ -511,13 +520,16 @@ function ReviewTab({ job, run }) {
       return
     }
 
+    const commentDraft = commentByLeft.get(leftId) ?? ''
     setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, rightId); return m })
     setSavingLeftId(leftId)
     try {
-      await submitRunDecision(jobId, runId, leftId, rightId)
+      await submitRunDecision(jobId, runId, leftId, rightId, commentDraft)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId } : it))
+      setItems(prev => prev.map(it =>
+        it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId, review_comment: commentDraft } : it,
+      ))
     } finally {
       setSavingLeftId(null)
     }
@@ -537,9 +549,10 @@ function ReviewTab({ job, run }) {
           m.set(leftId, null)
           return m
         })
+        setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
         setItems(prev =>
           prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null } : it,
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '' } : it,
           ),
         )
       } finally {
@@ -548,13 +561,16 @@ function ReviewTab({ job, run }) {
       return
     }
 
+    const commentDraftNm = commentByLeft.get(leftId) ?? ''
     setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
     setSavingLeftId(leftId)
     try {
-      await submitRunDecision(jobId, runId, leftId, null)
+      await submitRunDecision(jobId, runId, leftId, null, commentDraftNm)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      setItems(prev => prev.map(it => it.left_id === leftId ? { ...it, is_decided: true, current_decision: null } : it))
+      setItems(prev => prev.map(it =>
+        it.left_id === leftId ? { ...it, is_decided: true, current_decision: null, review_comment: commentDraftNm } : it,
+      ))
     } finally {
       setSavingLeftId(null)
     }
@@ -722,6 +738,38 @@ function ReviewTab({ job, run }) {
                           ))
                       )}
                     </div>
+                  </div>
+                  <div className="mt-3 px-1 max-w-3xl">
+                    <label htmlFor={`review-comment-${it.left_id}`} className="block text-xs font-medium text-gray-500 mb-1">
+                      Review comment
+                    </label>
+                    <textarea
+                      id={`review-comment-${it.left_id}`}
+                      rows={1}
+                      value={commentByLeft.get(it.left_id) ?? ''}
+                      disabled={isSaving}
+                      onChange={(e) => {
+                        setCommentByLeft(prev => new Map(prev).set(it.left_id, e.target.value))
+                      }}
+                      onBlur={(e) => {
+                        const draft = e.target.value
+                        const row = items.find(i => i.left_id === it.left_id)
+                        if (!row?.is_decided) return
+                        if (draft === (row.review_comment ?? '')) return
+                        setSavingLeftId(it.left_id)
+                        submitRunDecision(jobId, runId, it.left_id, row.current_decision, draft)
+                          .then(() => {
+                            refetchStats()
+                            queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+                            setItems(prev => prev.map(r =>
+                              r.left_id === it.left_id ? { ...r, review_comment: draft } : r,
+                            ))
+                          })
+                          .finally(() => setSavingLeftId(null))
+                      }}
+                      placeholder="Optional note — saved with your decision."
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 leading-normal focus:outline-none focus:ring-1 focus:ring-blue-300 resize-y bg-white disabled:opacity-50"
+                    />
                   </div>
                   <div className="mt-3 flex items-center justify-between">
                     <button

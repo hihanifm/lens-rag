@@ -400,7 +400,9 @@ class ReviewItem(BaseModel):
     candidates: List[CandidateItem]
     current_decision: Optional[int] = None   # matched_right_id if already decided, else None
     is_decided: bool
+    review_comment: str = ""
 
 
 class CompareDecision(BaseModel):
     matched_right_id: Optional[int] = None   # None means "no match"
+    review_comment: str = ""

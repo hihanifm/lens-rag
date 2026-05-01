@@ -258,7 +258,8 @@ def create_run_tables(schema_name: str, run_id: int):
             CREATE TABLE IF NOT EXISTS {schema_name}.run_{run_id}_decisions (
                 left_id          INTEGER PRIMARY KEY,
                 matched_right_id INTEGER,
-                decided_at       TIMESTAMP DEFAULT NOW()
+                decided_at       TIMESTAMP DEFAULT NOW(),
+                review_comment   TEXT
             );
         """)
 
@@ -269,6 +270,23 @@ def drop_run_tables(schema_name: str, run_id: int):
         cur.execute(f"DROP TABLE IF EXISTS {schema_name}.run_{run_id}_matches CASCADE;")
         cur.execute(f"DROP TABLE IF EXISTS {schema_name}.run_{run_id}_decisions CASCADE;")
         cur.execute("DELETE FROM public.compare_runs WHERE id = %s;", (run_id,))
+
+
+def migrate_compare_decisions_review_comment():
+    """Add review_comment to existing per-run decisions tables (safe on every startup)."""
+    with get_cursor() as (cur, _conn):
+        cur.execute("""
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema ~ '^compare_[0-9]+$'
+              AND table_name ~ '^run_[0-9]+_decisions$'
+        """)
+        for row in cur.fetchall():
+            schema = row["table_schema"]
+            table = row["table_name"]
+            cur.execute(
+                f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS review_comment TEXT;'
+            )
 
 
 def migrate_legacy_compare_jobs():

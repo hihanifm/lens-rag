@@ -1062,7 +1062,7 @@ def next_review_item(
 
     with get_cursor() as (cur, _conn):
         cur.execute(
-            f"SELECT matched_right_id FROM {schema}.{dec_table} WHERE left_id = %s",
+            f"SELECT matched_right_id, review_comment FROM {schema}.{dec_table} WHERE left_id = %s",
             [left_id],
         )
         dec = cur.fetchone()
@@ -1074,6 +1074,7 @@ def next_review_item(
         candidates=candidates,
         current_decision=dec["matched_right_id"] if dec else None,
         is_decided=dec is not None,
+        review_comment=(dec.get("review_comment") or "") if dec else "",
     )
 
 
@@ -1087,13 +1088,14 @@ def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecisio
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at)
-            VALUES (%s, %s, NOW())
+            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at, review_comment)
+            VALUES (%s, %s, NOW(), %s)
             ON CONFLICT (left_id) DO UPDATE
                 SET matched_right_id = EXCLUDED.matched_right_id,
-                    decided_at = NOW()
+                    decided_at = NOW(),
+                    review_comment = EXCLUDED.review_comment
             """,
-            [left_id, data.matched_right_id],
+            [left_id, data.matched_right_id, data.review_comment or ""],
         )
 
 
@@ -1144,10 +1146,12 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     m.cosine_score,
                     m.rerank_score,
                     m.llm_score,
-                    m.final_score
+                    m.final_score,
+                    COALESCE(d.review_comment, '') AS review_comment
                 FROM {schema}.{match_table} m
                 JOIN {schema}.records lr ON lr.id = m.left_id
                 JOIN {schema}.records rr ON rr.id = m.right_id
+                LEFT JOIN {schema}.{dec_table} d ON d.left_id = m.left_id
                 ORDER BY lr.original_row ASC, m.rank ASC
                 """,
             )
@@ -1160,6 +1164,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                 "Rank",
                 f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
                 "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                "Review Comment",
             ]
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name="All Matches", index=False)
@@ -1184,6 +1189,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         m.rerank_score,
                         m.llm_score,
                         m.final_score,
+                        COALESCE(d.review_comment, '') AS review_comment,
                         d.decided_at
                     FROM {schema}.{dec_table} d
                     JOIN {schema}.records lr ON lr.id = d.left_id
@@ -1201,7 +1207,8 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                 df_confirmed.columns = [
                     f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
-                    "Cosine Score", "Rerank Score", "LLM Score", "Final Score", "Decided At",
+                    "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                    "Review Comment", "Decided At",
                 ]
             df_confirmed.to_excel(writer, sheet_name="Confirmed Matches", index=False)
 
@@ -1213,7 +1220,8 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         lr.original_row       AS left_row,
                         lr.display_value      AS left_display,
                         lr.contextual_content AS left_contextual,
-                        CASE WHEN d.left_id IS NOT NULL THEN 'no match' ELSE '' END AS human_review
+                        CASE WHEN d.left_id IS NOT NULL THEN 'no match' ELSE '' END AS human_review,
+                        COALESCE(d.review_comment, '') AS review_comment
                     FROM {schema}.records lr
                     LEFT JOIN {schema}.{dec_table} d
                         ON d.left_id = lr.id AND d.matched_right_id IS NULL
@@ -1229,7 +1237,8 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
             df_unique_left = pd.DataFrame(unique_left_rows) if unique_left_rows else pd.DataFrame()
             if not df_unique_left.empty:
                 df_unique_left.columns = [
-                    f"{label_l} Row", f"{label_l} Display", f"{label_l} Content", "Human Review",
+                    f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
+                    "Human Review", "Review Comment",
                 ]
             df_unique_left.to_excel(writer, sheet_name=f"Unique {label_l}", index=False)
 
