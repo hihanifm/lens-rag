@@ -34,6 +34,7 @@ from db import (
     get_cursor,
     migrate_legacy_compare_jobs,
     migrate_compare_decisions_review_comment,
+    migrate_compare_decisions_review_outcome,
     validate_pgvector_embedding_dims,
 )
 from models import (
@@ -90,6 +91,7 @@ def startup():
     init_db()
     migrate_legacy_compare_jobs()
     migrate_compare_decisions_review_comment()
+    migrate_compare_decisions_review_outcome()
     logger.info("DB initialised")
 
 _SAMPLES_DIR = os.environ.get(

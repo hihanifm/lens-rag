@@ -311,10 +311,20 @@ export const getNextRunReviewItem = (
     },
   }).then(r => r.data)
 
-export const submitRunDecision = (jobId, runId, leftId, matchedRightId, reviewComment = '') =>
+export const submitRunDecision = (
+  jobId,
+  runId,
+  leftId,
+  matchedRightId,
+  reviewComment = '',
+  reviewOutcome = null,
+) =>
   api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, {
     matched_right_id: matchedRightId ?? null,
     review_comment: typeof reviewComment === 'string' ? reviewComment : '',
+    review_outcome: reviewOutcome === 'no_match' || reviewOutcome === 'partial' || reviewOutcome === 'fail'
+      ? reviewOutcome
+      : null,
   }).then(r => r.data)
 
 export const clearRunReviewDecision = (jobId, runId, leftId) =>

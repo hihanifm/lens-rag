@@ -259,7 +259,8 @@ def create_run_tables(schema_name: str, run_id: int):
                 left_id          INTEGER PRIMARY KEY,
                 matched_right_id INTEGER,
                 decided_at       TIMESTAMP DEFAULT NOW(),
-                review_comment   TEXT
+                review_comment   TEXT,
+                review_outcome   TEXT
             );
         """)
 
@@ -286,6 +287,23 @@ def migrate_compare_decisions_review_comment():
             table = row["table_name"]
             cur.execute(
                 f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS review_comment TEXT;'
+            )
+
+
+def migrate_compare_decisions_review_outcome():
+    """Add review_outcome (no_match | partial | fail) to per-run decisions tables."""
+    with get_cursor() as (cur, _conn):
+        cur.execute("""
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema ~ '^compare_[0-9]+$'
+              AND table_name ~ '^run_[0-9]+_decisions$'
+        """)
+        for row in cur.fetchall():
+            schema = row["table_schema"]
+            table = row["table_name"]
+            cur.execute(
+                f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS review_outcome TEXT;'
             )
 
 

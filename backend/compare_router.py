@@ -93,6 +93,8 @@ from models import (
 )
 
 logger = logging.getLogger("lens.compare_router")
+
+_REVIEW_OUTCOME_VALUES = frozenset({"no_match", "partial", "fail"})
 router = APIRouter()
 
 # Progress for job-level embedding (Phase 1), keyed by job_id
@@ -1062,10 +1064,13 @@ def next_review_item(
 
     with get_cursor() as (cur, _conn):
         cur.execute(
-            f"SELECT matched_right_id, review_comment FROM {schema}.{dec_table} WHERE left_id = %s",
+            f"SELECT matched_right_id, review_comment, review_outcome FROM {schema}.{dec_table} WHERE left_id = %s",
             [left_id],
         )
         dec = cur.fetchone()
+
+    raw_oc = (dec.get("review_outcome") if dec else None) or None
+    norm_oc = raw_oc if raw_oc in _REVIEW_OUTCOME_VALUES else None
 
     return ReviewItem(
         left_id=left_id,
@@ -1075,6 +1080,7 @@ def next_review_item(
         current_decision=dec["matched_right_id"] if dec else None,
         is_decided=dec is not None,
         review_comment=(dec.get("review_comment") or "") if dec else "",
+        review_outcome=norm_oc,
     )
 
 
@@ -1085,17 +1091,26 @@ def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecisio
     schema    = job["schema_name"]
     dec_table = f"run_{run_id}_decisions"
 
+    outcome = data.review_outcome
+    if outcome is not None and outcome not in _REVIEW_OUTCOME_VALUES:
+        raise HTTPException(status_code=400, detail="review_outcome must be no_match, partial, or fail")
+
+    mid = data.matched_right_id
+    if outcome == "no_match":
+        mid = None
+
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at, review_comment)
-            VALUES (%s, %s, NOW(), %s)
+            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at, review_comment, review_outcome)
+            VALUES (%s, %s, NOW(), %s, %s)
             ON CONFLICT (left_id) DO UPDATE
                 SET matched_right_id = EXCLUDED.matched_right_id,
                     decided_at = NOW(),
-                    review_comment = EXCLUDED.review_comment
+                    review_comment = EXCLUDED.review_comment,
+                    review_outcome = EXCLUDED.review_outcome
             """,
-            [left_id, data.matched_right_id, data.review_comment or ""],
+            [left_id, mid, data.review_comment or "", outcome],
         )
 
 
@@ -1147,6 +1162,12 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     m.rerank_score,
                     m.llm_score,
                     m.final_score,
+                    CASE COALESCE(d.review_outcome, '')
+                        WHEN 'no_match' THEN 'no match'
+                        WHEN 'partial' THEN 'partial'
+                        WHEN 'fail' THEN 'fail'
+                        ELSE ''
+                    END AS review_outcome_display,
                     COALESCE(d.review_comment, '') AS review_comment
                 FROM {schema}.{match_table} m
                 JOIN {schema}.records lr ON lr.id = m.left_id
@@ -1164,6 +1185,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                 "Rank",
                 f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
                 "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                "Review Outcome",
                 "Review Comment",
             ]
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -1189,6 +1211,12 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         m.rerank_score,
                         m.llm_score,
                         m.final_score,
+                        CASE COALESCE(d.review_outcome, '')
+                            WHEN 'no_match' THEN 'no match'
+                            WHEN 'partial' THEN 'partial'
+                            WHEN 'fail' THEN 'fail'
+                            ELSE ''
+                        END AS review_outcome_display,
                         COALESCE(d.review_comment, '') AS review_comment,
                         d.decided_at
                     FROM {schema}.{dec_table} d
@@ -1208,6 +1236,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
                     "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                    "Review Outcome",
                     "Review Comment", "Decided At",
                 ]
             df_confirmed.to_excel(writer, sheet_name="Confirmed Matches", index=False)
@@ -1220,7 +1249,14 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         lr.original_row       AS left_row,
                         lr.display_value      AS left_display,
                         lr.contextual_content AS left_contextual,
-                        CASE WHEN d.left_id IS NOT NULL THEN 'no match' ELSE '' END AS human_review,
+                        CASE
+                            WHEN d.left_id IS NULL THEN ''
+                            WHEN d.review_outcome = 'partial' THEN 'partial'
+                            WHEN d.review_outcome = 'fail' THEN 'fail'
+                            WHEN d.review_outcome = 'no_match' THEN 'no match'
+                            WHEN d.matched_right_id IS NULL THEN 'no match'
+                            ELSE ''
+                        END AS human_review,
                         COALESCE(d.review_comment, '') AS review_comment
                     FROM {schema}.records lr
                     LEFT JOIN {schema}.{dec_table} d

@@ -409,6 +409,28 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
   )
 }
 
+/** Short label for reviewed row: candidate pick + optional partial/fail flag (mutually exclusive outcomes). */
+function formatReviewBadge(it) {
+  if (!it?.is_decided) return ''
+  const oc = it.review_outcome
+  const hasPick = it.current_decision != null
+  if (hasPick) {
+    if (oc === 'partial') return 'Matched · partial'
+    if (oc === 'fail') return 'Matched · fail'
+    return 'Matched'
+  }
+  if (oc === 'partial') return 'Partial'
+  if (oc === 'fail') return 'Fail'
+  return 'No match'
+}
+
+const REVIEW_OUTCOME_CHIPS = [
+  { value: null, label: 'None' },
+  { value: 'no_match', label: 'No match' },
+  { value: 'partial', label: 'Partial' },
+  { value: 'fail', label: 'Fail' },
+]
+
 // ── Review tab ────────────────────────────────────────────────────────────
 
 function ReviewTab({ job, run }) {
@@ -430,6 +452,7 @@ function ReviewTab({ job, run }) {
   const [textDraft, setTextDraft] = useState('')
   const [textContains, setTextContains] = useState('')
   const [commentByLeft, setCommentByLeft] = useState(() => new Map())
+  const [outcomeByLeft, setOutcomeByLeft] = useState(() => new Map())
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['run-review-stats', jobId, runId],
@@ -457,6 +480,7 @@ function ReviewTab({ job, run }) {
         setNoMore(true)
         setItems([])
         setCommentByLeft(() => new Map())
+        setOutcomeByLeft(() => new Map())
         return
       }
 
@@ -472,6 +496,11 @@ function ReviewTab({ job, run }) {
         for (const it of pageItems) m.set(it.left_id, it.review_comment ?? '')
         return m
       })
+      setOutcomeByLeft(() => {
+        const m = new Map()
+        for (const it of pageItems) m.set(it.left_id, it.review_outcome ?? null)
+        return m
+      })
       setOffset(newOffset)
       setRowStartedAt(Date.now())
     } catch (e) {
@@ -479,6 +508,7 @@ function ReviewTab({ job, run }) {
         setNoMore(true)
         setItems([])
         setCommentByLeft(() => new Map())
+        setOutcomeByLeft(() => new Map())
       }
     } finally {
       setLoading(false)
@@ -493,6 +523,39 @@ function ReviewTab({ job, run }) {
   useEffect(() => {
     fetchPage(0)
   }, [fetchPage])
+
+  const handleSetOutcome = async (leftId, outcome) => {
+    if (savingLeftId != null) return
+    const row = items.find(i => i.left_id === leftId)
+    const commentDraft = commentByLeft.get(leftId) ?? ''
+    let mid = row?.is_decided ? row.current_decision : selectedByLeft.get(leftId)
+    if (mid === undefined) mid = null
+    if (outcome === 'no_match') mid = null
+
+    setSavingLeftId(leftId)
+    try {
+      await submitRunDecision(jobId, runId, leftId, mid ?? null, commentDraft, outcome)
+      refetchStats()
+      queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+      setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, outcome); return m })
+      setSelectedByLeft(prev => {
+        const m = new Map(prev)
+        if (outcome === 'no_match') m.set(leftId, null)
+        return m
+      })
+      setItems(prev => prev.map(it =>
+        it.left_id === leftId ? {
+          ...it,
+          is_decided: true,
+          current_decision: mid ?? null,
+          review_comment: commentDraft,
+          review_outcome: outcome,
+        } : it,
+      ))
+    } finally {
+      setSavingLeftId(null)
+    }
+  }
 
   const handleSelect = async (leftId, rightId) => {
     if (savingLeftId != null) return
@@ -509,9 +572,10 @@ function ReviewTab({ job, run }) {
           return m
         })
         setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
+        setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
         setItems(prev =>
           prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '' } : it,
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '', review_outcome: null } : it,
           ),
         )
       } finally {
@@ -521,14 +585,17 @@ function ReviewTab({ job, run }) {
     }
 
     const commentDraft = commentByLeft.get(leftId) ?? ''
+    let oc = outcomeByLeft.get(leftId) ?? null
+    if (oc === 'no_match') oc = null
     setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, rightId); return m })
     setSavingLeftId(leftId)
     try {
-      await submitRunDecision(jobId, runId, leftId, rightId, commentDraft)
+      await submitRunDecision(jobId, runId, leftId, rightId, commentDraft, oc)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+      setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, oc); return m })
       setItems(prev => prev.map(it =>
-        it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId, review_comment: commentDraft } : it,
+        it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId, review_comment: commentDraft, review_outcome: oc } : it,
       ))
     } finally {
       setSavingLeftId(null)
@@ -550,9 +617,10 @@ function ReviewTab({ job, run }) {
           return m
         })
         setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
+        setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
         setItems(prev =>
           prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '' } : it,
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '', review_outcome: null } : it,
           ),
         )
       } finally {
@@ -561,19 +629,7 @@ function ReviewTab({ job, run }) {
       return
     }
 
-    const commentDraftNm = commentByLeft.get(leftId) ?? ''
-    setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
-    setSavingLeftId(leftId)
-    try {
-      await submitRunDecision(jobId, runId, leftId, null, commentDraftNm)
-      refetchStats()
-      queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-      setItems(prev => prev.map(it =>
-        it.left_id === leftId ? { ...it, is_decided: true, current_decision: null, review_comment: commentDraftNm } : it,
-      ))
-    } finally {
-      setSavingLeftId(null)
-    }
+    return handleSetOutcome(leftId, 'no_match')
   }
 
   const handlePrev = useCallback(() => {
@@ -672,6 +728,8 @@ function ReviewTab({ job, run }) {
         )}
         <p className="text-xs text-gray-400 w-full sm:w-auto sm:flex-1 min-w-0">
           Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s text <span className="text-gray-500">or</span> any candidate right row for this run; works with min score and paging.
+          <span className="text-gray-500"> · </span>
+          <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">X</kbd> sets outcome <span className="text-gray-500">No match</span> on the active row.
         </p>
       </div>
 
@@ -713,8 +771,8 @@ function ReviewTab({ job, run }) {
                         className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-64 ${!it.display_value ? 'mt-6' : ''}`}
                       />
                       {it.is_decided && (
-                        <span className="absolute bottom-3 right-3 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                          {it.current_decision ? 'matched' : 'no match'}
+                        <span className="absolute bottom-3 right-3 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full max-w-[min(12rem,55%)] truncate" title={formatReviewBadge(it)}>
+                          {formatReviewBadge(it)}
                         </span>
                       )}
                     </div>
@@ -739,7 +797,36 @@ function ReviewTab({ job, run }) {
                       )}
                     </div>
                   </div>
-                  <div className="mt-3 px-1 max-w-3xl">
+                  <div className="mt-3 px-1 max-w-3xl flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-500 font-medium w-full sm:w-auto">Outcome</span>
+                    {REVIEW_OUTCOME_CHIPS.map(({ value, label }) => {
+                      const curOc = outcomeByLeft.get(it.left_id) ?? null
+                      const active = value === null ? curOc == null : curOc === value
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          disabled={
+                            isSaving || savingLeftId != null
+                            || (!it.is_decided && value === null)
+                          }
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            handleSetOutcome(it.left_id, value)
+                          }}
+                          className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                            active
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          } disabled:opacity-40`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-2 px-1 max-w-3xl">
                     <label htmlFor={`review-comment-${it.left_id}`} className="block text-xs font-medium text-gray-500 mb-1">
                       Review comment
                     </label>
@@ -757,7 +844,14 @@ function ReviewTab({ job, run }) {
                         if (!row?.is_decided) return
                         if (draft === (row.review_comment ?? '')) return
                         setSavingLeftId(it.left_id)
-                        submitRunDecision(jobId, runId, it.left_id, row.current_decision, draft)
+                        submitRunDecision(
+                          jobId,
+                          runId,
+                          it.left_id,
+                          row.current_decision,
+                          draft,
+                          outcomeByLeft.get(it.left_id) ?? null,
+                        )
                           .then(() => {
                             refetchStats()
                             queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
@@ -771,20 +865,11 @@ function ReviewTab({ job, run }) {
                       className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 leading-normal focus:outline-none focus:ring-1 focus:ring-blue-300 resize-y bg-white disabled:opacity-50"
                     />
                   </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNoMatch(it.left_id) }}
-                      disabled={isSaving || savingLeftId != null}
-                      className={`px-5 py-2 rounded-lg text-sm font-medium border transition-colors
-                        ${it.is_decided && it.current_decision === null
-                          ? 'bg-rose-600 text-white border-rose-600'
-                          : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300'} disabled:opacity-40`}
-                    >
-                      {isSaving ? '…' : '✕ No match'} <span className="ml-1 text-xs opacity-70">(X)</span>
-                    </button>
-                    {isActive && <div className="text-xs text-gray-400">Active</div>}
-                  </div>
+                  {isActive && (
+                    <div className="mt-2 px-1 flex justify-end">
+                      <span className="text-xs text-gray-400">Active</span>
+                    </div>
+                  )}
                 </div>
               )
             })}
