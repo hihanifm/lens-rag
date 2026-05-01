@@ -326,7 +326,7 @@ function RowFiltersEditor({ columns, filters, onChange, tmpPath, sheetForApi }) 
   const patch = (id, part) => onChange(filters.map(f => (f.id === id ? { ...f, ...part } : f)))
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-ignore-enter-wizard>
       <div className="flex items-center justify-between gap-2">
         <label className="block text-sm font-medium text-gray-700">Row filters (optional)</label>
         <button
@@ -1385,6 +1385,7 @@ export default function CreateCompareJob() {
       const el = document.activeElement
       if (el?.tagName === 'TEXTAREA') return
       if (el?.isContentEditable) return
+      if (el?.closest?.('[data-ignore-enter-wizard]')) return
 
       const canProceed =
         (step === 0 && state.name.trim() && state.labelLeft.trim() && state.labelRight.trim()) ||
