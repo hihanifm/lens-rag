@@ -541,6 +541,7 @@ function StepUpload({ side, label, state, setState, onNext }) {
         [`filename${colsKey}`]: file.name,
         [`rowsTotal${colsKey}`]: result.row_count,
         [`rowCount${colsKey}`]: firstRow?.row_count ?? result.row_count,
+        [`rowCountFiltered${colsKey}`]: null,
         [`rowFilters${colsKey}`]: [],
         [`contextColumns${colsKey}`]: (s[`contextColumns${colsKey}`] && s[`contextColumns${colsKey}`].length > 0)
           ? s[`contextColumns${colsKey}`]
@@ -599,7 +600,6 @@ function StepColumns({ side, label, state, setState, onNext }) {
   const rowCountSheet = state[`rowCount${key}`]
   const stepIdx = side === 'left' ? 2 : 4
 
-  const [filteredCount, setFilteredCount] = useState(null)
   const [columnSamples, setColumnSamples] = useState({})
   const [columnSamplesLoading, setColumnSamplesLoading] = useState(false)
 
@@ -620,6 +620,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
       [`sheet${key}`]: sn,
       [`columns${key}`]: cols,
       [`rowCount${key}`]: row.row_count,
+      [`rowCountFiltered${key}`]: null,
       [`contextColumns${key}`]: defaults,
       [`displayColumn${key}`]: null,
       [`rowFilters${key}`]: [],
@@ -636,10 +637,13 @@ function StepColumns({ side, label, state, setState, onNext }) {
         rowFilters: apiFilters,
       })
         .then((res) => {
-          if (!cancelled) setFilteredCount(res?.row_count_filtered ?? null)
+          if (!cancelled) {
+            const n = res?.row_count_filtered ?? null
+            setState(s => ({ ...s, [`rowCountFiltered${key}`]: n }))
+          }
         })
         .catch(() => {
-          if (!cancelled) setFilteredCount(null)
+          if (!cancelled) setState(s => ({ ...s, [`rowCountFiltered${key}`]: null }))
         })
     }, 400)
     return () => { cancelled = true; clearTimeout(t) }
@@ -721,8 +725,8 @@ function StepColumns({ side, label, state, setState, onNext }) {
 
       <p className="text-xs text-gray-500">
         Rows after filters
-        {filteredCount != null ? (
-          <>: <strong>{filteredCount.toLocaleString()}</strong> (of {rowCountSheet?.toLocaleString?.() ?? rowCountSheet} on this sheet)</>
+        {state[`rowCountFiltered${key}`] != null ? (
+          <>: <strong>{state[`rowCountFiltered${key}`].toLocaleString()}</strong> (of {rowCountSheet?.toLocaleString?.() ?? rowCountSheet} on this sheet)</>
         ) : (
           <>…</>
         )}
@@ -908,6 +912,13 @@ function StepConnection({
 function StepReview({ state, onSubmit, onBack, submitting, error }) {
   const leftTitle = state.labelLeft || 'Left'
   const rightTitle = state.labelRight || 'Right'
+
+  const fmtRowsAfterFilters = (filtered, onSheet) => {
+    if (filtered == null) return '—'
+    if (onSheet != null) return `${filtered.toLocaleString()} (of ${onSheet.toLocaleString()})`
+    return filtered.toLocaleString()
+  }
+
   const [ctxPreview, setCtxPreview] = useState({ left: null, right: null })
   const [ctxLoading, setCtxLoading] = useState(false)
   const [ctxError, setCtxError] = useState('')
@@ -962,6 +973,11 @@ function StepReview({ state, onSubmit, onBack, submitting, error }) {
     ['File', state.filenameLeft, state.filenameRight],
     ['Excel sheet', state.sheetLeft || '—', state.sheetRight || '—'],
     ['Rows on sheet', state.rowCountLeft?.toLocaleString(), state.rowCountRight?.toLocaleString()],
+    [
+      'Rows after filters',
+      fmtRowsAfterFilters(state.rowCountFilteredLeft, state.rowCountLeft),
+      fmtRowsAfterFilters(state.rowCountFilteredRight, state.rowCountRight),
+    ],
     [
       'Row filters',
       state.rowFiltersLeft?.length ? `${state.rowFiltersLeft.length} rule(s)` : 'None',
@@ -1218,6 +1234,8 @@ const INITIAL = {
   rowsTotalRight: null,
   rowCountLeft: null,
   rowCountRight: null,
+  rowCountFilteredLeft: null,
+  rowCountFilteredRight: null,
   perSheetLeft: [],
   perSheetRight: [],
   sheetNamesLeft: [],
