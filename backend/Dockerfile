@@ -1,3 +1,4 @@
+# Python 3.11 — matches `make pip-cache` (--python-version 3.11 / cp311 wheels).
 FROM python:3.11-slim
 
 # Proxy build args — passed from docker-compose, empty if not set in .env

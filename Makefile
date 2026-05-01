@@ -1,4 +1,22 @@
-.PHONY: up down build logs logs-api logs-frontend logs-db logs-split prod-logs prod-logs-api prod-logs-db prod-logs-split restart prod-restart ps dev-up prod-up prod-down build-frontend e2e-up e2e e2e-down pip-cache clean
+# Dev stack (compose profile "dev"):
+#   make build && make up        — pick up Dockerfile / dependency changes (required after backend edits)
+#   make rebuild                 — full --no-cache rebuild + up (after git pull if API/UI acts stale, e.g. 405s)
+#   make rebuild-api             — API image only (faster when only backend/ changed)
+#   make e2e-up                  — up with build (CI / fresh checkout)
+.PHONY: help up down build rebuild rebuild-api rebuild-frontend logs logs-api logs-frontend logs-db logs-split prod-logs prod-logs-api prod-logs-db prod-logs-split restart prod-restart ps dev-up prod-up prod-down build-frontend e2e-up e2e e2e-down pip-cache clean
+
+help:
+	@echo "LENS — common Make targets"
+	@echo ""
+	@echo "  make build && make up     Build dev images, start stack (Postgres + API + Vite)"
+	@echo "  make rebuild              Build dev images with --no-cache, then up (lab: after git pull)"
+	@echo "  make rebuild-api          Same, API service only (faster)"
+	@echo "  make rebuild-frontend     Same, frontend service only"
+	@echo "  make restart              down then up (no rebuild — does not pick up code changes)"
+	@echo "  make logs-api             Follow API container logs"
+	@echo "  make ps                   docker compose ps"
+	@echo "  make pip-cache            Download wheels into pip-cache/ (offline-friendly make build)"
+	@echo ""
 
 up:
 	docker compose --profile dev up -d
@@ -8,6 +26,18 @@ down:
 
 build:
 	docker compose --profile dev build
+
+rebuild:
+	docker compose --profile dev build --no-cache
+	docker compose --profile dev up -d
+
+rebuild-api:
+	docker compose --profile dev build --no-cache lens-rag-api
+	docker compose --profile dev up -d lens-rag-api
+
+rebuild-frontend:
+	docker compose --profile dev build --no-cache lens-rag-frontend
+	docker compose --profile dev up -d lens-rag-frontend
 
 logs:
 	docker compose --profile dev logs -f
