@@ -25,6 +25,10 @@ else:
     EMBEDDING_MODEL = OLLAMA_EMBED_MODEL
     EMBEDDING_DIMS  = int(os.environ.get("EMBEDDING_DIMS", 1024))
 
+# pgvector HNSW indexes enforce a maximum vector width (often 2000; pgvector 0.5.2+ raised
+# many installs to 4096). Exceeding it causes: program_limit_exceeded / cannot have more than N dimensions.
+PGVECTOR_MAX_INDEXED_DIMS = int(os.environ.get("PGVECTOR_MAX_INDEXED_DIMS", "2000"))
+
 # ── Reranker ───────────────────────────────────────────────────────────────
 # Reranker always runs via Ollama (no OpenAI equivalent)
 RERANKER_ENABLED   = os.environ.get("RERANKER_ENABLED", "true").lower() == "true"

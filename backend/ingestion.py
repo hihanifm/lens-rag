@@ -80,10 +80,6 @@ def read_compare_dataframe(filepath: str, sheet_name: str | None) -> pd.DataFram
     return df
 
 
-def _row_cell_str(row: dict, col: str) -> str:
-    return compare_scalar_cell_str(row.get(col))
-
-
 def compare_scalar_cell_str(v) -> str:
     """Plain-text cell value for Compare filtering / distinct lists (matches row filter semantics)."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -128,13 +124,13 @@ def apply_compare_row_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataF
         return df
 
     def row_ok(row: pd.Series) -> bool:
-        rd = row.to_dict()
         for f in filters:
             col = str(f.get("column") or "").strip()
             if not col or col not in df.columns:
                 return False
             op = str(f.get("op") or "contains").strip().lower()
-            val = _row_cell_str(rd, col)
+            # Read scalars from the row Series — avoid row.to_dict() (very slow on large sheets).
+            val = compare_scalar_cell_str(row[col]) if col in row.index else ""
             needle = str(f.get("value") if f.get("value") is not None else "").strip()
 
             if op == "empty":

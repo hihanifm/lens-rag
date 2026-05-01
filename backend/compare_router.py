@@ -51,7 +51,14 @@ from comparator import (
     run_pipeline,
 )
 from config import EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE
-from db import create_compare_schema, create_run_tables, drop_compare_schema, drop_run_tables, get_cursor
+from db import (
+    create_compare_schema,
+    create_run_tables,
+    drop_compare_schema,
+    drop_run_tables,
+    get_cursor,
+    validate_pgvector_embedding_dims,
+)
 from embedder import embed as _embed_probe
 from ingestion import (
     apply_compare_row_filters,
@@ -359,6 +366,11 @@ async def create_compare_job(data: CompareJobCreate):
                 status_code=422,
                 detail=f"Could not verify embedding endpoint: {e}",
             )
+
+    try:
+        validate_pgvector_embedding_dims(resolved_dims)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     lf = _filters_to_dicts(data.row_filters_left)
     rf = _filters_to_dicts(data.row_filters_right)

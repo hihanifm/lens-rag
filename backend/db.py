@@ -1,7 +1,51 @@
 import psycopg2
 import psycopg2.extras
 from contextlib import contextmanager
-from config import DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, EMBEDDING_DIMS
+from config import (
+    DB_HOST,
+    DB_PORT,
+    DB_NAME,
+    DB_USER,
+    DB_PASSWORD,
+    EMBEDDING_DIMS,
+    PGVECTOR_MAX_INDEXED_DIMS,
+)
+
+
+def embedding_dimension_exceeded_message(model_dims: int | None = None) -> str:
+    """
+    User-facing explanation for pgvector HNSW dimension limits (embedding model too wide for the DB index).
+    """
+    prefix = (
+        f"This embedding model outputs {model_dims} dimensions, but "
+        if model_dims is not None
+        else ""
+    )
+    return (
+        f"{prefix}"
+        "PostgreSQL pgvector cannot build the vector search index (HNSW): the embedding width "
+        f"exceeds this server's limit ({PGVECTOR_MAX_INDEXED_DIMS} dimensions). "
+        "Use an embedding model with fewer output dimensions, or after upgrading pgvector set "
+        "PGVECTOR_MAX_INDEXED_DIMS if your installation supports a higher limit."
+    )
+
+
+def _is_pgvector_dimension_index_limit_error(exc: BaseException) -> bool:
+    """Detect raw Postgres/pgvector errors like program_limit_exceeded / cannot have more than N dimensions."""
+    s = (str(exc) or "").lower()
+    if "program_limit_exceeded" in s:
+        return True
+    if "cannot have more than" in s and "dimension" in s:
+        return True
+    if "halfvec" in s and "dimension" in s:
+        return False
+    return "dimension" in s and ("limit" in s or "exceed" in s)
+
+
+def validate_pgvector_embedding_dims(dims: int) -> None:
+    """Raise ValueError if embedding width cannot be indexed with pgvector HNSW (LENS default index)."""
+    if dims > PGVECTOR_MAX_INDEXED_DIMS:
+        raise ValueError(embedding_dimension_exceeded_message(dims))
 
 
 def get_connection():
@@ -147,30 +191,36 @@ def init_db():
 
 def create_compare_schema(job_id: int, dims: int):
     """Create per-job schema with records table only. Matches/decisions are per-run."""
+    validate_pgvector_embedding_dims(dims)
     schema = f"compare_{job_id}"
-    with get_cursor() as (cur, conn):
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
-        cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {schema}.records (
-                id                  SERIAL PRIMARY KEY,
-                side                TEXT NOT NULL,
-                original_row        INTEGER,
-                sheet_name          TEXT,
-                contextual_content  TEXT,
-                display_value       TEXT,
-                embedding           vector({dims})
-            );
-        """)
-        cur.execute(f"""
-            ALTER TABLE {schema}.records
-                ADD CONSTRAINT records_side_chk CHECK (side IN ('left','right'));
-        """)
-        cur.execute(f"""
-            CREATE INDEX IF NOT EXISTS {schema}_records_emb_idx
-                ON {schema}.records USING hnsw (embedding vector_cosine_ops);
-            CREATE INDEX IF NOT EXISTS {schema}_records_side_idx
-                ON {schema}.records (side);
-        """)
+    try:
+        with get_cursor() as (cur, conn):
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema};")
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {schema}.records (
+                    id                  SERIAL PRIMARY KEY,
+                    side                TEXT NOT NULL,
+                    original_row        INTEGER,
+                    sheet_name          TEXT,
+                    contextual_content  TEXT,
+                    display_value       TEXT,
+                    embedding           vector({dims})
+                );
+            """)
+            cur.execute(f"""
+                ALTER TABLE {schema}.records
+                    ADD CONSTRAINT records_side_chk CHECK (side IN ('left','right'));
+            """)
+            cur.execute(f"""
+                CREATE INDEX IF NOT EXISTS {schema}_records_emb_idx
+                    ON {schema}.records USING hnsw (embedding vector_cosine_ops);
+                CREATE INDEX IF NOT EXISTS {schema}_records_side_idx
+                    ON {schema}.records (side);
+            """)
+    except Exception as e:
+        if _is_pgvector_dimension_index_limit_error(e):
+            raise ValueError(embedding_dimension_exceeded_message(dims)) from e
+        raise
 
 
 def drop_compare_schema(job_id: int):
@@ -302,38 +352,45 @@ def create_project_schema(schema_name: str, columns: list, id_column: str = None
     Create a schema and records table for a project.
     All original Excel columns stored as col_{name}.
     """
-    with get_cursor() as (cur, conn):
-        # Create schema
-        cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name};")
+    eff_dims = dims or EMBEDDING_DIMS
+    validate_pgvector_embedding_dims(eff_dims)
+    try:
+        with get_cursor() as (cur, conn):
+            # Create schema
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema_name};")
 
-        # Build dynamic column definitions
-        col_defs = "\n".join([
-            f'    "col_{col.lower().replace(" ", "_")}" TEXT,'
-            for col in columns
-        ])
+            # Build dynamic column definitions
+            col_defs = "\n".join([
+                f'    "col_{col.lower().replace(" ", "_")}" TEXT,'
+                for col in columns
+            ])
 
-        # Build tsvector expression
-        tsvector_expr = "to_tsvector('english', coalesce(contextual_content, ''))"
-        if id_column:
-            safe_id = id_column.lower().replace(" ", "_")
-            tsvector_expr += f" || to_tsvector('simple', coalesce(\"col_{safe_id}\", ''))"
+            # Build tsvector expression
+            tsvector_expr = "to_tsvector('english', coalesce(contextual_content, ''))"
+            if id_column:
+                safe_id = id_column.lower().replace(" ", "_")
+                tsvector_expr += f" || to_tsvector('simple', coalesce(\"col_{safe_id}\", ''))"
 
-        cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS {schema_name}.records (
-                id                  SERIAL PRIMARY KEY,
-                sheet_name          TEXT,
-                {col_defs}
-                contextual_content  TEXT,
-                embedding           vector({dims or EMBEDDING_DIMS}),
-                search_vector       tsvector
-                    GENERATED ALWAYS AS ({tsvector_expr}) STORED
-            );
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {schema_name}.records (
+                    id                  SERIAL PRIMARY KEY,
+                    sheet_name          TEXT,
+                    {col_defs}
+                    contextual_content  TEXT,
+                    embedding           vector({eff_dims}),
+                    search_vector       tsvector
+                        GENERATED ALWAYS AS ({tsvector_expr}) STORED
+                );
 
-            CREATE INDEX IF NOT EXISTS {schema_name}_embedding_idx
-                ON {schema_name}.records
-                USING hnsw (embedding vector_cosine_ops);
+                CREATE INDEX IF NOT EXISTS {schema_name}_embedding_idx
+                    ON {schema_name}.records
+                    USING hnsw (embedding vector_cosine_ops);
 
-            CREATE INDEX IF NOT EXISTS {schema_name}_search_idx
-                ON {schema_name}.records
-                USING gin (search_vector);
-        """)
+                CREATE INDEX IF NOT EXISTS {schema_name}_search_idx
+                    ON {schema_name}.records
+                    USING gin (search_vector);
+            """)
+    except Exception as e:
+        if _is_pgvector_dimension_index_limit_error(e):
+            raise ValueError(embedding_dimension_exceeded_message(eff_dims)) from e
+        raise

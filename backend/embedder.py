@@ -142,7 +142,11 @@ def _probe_ollama():
     try:
         resp = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input="ping")
         elapsed = int((time.monotonic() - t0) * 1000)
-        logger.info("Embed probe OK — dims=%d elapsed_ms=%d", len(resp.data[0].embedding), elapsed)
+        probe_dims = len(resp.data[0].embedding)
+        logger.info("Embed probe OK — dims=%d elapsed_ms=%d", probe_dims, elapsed)
+        from db import validate_pgvector_embedding_dims
+
+        validate_pgvector_embedding_dims(probe_dims)
     except Exception as e:
         logger.error(
             "Embed probe FAILED — url=%s model=%s — %s: %s\n"

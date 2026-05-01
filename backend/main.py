@@ -29,7 +29,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("lens.main")
-from db import init_db, get_cursor, migrate_legacy_compare_jobs
+from db import init_db, get_cursor, migrate_legacy_compare_jobs, validate_pgvector_embedding_dims
 from models import (
     ProjectCreate,
     ProjectUpdate,
@@ -292,8 +292,11 @@ def verify_embedding_endpoint(body: EmbeddingVerifyRequest):
     api_key = ((body.api_key or "").strip() or None) if url else None
     model = ((body.model or "").strip() or None) if url else None
     try:
-        embed("probe", base_url=url, api_key=api_key, model=model)
+        vec = embed("probe", base_url=url, api_key=api_key, model=model)
+        validate_pgvector_embedding_dims(len(vec))
         return {"ok": True}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -440,6 +443,11 @@ async def create_project_endpoint(data: ProjectCreate):
         errors.append(f"display_columns not in stored_columns: {bad_disp}")
     if errors:
         raise HTTPException(status_code=422, detail="; ".join(errors))
+    if data.embed_dims is not None:
+        try:
+            validate_pgvector_embedding_dims(data.embed_dims)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     project = create_project(data)
     return project
 
