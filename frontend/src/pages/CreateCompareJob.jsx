@@ -280,8 +280,13 @@ function ColumnSingleSelect({ columns, value, onChange, label, required = false 
   )
 }
 
+function newRowFilterId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `rf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 11)}`
+}
+
 function RowFiltersEditor({ columns, filters, onChange, tmpPath, sheetForApi }) {
-  const add = () => onChange([...filters, { id: crypto.randomUUID(), column: '', op: 'contains', value: '' }])
+  const add = () => onChange([...filters, { id: newRowFilterId(), column: '', op: 'contains', value: '' }])
   const remove = (id) => onChange(filters.filter(f => f.id !== id))
   const patch = (id, part) => onChange(filters.map(f => (f.id === id ? { ...f, ...part } : f)))
 

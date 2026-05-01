@@ -126,6 +126,16 @@ function RunStatsPane({ job, run }) {
     ['LLM judge', fmtBool(run.llm_judge_enabled)],
     ['LLM model', run.llm_judge_model || '—'],
     ['LLM endpoint', run.llm_judge_url || '—'],
+    ...(run.llm_judge_enabled
+      ? [[
+          'LLM max req/min',
+          run.llm_judge_max_requests_per_minute === 0
+            ? '0 (unlimited)'
+            : run.llm_judge_max_requests_per_minute != null
+              ? `${run.llm_judge_max_requests_per_minute}`
+              : 'Server default',
+        ]]
+      : []),
     ['Completed', fmtDt(run.completed_at)],
   ]
 
@@ -134,6 +144,14 @@ function RunStatsPane({ job, run }) {
     llmParamRows.push(
       ['Max output tokens', fmtNum(metrics.llm_judge_max_tokens)],
       ['Temperature', metrics.llm_judge_temperature != null ? String(metrics.llm_judge_temperature) : '—'],
+      ...(typeof metrics.llm_judge_max_requests_per_minute === 'number'
+        ? [[
+            'Effective max req/min',
+            metrics.llm_judge_max_requests_per_minute === 0
+              ? '0 (unlimited)'
+              : String(metrics.llm_judge_max_requests_per_minute),
+          ]]
+        : []),
       ['Avg ms / pair', metrics.llm_judge_avg_ms_per_pair != null ? `${metrics.llm_judge_avg_ms_per_pair} ms` : '—'],
       ['Response shape', '{ "score": number } (chat completion)'],
     )
@@ -1020,12 +1038,13 @@ function NewRunModal({ onClose, onCreated }) {
   const [error, setError] = useState('')
   const [llmJudgeDefaults, setLlmJudgeDefaults] = useState(null)
   const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
+  const [llmMaxRpm, setLlmMaxRpm] = useState('')
 
   useEffect(() => {
     let cancelled = false
     getCompareLlmJudgeDefaults()
       .then((d) => {
-        if (!cancelled && d?.default_system_prompt) setLlmJudgeDefaults(d)
+        if (!cancelled && d) setLlmJudgeDefaults(d)
       })
       .catch(() => {
         if (!cancelled) setLlmJudgeDefaultsErr('Could not load server default prompt.')
@@ -1091,6 +1110,12 @@ function NewRunModal({ onClose, onCreated }) {
     setSubmitting(true)
     setError('')
     try {
+      let llmRpmPayload = null
+      if (llmEnabled && String(llmMaxRpm).trim() !== '') {
+        const n = parseInt(String(llmMaxRpm).trim(), 10)
+        if (!Number.isNaN(n)) llmRpmPayload = Math.min(360, Math.max(0, n))
+      }
+
       const data = {
         name: name.trim() || null,
         top_k: topK,
@@ -1102,6 +1127,7 @@ function NewRunModal({ onClose, onCreated }) {
         llm_judge_url: llmEnabled && llmUrl.trim() ? llmUrl.trim() : null,
         llm_judge_model: llmEnabled && llmModel.trim() ? llmModel.trim() : null,
         llm_judge_prompt: llmEnabled && llmPrompt.trim() ? llmPrompt.trim() : null,
+        llm_judge_max_requests_per_minute: llmEnabled ? llmRpmPayload : null,
       }
       const run = await onCreated(data)
       if (!run) return
@@ -1332,6 +1358,34 @@ function NewRunModal({ onClose, onCreated }) {
                     placeholder="Leave blank to use the server default shown above."
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Max LLM requests / minute{' '}
+                      <span className="text-gray-400 font-normal">
+                        (blank = server default
+                        {llmJudgeDefaults && typeof llmJudgeDefaults.default_max_requests_per_minute === 'number'
+                          ? ` (${llmJudgeDefaults.default_max_requests_per_minute})`
+                          : ''}
+                        ; 0 = unlimited)
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={360}
+                      value={llmMaxRpm}
+                      onChange={(e) => setLlmMaxRpm(e.target.value)}
+                      placeholder={
+                        llmJudgeDefaults && typeof llmJudgeDefaults.default_max_requests_per_minute === 'number'
+                          ? `Default ${llmJudgeDefaults.default_max_requests_per_minute}`
+                          : 'e.g. 3'
+                      }
+                      className="w-full max-w-xs border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    />
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Enforces a minimum gap of 60 ÷ N seconds between judge calls so sustained traffic stays under N requests per minute.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

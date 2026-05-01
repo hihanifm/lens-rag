@@ -18,7 +18,7 @@ from typing import Generator
 
 from openai import OpenAI
 
-from config import EMBEDDING_DIMS, RERANKER_ENABLED
+from config import EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE, RERANKER_ENABLED
 from db import get_cursor, create_compare_schema
 from embedder import embed, rerank
 from ingestion import apply_compare_row_filters, build_contextual_content, read_compare_dataframe
@@ -399,19 +399,42 @@ LLM_JUDGE_MAX_TOKENS = 50
 LLM_JUDGE_TEMPERATURE = 0.0
 
 
+def effective_llm_judge_max_rpm(run: dict) -> int:
+    """
+    Max LLM chat requests per minute (0 = unlimited).
+    Run column NULL → server env LLM_JUDGE_MAX_REQUESTS_PER_MINUTE.
+    """
+    raw = run.get("llm_judge_max_requests_per_minute")
+    if raw is None:
+        try:
+            return max(0, int(LLM_JUDGE_MAX_REQUESTS_PER_MINUTE))
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return max(0, min(int(raw), 360))
+    except (TypeError, ValueError):
+        try:
+            return max(0, int(LLM_JUDGE_MAX_REQUESTS_PER_MINUTE))
+        except (TypeError, ValueError):
+            return 0
+
+
 def iter_run_llm_judge(
     schema_name: str,
     candidates: list,
     *,
     url: str,
     model: str,
-    prompt: str | None = None,
     results_out: list,
+    prompt: str | None = None,
+    max_requests_per_minute: int = 0,
 ) -> Generator[dict, None, None]:
     """
     Score each (left_id, right_id, cosine, rerank_score) tuple using an LLM judge.
     Appends (left_id, right_id, cosine, rerank_score, llm_score) to results_out.
     Yields SSE dicts type llm_judge with processed/total per pair.
+
+    max_requests_per_minute: > 0 enforces minimum spacing (60/rpm seconds) between call starts.
     """
     system_prompt = prompt or DEFAULT_LLM_JUDGE_PROMPT
     client = OpenAI(base_url=url, api_key="ollama")
@@ -437,15 +460,26 @@ def iter_run_llm_judge(
         }
         return
 
+    rpm = max(0, int(max_requests_per_minute or 0))
+    throttle_note = f", max {rpm}/min" if rpm > 0 else ""
     yield {
         "type": "llm_judge",
         "processed": 0,
         "total": total_p,
         "percent": 0,
-        "message": f"LLM judge — {total_p} pair(s)",
+        "message": f"LLM judge — {total_p} pair(s){throttle_note}",
     }
 
+    last_call_start: float | None = None
+    min_gap_s = (60.0 / float(rpm)) if rpm > 0 else 0.0
+
     for pi, (left_id, right_id, cosine, rerank_score) in enumerate(candidates):
+        if min_gap_s > 0 and last_call_start is not None:
+            elapsed = time.monotonic() - last_call_start
+            if elapsed < min_gap_s:
+                time.sleep(min_gap_s - elapsed)
+        last_call_start = time.monotonic()
+
         query_text = content_map.get(left_id, "")
         doc_text = content_map.get(right_id, "")
         fallback = float(rerank_score) if rerank_score is not None else float(cosine)
@@ -493,11 +527,18 @@ def run_llm_judge(
     url: str,
     model: str,
     prompt: str | None = None,
+    max_requests_per_minute: int = 0,
 ) -> list:
     """Non-streaming wrapper."""
     out = []
     for _ in iter_run_llm_judge(
-        schema_name, candidates, url=url, model=model, prompt=prompt, results_out=out
+        schema_name,
+        candidates,
+        url=url,
+        model=model,
+        results_out=out,
+        prompt=prompt,
+        max_requests_per_minute=max_requests_per_minute,
     ):
         pass
     return out
@@ -671,6 +712,7 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
                 _set_run_status("error", "LLM judge url or model missing")
                 return
 
+            rpm_eff = effective_llm_judge_max_rpm(run)
             t_llm0 = time.monotonic()
             judged: list[tuple] = []
             for prog in iter_run_llm_judge(
@@ -678,14 +720,16 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
                 pairs_with_rerank,
                 url=url,
                 model=model,
-                prompt=run.get("llm_judge_prompt") or None,
                 results_out=judged,
+                prompt=run.get("llm_judge_prompt") or None,
+                max_requests_per_minute=rpm_eff,
             ):
                 yield prog
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
             metrics["llm_judge_pairs"] = len(pairs_with_rerank)
             metrics["llm_judge_max_tokens"] = LLM_JUDGE_MAX_TOKENS
             metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
+            metrics["llm_judge_max_requests_per_minute"] = rpm_eff
             scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
         else:
             # final_score = rerank when present, else cosine (reranker off)

@@ -140,6 +140,9 @@ def init_db():
                 completed_at          TIMESTAMP
             );
         """)
+        cur.execute(
+            "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_max_requests_per_minute INTEGER;"
+        )
 
 
 def create_compare_schema(job_id: int, dims: int):

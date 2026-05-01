@@ -50,7 +50,7 @@ from comparator import (
     run_ingest_job,
     run_pipeline,
 )
-from config import EMBEDDING_DIMS
+from config import EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE
 from db import create_compare_schema, create_run_tables, drop_compare_schema, drop_run_tables, get_cursor
 from embedder import embed as _embed_probe
 from ingestion import (
@@ -438,6 +438,7 @@ def get_llm_judge_defaults():
         default_system_prompt=DEFAULT_LLM_JUDGE_PROMPT,
         max_tokens=LLM_JUDGE_MAX_TOKENS,
         temperature=LLM_JUDGE_TEMPERATURE,
+        default_max_requests_per_minute=max(0, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE),
     )
 
 
@@ -552,8 +553,9 @@ def create_run(job_id: int, data: CompareRunCreate):
             INSERT INTO public.compare_runs
                 (job_id, name, status, top_k, vector_enabled,
                  reranker_enabled, reranker_model, reranker_url,
-                 llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt)
-            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt,
+                 llm_judge_max_requests_per_minute)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, [
             job_id,
@@ -567,6 +569,7 @@ def create_run(job_id: int, data: CompareRunCreate):
             data.llm_judge_url or None,
             data.llm_judge_model or None,
             data.llm_judge_prompt or None,
+            data.llm_judge_max_requests_per_minute if data.llm_judge_enabled else None,
         ])
         run_id = cur.fetchone()["id"]
 
@@ -1203,6 +1206,7 @@ def _serialize_run(row: dict) -> dict:
         "llm_judge_url": row.get("llm_judge_url"),
         "llm_judge_model": row.get("llm_judge_model"),
         "llm_judge_prompt": row.get("llm_judge_prompt"),
+        "llm_judge_max_requests_per_minute": row.get("llm_judge_max_requests_per_minute"),
         "row_count_left": row.get("row_count_left"),
         "created_at": row["created_at"],
         "completed_at": row.get("completed_at"),

@@ -278,6 +278,8 @@ class CompareRunCreate(BaseModel):
     llm_judge_url: Optional[str] = None
     llm_judge_model: Optional[str] = None
     llm_judge_prompt: Optional[str] = None
+    # None = use server env LLM_JUDGE_MAX_REQUESTS_PER_MINUTE; 0 = unlimited; N > 0 = max N calls/min
+    llm_judge_max_requests_per_minute: Optional[int] = Field(default=None, ge=0, le=360)
 
 
 class CompareRunResponse(BaseModel):
@@ -295,6 +297,7 @@ class CompareRunResponse(BaseModel):
     llm_judge_url: Optional[str] = None
     llm_judge_model: Optional[str] = None
     llm_judge_prompt: Optional[str] = None
+    llm_judge_max_requests_per_minute: Optional[int] = None
     row_count_left: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
@@ -367,6 +370,7 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     default_system_prompt: str
     max_tokens: int
     temperature: float
+    default_max_requests_per_minute: int
 
 
 class CandidateItem(BaseModel):

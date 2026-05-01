@@ -62,6 +62,10 @@ COMPARE_TOP_K          = int(os.getenv("COMPARE_TOP_K", "3"))
 COMPARE_MATCH_THRESHOLD  = float(os.getenv("COMPARE_MATCH_THRESHOLD", "0.85"))
 COMPARE_REVIEW_THRESHOLD = float(os.getenv("COMPARE_REVIEW_THRESHOLD", "0.60"))
 
+# Compare LLM judge: max HTTP chat completions per rolling minute (0 = no throttle).
+# Runs may override via llm_judge_max_requests_per_minute; NULL uses this default.
+LLM_JUDGE_MAX_REQUESTS_PER_MINUTE = int(os.getenv("LLM_JUDGE_MAX_REQUESTS_PER_MINUTE", "0"))
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")
