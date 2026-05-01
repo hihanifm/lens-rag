@@ -271,6 +271,8 @@ class CompareRunCreate(BaseModel):
     name: Optional[str] = None
     top_k: int = 3
     vector_enabled: bool = True
+    # When vector_enabled is false (LLM compares vs many right rows): max rights loaded per left; null uses server default.
+    llm_compare_max_rights: Optional[int] = Field(default=None, ge=1, le=500)
     reranker_enabled: bool = False
     reranker_model: Optional[str] = None
     reranker_url: Optional[str] = None
@@ -296,6 +298,7 @@ class CompareRunResponse(BaseModel):
     status_message: Optional[str] = None
     top_k: int
     vector_enabled: bool
+    llm_compare_max_rights: Optional[int] = None
     reranker_enabled: bool
     reranker_model: Optional[str] = None
     reranker_url: Optional[str] = None

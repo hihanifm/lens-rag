@@ -19,7 +19,13 @@ from typing import Generator
 
 from openai import OpenAI
 
-from config import EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE, RERANKER_ENABLED
+from config import (
+    EMBEDDING_DIMS,
+    LLM_COMPARE_MAX_RIGHTS_CAP,
+    LLM_COMPARE_MAX_RIGHTS_DEFAULT,
+    LLM_JUDGE_MAX_REQUESTS_PER_MINUTE,
+    RERANKER_ENABLED,
+)
 from db import get_cursor, create_compare_schema
 from embedder import embed, rerank
 from ingestion import apply_compare_row_filters, build_contextual_content, read_compare_dataframe
@@ -218,6 +224,93 @@ def run_bidirectional_search(schema_name: str, top_k: int) -> list[tuple[int, in
     return out
 
 
+def iter_cartesian_candidates(
+    schema_name: str,
+    max_rights: int,
+    candidates_out: list[tuple[int, int, float]],
+    stats_out: dict | None = None,
+) -> Generator[dict, None, None]:
+    """
+    For each left row, pair with up to max_rights right rows (by id order). Cosine placeholder 0.0.
+    Used when vector retrieval is off and LLM scores all pairs in one call per left.
+    """
+    max_rights = max(1, min(int(max_rights), LLM_COMPARE_MAX_RIGHTS_CAP))
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f"SELECT id FROM {schema_name}.records WHERE side = 'left' ORDER BY id")
+        left_rows = cur.fetchall()
+        cur.execute(f"SELECT COUNT(*) AS c FROM {schema_name}.records WHERE side = 'right'")
+        total_right = int((cur.fetchone() or {}).get("c") or 0)
+        cur.execute(
+            f"""
+            SELECT id FROM {schema_name}.records
+            WHERE side = 'right'
+            ORDER BY id
+            LIMIT %s
+            """,
+            [max_rights],
+        )
+        right_rows = cur.fetchall()
+
+    right_ids = [r["id"] for r in right_rows]
+    truncated = total_right > len(right_ids)
+    if stats_out is not None:
+        stats_out["llm_compare_rights_loaded"] = len(right_ids)
+        stats_out["llm_compare_rights_total"] = total_right
+        stats_out["llm_compare_truncated_rights"] = truncated
+
+    n_left = len(left_rows)
+    if n_left == 0 or len(right_ids) == 0:
+        yield {
+            "type": "vector_search",
+            "processed": 0,
+            "total": 0,
+            "percent": 100,
+            "message": "No left or right rows for LLM compare"
+            + (" (truncated right pool)" if truncated else ""),
+        }
+        logger.info(
+            "iter_cartesian_candidates() empty left=%d right_loaded=%d",
+            n_left,
+            len(right_ids),
+        )
+        return
+
+    yield {
+        "type": "vector_search",
+        "processed": 0,
+        "total": n_left,
+        "percent": 0,
+        "message": (
+            f"LLM compare — {n_left} left × {len(right_ids)} right"
+            + (f" (showing first {len(right_ids)} of {total_right} right rows)" if truncated else "")
+        ),
+    }
+
+    for i, left_row in enumerate(left_rows):
+        left_id = left_row["id"]
+        for rid in right_ids:
+            candidates_out.append((left_id, rid, 0.0))
+
+        pct = round(100 * (i + 1) / n_left)
+        yield {
+            "type": "vector_search",
+            "processed": i + 1,
+            "total": n_left,
+            "percent": pct,
+            "message": f"Left row {i + 1} / {n_left} (db id {left_id}) — {len(right_ids)} pair(s)",
+            "left_id": left_id,
+        }
+
+    logger.info(
+        "iter_cartesian_candidates() left_rows=%d right_loaded=%d candidates=%d truncated=%s",
+        n_left,
+        len(right_ids),
+        len(candidates_out),
+        truncated,
+    )
+
+
 # ── Reranking ──────────────────────────────────────────────────────────────
 
 def iter_run_reranking(
@@ -341,6 +434,9 @@ def write_matches(
     """
     Per left_id: sort by final_score desc, take top_k, insert into {schema_name}.{table_name}.
     scored_tuples: (left_id, right_id, cosine_score, rerank_score, llm_score, final_score)
+
+    For LLM Cartesian runs (many candidates per left), raise top_k on the run to persist more rows;
+    it caps how many ranked pairs are stored after scoring.
     """
     groups: dict[int, list] = defaultdict(list)
     for row in scored_tuples:
@@ -398,6 +494,13 @@ Reply with ONLY valid JSON: {"scores": [<float>, ...]} — same length as the nu
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
 LLM_JUDGE_MAX_TOKENS = 512
 LLM_JUDGE_TEMPERATURE = 0.0
+
+
+def llm_judge_completion_max_tokens(num_candidates: int) -> int:
+    """Ensure JSON scores array fits when scoring many candidates per request."""
+    n = max(1, int(num_candidates))
+    est = 128 + n * 28
+    return min(8192, max(LLM_JUDGE_MAX_TOKENS, est))
 
 
 def _strip_json_fence(text: str) -> str:
@@ -550,13 +653,14 @@ def iter_run_llm_judge(
         user_content = f"Reference:\n{query_text}\n\n" + "\n\n".join(doc_blocks)
 
         try:
+            _mt = llm_judge_completion_max_tokens(len(pairs))
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-                max_tokens=LLM_JUDGE_MAX_TOKENS,
+                max_tokens=_mt,
                 temperature=LLM_JUDGE_TEMPERATURE,
             )
             text = (resp.choices[0].message.content or "").strip()
@@ -745,20 +849,54 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
         t_total0 = time.monotonic()
         metrics: dict = {}
 
-        # ── Vector search ─────────────────────────────────────────────────
+        # ── Candidate generation: vector top-K vs Cartesian LLM compare ───
         _set_run_status("running")
 
-        t_vec0 = time.monotonic()
+        use_vector = bool(run.get("vector_enabled", True))
         candidates: list[tuple[int, int, float]] = []
-        for prog in iter_vector_search(schema_name, top_k, candidates):
-            yield prog
-        metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
+        cartesian_stats: dict = {}
+
+        if use_vector:
+            t_vec0 = time.monotonic()
+            for prog in iter_vector_search(schema_name, top_k, candidates):
+                yield prog
+            metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
+            metrics["pipeline_mode"] = "vector_top_k"
+        else:
+            if not run["llm_judge_enabled"]:
+                yield {
+                    "type": "error",
+                    "message": "Vector retrieval is off — enable LLM judge and set URL + model.",
+                }
+                _set_run_status("error", "LLM judge required when vector retrieval is off")
+                return
+            url_chk = (run.get("llm_judge_url") or "").strip()
+            model_chk = (run.get("llm_judge_model") or "").strip()
+            if not url_chk or not model_chk:
+                yield {
+                    "type": "error",
+                    "message": "LLM judge URL and model are required when vector retrieval is off.",
+                }
+                _set_run_status("error", "LLM judge url or model missing")
+                return
+
+            raw_cap = run.get("llm_compare_max_rights")
+            max_rights = int(raw_cap) if raw_cap is not None else LLM_COMPARE_MAX_RIGHTS_DEFAULT
+            max_rights = max(1, min(max_rights, LLM_COMPARE_MAX_RIGHTS_CAP))
+
+            t_vec0 = time.monotonic()
+            for prog in iter_cartesian_candidates(schema_name, max_rights, candidates, cartesian_stats):
+                yield prog
+            metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
+            metrics["pipeline_mode"] = "llm_compare_cartesian"
+            metrics.update(cartesian_stats)
+
         metrics["candidate_pairs"] = len(candidates)
         metrics["vector_left_rows"] = len({left_id for left_id, _, _ in candidates})
 
-        # ── Reranker ──────────────────────────────────────────────────────
+        # ── Reranker (only when embedding retrieval produced cosine scores) ─
         pairs_with_rerank: list[tuple[int, int, float, float]] = []
-        if run["reranker_enabled"]:
+        if use_vector and run["reranker_enabled"]:
             t_rr0 = time.monotonic()
             for prog in iter_run_reranking(
                 schema_name,
@@ -771,7 +909,6 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             metrics["rerank_ms"] = int((time.monotonic() - t_rr0) * 1000)
             metrics["rerank_pairs"] = len(candidates)
         else:
-            # No reranker pass: keep rerank slot None so DB/UI do not show a fake "R" score (was cosine duplicate).
             pairs_with_rerank = [(l, r, c, None) for l, r, c in candidates]
 
         # ── LLM Judge ─────────────────────────────────────────────────────
@@ -799,12 +936,19 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
             metrics["llm_judge_pairs"] = len(pairs_with_rerank)
             metrics["llm_judge_requests"] = len({p[0] for p in pairs_with_rerank})
-            metrics["llm_judge_max_tokens"] = LLM_JUDGE_MAX_TOKENS
+            grp_sz = defaultdict(int)
+            for p in pairs_with_rerank:
+                grp_sz[p[0]] += 1
+            max_grp = max(grp_sz.values()) if grp_sz else 1
+            metrics["llm_judge_max_tokens"] = llm_judge_completion_max_tokens(max_grp)
             metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
             metrics["llm_judge_max_requests_per_minute"] = rpm_eff
             scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
         else:
-            # final_score = rerank when present, else cosine (reranker off)
+            if not use_vector:
+                yield {"type": "error", "message": "LLM judge must be enabled when vector retrieval is off."}
+                _set_run_status("error", "LLM judge required for LLM-only compare")
+                return
             scored_tuples = [
                 (l, r, c, rs, None, float(rs) if rs is not None else float(c))
                 for l, r, c, rs in pairs_with_rerank

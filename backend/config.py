@@ -70,6 +70,10 @@ COMPARE_REVIEW_THRESHOLD = float(os.getenv("COMPARE_REVIEW_THRESHOLD", "0.60"))
 # Runs may override via llm_judge_max_requests_per_minute; NULL uses this default.
 LLM_JUDGE_MAX_REQUESTS_PER_MINUTE = int(os.getenv("LLM_JUDGE_MAX_REQUESTS_PER_MINUTE", "0"))
 
+# LLM-only compare runs (vector retrieval off): max right rows paired per left (run column overrides default).
+LLM_COMPARE_MAX_RIGHTS_DEFAULT = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_DEFAULT", "100"))
+LLM_COMPARE_MAX_RIGHTS_CAP = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_CAP", "500"))
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")

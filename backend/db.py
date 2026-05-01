@@ -187,6 +187,9 @@ def init_db():
         cur.execute(
             "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_max_requests_per_minute INTEGER;"
         )
+        cur.execute(
+            "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_compare_max_rights INTEGER;"
+        )
 
 
 def create_compare_schema(job_id: int, dims: int):

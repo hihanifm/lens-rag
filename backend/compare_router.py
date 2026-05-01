@@ -592,21 +592,34 @@ def create_run(job_id: int, data: CompareRunCreate):
         raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
     if not data.vector_enabled and not data.reranker_enabled and not data.llm_judge_enabled:
         raise HTTPException(status_code=422, detail="At least one pipeline stage must be enabled")
+    if not data.vector_enabled:
+        if not data.llm_judge_enabled:
+            raise HTTPException(
+                status_code=422,
+                detail="When vector retrieval is off, LLM judge must be enabled to score left×right pairs.",
+            )
+        if not (data.llm_judge_url or "").strip() or not (data.llm_judge_model or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="LLM-only runs require llm_judge_url and llm_judge_model.",
+            )
 
     with get_cursor() as (cur, _conn):
         cur.execute("""
             INSERT INTO public.compare_runs
                 (job_id, name, status, top_k, vector_enabled,
+                 llm_compare_max_rights,
                  reranker_enabled, reranker_model, reranker_url,
                  llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt,
                  llm_judge_max_requests_per_minute)
-            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, [
             job_id,
             data.name or None,
             data.top_k,
             data.vector_enabled,
+            data.llm_compare_max_rights if not data.vector_enabled else None,
             data.reranker_enabled,
             data.reranker_model or None,
             data.reranker_url or None,
@@ -1288,6 +1301,7 @@ def _serialize_run(row: dict) -> dict:
         "status_message": row.get("status_message"),
         "top_k": row["top_k"],
         "vector_enabled": row["vector_enabled"],
+        "llm_compare_max_rights": row.get("llm_compare_max_rights"),
         "reranker_enabled": row["reranker_enabled"],
         "reranker_model": row.get("reranker_model"),
         "reranker_url": row.get("reranker_url"),

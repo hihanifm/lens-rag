@@ -112,7 +112,11 @@ function RunStatsPane({ job, run }) {
   ]
 
   const countDefs = [
+    ...(metrics?.pipeline_mode != null && metrics.pipeline_mode !== ''
+      ? [['Pipeline mode', String(metrics.pipeline_mode)]]
+      : []),
     ['Candidate pairs (pre top-K)', 'candidate_pairs'],
+    ...(metrics?.llm_compare_truncated_rights === true ? [['Right pool truncated', 'yes']] : []),
     ['Distinct left rows (search)', 'vector_left_rows'],
     ['Rerank pairs', 'rerank_pairs'],
     ['LLM judge pairs', 'llm_judge_pairs'],
@@ -121,8 +125,11 @@ function RunStatsPane({ job, run }) {
   ]
 
   const runCfgRows = [
-    ['Top K', run.top_k],
+    ['Top K (stored per left)', run.top_k],
     ['Vector stage', fmtBool(run.vector_enabled !== false)],
+    ...(run.vector_enabled === false
+      ? [['Max right rows vs LLM', run.llm_compare_max_rights != null ? run.llm_compare_max_rights : 'Server default']]
+      : []),
     ['Reranker', fmtBool(run.reranker_enabled)],
     ['Reranker model', run.reranker_model || '—'],
     ['Reranker URL', run.reranker_url || '—'],
@@ -1114,9 +1121,11 @@ function ConfigStatsTab({ job }) {
 
 // ── New Run Modal ──────────────────────────────────────────────────────────
 
-function NewRunModal({ onClose, onCreated }) {
+function NewRunModal({ onClose, onCreated, job }) {
   const [name, setName] = useState('')
   const [topK, setTopK] = useState(3)
+  const [vectorEnabled, setVectorEnabled] = useState(true)
+  const [llmCompareMaxRights, setLlmCompareMaxRights] = useState('')
   const [rerankerEnabled, setRerankerEnabled] = useState(false)
   const [rerankerModel, setRerankerModel] = useState('')
   const [rerankerUrl, setRerankerUrl] = useState('')
@@ -1168,6 +1177,22 @@ function NewRunModal({ onClose, onCreated }) {
     setLlmModel((m) => (llmModelOptions.includes(m) ? m : llmModelOptions[0]))
   }, [llmModelOptions])
 
+  useEffect(() => {
+    if (!vectorEnabled) {
+      setLlmEnabled(true)
+      setRerankerEnabled(false)
+    }
+  }, [vectorEnabled])
+
+  const topKMax = vectorEnabled ? 20 : 500
+
+  useEffect(() => {
+    setTopK((prev) => {
+      const n = prev === '' ? 1 : prev
+      return Math.max(1, Math.min(topKMax, n))
+    })
+  }, [vectorEnabled, topKMax])
+
   const handleFetchLlmModels = async () => {
     const url = llmUrl.trim()
     if (!url) {
@@ -1210,13 +1235,23 @@ function NewRunModal({ onClose, onCreated }) {
         if (!Number.isNaN(n)) llmRpmPayload = Math.min(360, Math.max(0, n))
       }
 
+      let rightsPayload = null
+      if (!vectorEnabled && String(llmCompareMaxRights).trim() !== '') {
+        const r = parseInt(String(llmCompareMaxRights).trim(), 10)
+        if (!Number.isNaN(r)) rightsPayload = Math.min(500, Math.max(1, r))
+      }
+
+      const topKResolved =
+        typeof topK === 'number' ? Math.max(1, Math.min(topKMax, topK)) : 1
+
       const data = {
         name: name.trim() || null,
-        top_k: topK,
-        vector_enabled: true,
-        reranker_enabled: rerankerEnabled,
-        reranker_model: rerankerEnabled && rerankerModel.trim() ? rerankerModel.trim() : null,
-        reranker_url: rerankerEnabled && rerankerUrl.trim() ? rerankerUrl.trim() : null,
+        top_k: topKResolved,
+        vector_enabled: vectorEnabled,
+        llm_compare_max_rights: vectorEnabled ? null : rightsPayload,
+        reranker_enabled: vectorEnabled && rerankerEnabled,
+        reranker_model: vectorEnabled && rerankerEnabled && rerankerModel.trim() ? rerankerModel.trim() : null,
+        reranker_url: vectorEnabled && rerankerEnabled && rerankerUrl.trim() ? rerankerUrl.trim() : null,
         llm_judge_enabled: llmEnabled,
         llm_judge_url: llmEnabled && llmUrl.trim() ? llmUrl.trim() : null,
         llm_judge_model: llmEnabled && llmModel.trim() ? llmModel.trim() : null,
@@ -1252,25 +1287,93 @@ function NewRunModal({ onClose, onCreated }) {
             />
           </div>
 
+          <div className="rounded-xl border border-gray-200 p-4 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={vectorEnabled}
+                onChange={e => setVectorEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm font-medium text-gray-700">Embedding retrieval (vector similarity)</span>
+            </label>
+            {!vectorEnabled && (
+              <p className="text-xs text-gray-500 pl-6">
+                Off: each left row is scored by the LLM against many right rows at once (no vector shortlist). Requires LLM judge below.
+                Reranker is disabled. Raise Top-K to keep more ranked pairs in the database.
+              </p>
+            )}
+          </div>
+
+          {!vectorEnabled && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Max right rows to compare per left <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={llmCompareMaxRights}
+                onChange={e => setLlmCompareMaxRights(e.target.value)}
+                placeholder="Blank = server default (often 100)"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                {job?.row_count_right != null ? (
+                  <>
+                    <span className="text-gray-600 font-medium">{job.row_count_right.toLocaleString()} right records</span>
+                    {' '}loaded for this job — cap applies if higher.
+                  </>
+                ) : (
+                  <>Right-side count is shown after ingest completes.</>
+                )}{' '}
+                Rows are taken in id order when there are more rights than the cap.
+              </p>
+            </div>
+          )}
+
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Top-K candidates per left row</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {vectorEnabled ? 'Top-K neighbors per left (retrieval)' : 'Max ranked pairs to store per left'}
+            </label>
             <input
               type="number"
               min={1}
-              max={20}
-              value={topK}
-              onChange={e => setTopK(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+              max={topKMax}
+              value={topK === '' ? '' : topK}
+              onChange={(e) => {
+                const raw = e.target.value
+                if (raw === '') {
+                  setTopK('')
+                  return
+                }
+                const n = parseInt(raw, 10)
+                if (Number.isNaN(n)) return
+                setTopK(Math.max(1, Math.min(topKMax, n)))
+              }}
+              onBlur={() => {
+                setTopK((prev) =>
+                  prev === '' ? 1 : Math.max(1, Math.min(topKMax, prev))
+                )
+              }}
               className="w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
             />
+            {!vectorEnabled && (
+              <p className="text-xs text-gray-400 mt-1">
+                After LLM scores all candidates, results are sorted and only this many pairs per left are saved. Set ≥ rights loaded to keep all scored pairs.
+              </p>
+            )}
           </div>
 
           {/* Reranker section */}
-          <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+          <div className={`rounded-xl border border-gray-200 p-4 space-y-3 ${!vectorEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={rerankerEnabled}
                 onChange={e => setRerankerEnabled(e.target.checked)}
+                disabled={!vectorEnabled}
                 className="rounded border-gray-300 text-blue-600"
               />
               <span className="text-sm font-medium text-gray-700">Enable reranker</span>
@@ -1308,10 +1411,13 @@ function NewRunModal({ onClose, onCreated }) {
                 type="checkbox"
                 checked={llmEnabled}
                 onChange={e => setLlmEnabled(e.target.checked)}
+                disabled={!vectorEnabled}
                 className="rounded border-gray-300 text-purple-600"
               />
               <span className="text-sm font-medium text-gray-700">Enable LLM judge</span>
-              <span className="text-xs text-gray-400">(stacks on top of reranker)</span>
+              <span className="text-xs text-gray-400">
+                {vectorEnabled ? '(stacks on top of reranker)' : '(required — primary scorer)'}
+              </span>
             </label>
             {llmEnabled && (
               <div className="space-y-3 pl-6">
@@ -1962,6 +2068,7 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
 
       {showNewRun && (
         <NewRunModal
+          job={job}
           onClose={() => setShowNewRun(false)}
           onCreated={handleCreateRun}
         />
