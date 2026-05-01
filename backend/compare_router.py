@@ -27,6 +27,7 @@ Run-level routes (under /compare/{job_id}/runs):
   GET  /compare/{job_id}/runs/{run_id}/review           stats
   GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
+  DELETE /compare/{job_id}/runs/{run_id}/review/{left_id} clear decision (back to pending)
   GET  /compare/{job_id}/runs/{run_id}/export           Excel download
   DELETE /compare/{job_id}/runs/{run_id}                delete run
 """
@@ -1019,6 +1020,18 @@ def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecisio
             """,
             [left_id, data.matched_right_id],
         )
+
+
+@router.delete("/{job_id}/runs/{run_id}/review/{left_id}", status_code=204)
+def clear_decision(job_id: int, run_id: int, left_id: int):
+    """Remove the decision row so this left row is pending again."""
+    job = _job_or_404(job_id)
+    _run_or_404(run_id, job_id)
+    schema = job["schema_name"]
+    dec_table = f"run_{run_id}_decisions"
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f"DELETE FROM {schema}.{dec_table} WHERE left_id = %s", [left_id])
 
 
 # ── Run export ────────────────────────────────────────────────────────────

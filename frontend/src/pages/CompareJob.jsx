@@ -10,6 +10,7 @@ import {
   getRunReviewStats,
   getNextRunReviewItem,
   submitRunDecision,
+  clearRunReviewDecision,
   downloadRunExport,
   browseCompareJob,
   browseRunRaw,
@@ -448,6 +449,29 @@ function ReviewTab({ job, run }) {
 
   const handleSelect = async (leftId, rightId) => {
     if (savingLeftId != null) return
+    const row = items.find(i => i.left_id === leftId)
+    if (row?.is_decided && row.current_decision === rightId) {
+      setSavingLeftId(leftId)
+      try {
+        await clearRunReviewDecision(jobId, runId, leftId)
+        refetchStats()
+        queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+        setSelectedByLeft(prev => {
+          const m = new Map(prev)
+          m.set(leftId, null)
+          return m
+        })
+        setItems(prev =>
+          prev.map(it =>
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null } : it,
+          ),
+        )
+      } finally {
+        setSavingLeftId(null)
+      }
+      return
+    }
+
     setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, rightId); return m })
     setSavingLeftId(leftId)
     try {
@@ -462,6 +486,29 @@ function ReviewTab({ job, run }) {
 
   const handleNoMatch = async (leftId) => {
     if (savingLeftId != null) return
+    const row = items.find(i => i.left_id === leftId)
+    if (row?.is_decided && row.current_decision == null) {
+      setSavingLeftId(leftId)
+      try {
+        await clearRunReviewDecision(jobId, runId, leftId)
+        refetchStats()
+        queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+        setSelectedByLeft(prev => {
+          const m = new Map(prev)
+          m.set(leftId, null)
+          return m
+        })
+        setItems(prev =>
+          prev.map(it =>
+            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null } : it,
+          ),
+        )
+      } finally {
+        setSavingLeftId(null)
+      }
+      return
+    }
+
     setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
     setSavingLeftId(leftId)
     try {

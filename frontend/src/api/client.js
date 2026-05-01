@@ -303,6 +303,9 @@ export const submitRunDecision = (jobId, runId, leftId, matchedRightId) =>
   api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, { matched_right_id: matchedRightId ?? null })
     .then(r => r.data)
 
+export const clearRunReviewDecision = (jobId, runId, leftId) =>
+  api.delete(`compare/${jobId}/runs/${runId}/review/${leftId}`).then(r => r.data)
+
 export const downloadRunExport = async (jobId, runId, type = 'confirmed', jobName = '') => {
   const response = await api.get(`compare/${jobId}/runs/${runId}/export`, {
     params: { type },
