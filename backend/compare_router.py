@@ -26,7 +26,7 @@ Run-level routes (under /compare/{job_id}/runs):
   PATCH /compare/{job_id}/runs/{run_id}                rename run
   GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2)
   GET  /compare/{job_id}/runs/{run_id}/review           stats
-  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= filters left text)
+  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= left or candidate-right text)
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
   DELETE /compare/{job_id}/runs/{run_id}/review/{left_id} clear decision (back to pending)
   GET  /compare/{job_id}/runs/{run_id}/export           Excel download
@@ -132,8 +132,8 @@ def _filters_to_dicts(filters: list[CompareRowFilter] | None) -> list[dict]:
 _REVIEW_TEXT_CONTAINS_MAX_LEN = 500
 
 
-def _review_text_contains_clause(raw: str | None) -> tuple[str, list]:
-    """SQL fragment + bind values to restrict left rows by contextual_content / display_value (ILIKE)."""
+def _review_text_contains_clause(schema: str, match_table: str, raw: str | None) -> tuple[str, list]:
+    """SQL fragment + binds: left contextual/display matches, OR any candidate right row for this run matches."""
     if not raw:
         return "", []
     t = raw.strip()
@@ -144,10 +144,17 @@ def _review_text_contains_clause(raw: str | None) -> tuple[str, list]:
     esc = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pat = f"%{esc}%"
     fragment = (
-        " AND (r.contextual_content ILIKE %s ESCAPE '\\' "
-        " OR COALESCE(r.display_value, '') ILIKE %s ESCAPE '\\')"
+        " AND ("
+        " (r.contextual_content ILIKE %s ESCAPE '\\' OR COALESCE(r.display_value, '') ILIKE %s ESCAPE '\\')"
+        " OR EXISTS ("
+        f" SELECT 1 FROM {schema}.{match_table} mx"
+        f" INNER JOIN {schema}.records rr ON rr.id = mx.right_id AND rr.side = 'right'"
+        " WHERE mx.left_id = r.id"
+        "   AND (rr.contextual_content ILIKE %s ESCAPE '\\' OR COALESCE(rr.display_value, '') ILIKE %s ESCAPE '\\')"
+        " )"
+        ")"
     )
-    return fragment, [pat, pat]
+    return fragment, [pat, pat, pat, pat]
 
 
 def _decode_job_filters(raw) -> list[CompareRowFilter]:
@@ -964,14 +971,17 @@ def next_review_item(
     min_score: float = 0.0,
     offset: int = 0,
     include_decided: bool = False,
-    text_contains: str | None = Query(default=None, description="Substring match on left contextual_content or display_value"),
+    text_contains: str | None = Query(
+        default=None,
+        description="Substring match on left contextual/display text or any this-run candidate right row",
+    ),
 ):
     job = _job_or_404(job_id)
     _run_or_404(run_id, job_id)
     schema      = job["schema_name"]
     match_table = f"run_{run_id}_matches"
     dec_table   = f"run_{run_id}_decisions"
-    text_frag, text_params = _review_text_contains_clause(text_contains)
+    text_frag, text_params = _review_text_contains_clause(schema, match_table, text_contains)
 
     if include_decided:
         query = f"""

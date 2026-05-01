@@ -599,7 +599,7 @@ function ReviewTab({ job, run }) {
 
       <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5">
         <label htmlFor="review-text-filter" className="text-xs text-gray-500 whitespace-nowrap shrink-0">
-          Left text contains
+          Text contains
         </label>
         <input
           id="review-text-filter"
@@ -626,7 +626,7 @@ function ReviewTab({ job, run }) {
           </button>
         )}
         <p className="text-xs text-gray-400 w-full sm:w-auto sm:flex-1 min-w-0">
-          Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s merged text or display value; works with min score and paging.
+          Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s text <span className="text-gray-500">or</span> any candidate right row for this run; works with min score and paging.
         </p>
       </div>
 
@@ -638,7 +638,7 @@ function ReviewTab({ job, run }) {
             {stats?.pending === 0
               ? '🎉 All rows reviewed!'
               : textContains
-                ? 'No left rows match this text (and the other filters) on this page. Try different words, clear the text filter, or lower the min score.'
+                ? 'No rows match this text on left or among candidates on the right (with your other filters). Try different words, clear the filter, or lower the min score.'
                 : 'No more rows match the current filter. Try lowering the min score.'}
           </p>
         </div>
