@@ -432,6 +432,16 @@ const REVIEW_OUTCOME_CHIPS = [
   { value: 'fail', label: 'Fail' },
 ]
 
+const FAIL_OUTCOME_CONFIRM_SKIP_KEY = 'lens_compare_review_fail_confirm_skip'
+
+function readFailOutcomeConfirmSkip() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(FAIL_OUTCOME_CONFIRM_SKIP_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 // ── Review tab ────────────────────────────────────────────────────────────
 
 function ReviewTab({ job, run }) {
@@ -454,6 +464,8 @@ function ReviewTab({ job, run }) {
   const [textContains, setTextContains] = useState('')
   const [commentByLeft, setCommentByLeft] = useState(() => new Map())
   const [outcomeByLeft, setOutcomeByLeft] = useState(() => new Map())
+  const [failConfirm, setFailConfirm] = useState(null)
+  const [failConfirmDontShowAgain, setFailConfirmDontShowAgain] = useState(false)
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['run-review-stats', jobId, runId],
@@ -525,7 +537,19 @@ function ReviewTab({ job, run }) {
     fetchPage(0)
   }, [fetchPage])
 
-  const handleSetOutcome = async (leftId, outcome) => {
+  useEffect(() => {
+    if (!failConfirm) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setFailConfirm(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [failConfirm])
+
+  const applySetOutcome = async (leftId, outcome) => {
     if (savingLeftId != null) return
     const row = items.find(i => i.left_id === leftId)
     const commentDraft = commentByLeft.get(leftId) ?? ''
@@ -556,6 +580,31 @@ function ReviewTab({ job, run }) {
     } finally {
       setSavingLeftId(null)
     }
+  }
+
+  const handleSetOutcome = async (leftId, outcome) => {
+    if (savingLeftId != null) return
+    if (outcome === 'fail' && !readFailOutcomeConfirmSkip()) {
+      setFailConfirm({ leftId })
+      setFailConfirmDontShowAgain(false)
+      return
+    }
+    await applySetOutcome(leftId, outcome)
+  }
+
+  const confirmFailOutcome = async () => {
+    if (!failConfirm || savingLeftId != null) return
+    const { leftId } = failConfirm
+    const persistSkip = failConfirmDontShowAgain
+    setFailConfirm(null)
+    if (persistSkip) {
+      try {
+        localStorage.setItem(FAIL_OUTCOME_CONFIRM_SKIP_KEY, '1')
+      } catch {
+        /* ignore */
+      }
+    }
+    await applySetOutcome(leftId, 'fail')
   }
 
   const handleSelect = async (leftId, rightId) => {
@@ -630,7 +679,7 @@ function ReviewTab({ job, run }) {
       return
     }
 
-    return handleSetOutcome(leftId, 'no_match')
+    return applySetOutcome(leftId, 'no_match')
   }
 
   const handlePrev = useCallback(() => {
@@ -657,6 +706,7 @@ function ReviewTab({ job, run }) {
   }, [offset, savingLeftId, loading, activeIdx, items, handlePrev, handleNext, handleNoMatch])
 
   return (
+    <>
     <div className="space-y-4">
       {/* Top bar */}
       <div className="flex flex-wrap items-center gap-4 bg-white border border-gray-200 rounded-xl px-4 py-3">
@@ -893,6 +943,58 @@ function ReviewTab({ job, run }) {
         </>
       ) : null}
     </div>
+    {failConfirm && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fail-outcome-confirm-title"
+        onClick={() => setFailConfirm(null)}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-xl w-full max-w-md"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+            <h2 id="fail-outcome-confirm-title" className="text-lg font-bold text-gray-900">
+              Confirm Fail outcome
+            </h2>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-sm text-gray-700 leading-relaxed">
+              You are marking <span className="font-semibold">Fail</span>: you confirm that a matching row exists on the right for this left row, but the system did not surface it among the candidates shown. Continue?
+            </p>
+            <label className="mt-4 flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={failConfirmDontShowAgain}
+                onChange={e => setFailConfirmDontShowAgain(e.target.checked)}
+                className="mt-0.5 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm text-gray-600">Do not show this confirmation again</span>
+            </label>
+          </div>
+          <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50"
+              onClick={() => setFailConfirm(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+              disabled={savingLeftId != null}
+              onClick={() => confirmFailOutcome()}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 
