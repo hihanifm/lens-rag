@@ -114,6 +114,7 @@ function RunStatsPane({ job, run }) {
     ['Distinct left rows (search)', 'vector_left_rows'],
     ['Rerank pairs', 'rerank_pairs'],
     ['LLM judge pairs', 'llm_judge_pairs'],
+    ['LLM chat calls (left batches)', 'llm_judge_requests'],
     ['Match rows inserted', 'matches_inserted'],
   ]
 
@@ -152,8 +153,9 @@ function RunStatsPane({ job, run }) {
               : String(metrics.llm_judge_max_requests_per_minute),
           ]]
         : []),
-      ['Avg ms / pair', metrics.llm_judge_avg_ms_per_pair != null ? `${metrics.llm_judge_avg_ms_per_pair} ms` : '—'],
-      ['Response shape', '{ "score": number } (chat completion)'],
+      ['Avg ms / LLM call', metrics.llm_judge_avg_ms_per_request != null ? `${metrics.llm_judge_avg_ms_per_request} ms` : '—'],
+      ['Avg ms / pair (amortized)', metrics.llm_judge_avg_ms_per_pair != null ? `${metrics.llm_judge_avg_ms_per_pair} ms` : '—'],
+      ['Response shape', '{ "scores": [number, …] } per left row (one score per candidate); K=1 may use { "score": number }'],
     )
   }
 

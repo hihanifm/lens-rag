@@ -12,6 +12,7 @@ Pipeline is split into two phases:
 """
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Generator
@@ -375,28 +376,73 @@ Domain context (critical):
 - Content typically reflects 3GPP-family specifications and related industry specs — including legacy cellular (e.g. GSM/UMTS context where relevant), LTE (4G), and 5G NR (New Radio), plus associated procedures, timers, RRC/NAS/AS behaviors, bearers, registrations, handovers, measurements, and conformance-style scenarios as described in the text.
 
 Input format (fixed by the tool):
-- "Query" is ONE reference test case (steps, scope, and fields merged into one text).
-- "Document" is ONE candidate test case from the other source.
+- "Reference" is ONE left-side test case (merged text).
+- "Candidate 1", "Candidate 2", … are top-ranked right-side rows for the SAME reference (same order as retrieval).
 
-Your job for THIS pair only:
-- Decide how well this single candidate corresponds to the reference test for human review — not a final truth.
-- Use telecom domain knowledge only to judge intent and coverage (procedures, layers, signals, parameters named in the text). Do not hallucinate spec clauses or requirements not supported by the given text.
-- Matching is often imperfect: one reference may align with one candidate, or several candidates together may cover one reference (split/combined cases). You only score THIS pair; reviewers may merge or split rows later.
+Your job:
+- Score EACH candidate against the reference independently for human review — not final truth.
+- Use telecom domain knowledge only to judge intent and coverage (procedures, layers, signals, parameters named in the text). Do not hallucinate spec clauses not supported by the given text.
+- Matching is often imperfect; reviewers may merge or split rows later.
 
-Scoring (output a single number 0.0–1.0):
+Per-candidate scores (each 0.0–1.0), aligned with candidate index order:
 - 0.90–1.00 = Strong match: same intent, scope, and main checks; wording/format differences are OK.
 - 0.75–0.89 = Good / reasonable match: clearly the same area with minor gaps, extra/missing steps, or different structure.
-- 0.55–0.74 = Partial / weak: overlapping topic but important differences; might be one of several candidates needed for a full match.
+- 0.55–0.74 = Partial / weak: overlapping topic but important differences.
 - 0.25–0.54 = Mostly different with small overlap.
 - 0.00–0.24 = Unrelated or wrong candidate.
 
 Use the full merged text; do not invent IDs or missing steps. Prefer lower scores when unsure.
 
-Reply with ONLY valid JSON in this format: {"score": <float>}"""
+Reply with ONLY valid JSON: {"scores": [<float>, ...]} — same length as the number of candidates, in order (scores[0] = Candidate 1). If there is exactly one candidate, {"score": <float>} is also accepted."""
 
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
-LLM_JUDGE_MAX_TOKENS = 50
+LLM_JUDGE_MAX_TOKENS = 512
 LLM_JUDGE_TEMPERATURE = 0.0
+
+
+def _strip_json_fence(text: str) -> str:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```\s*$", "", raw)
+    return raw.strip()
+
+
+def _parse_llm_judge_scores_batch(text: str, n: int, fallbacks: list[float]) -> list[float]:
+    """
+    Expect {"scores": [float, ...]} of length n, or {"score": float} when n==1.
+    On failure or wrong length, uses fallbacks (rerank/cosine) per slot.
+    """
+    if n <= 0:
+        return []
+    fb = list(fallbacks[:n])
+    while len(fb) < n:
+        fb.append(0.0)
+
+    try:
+        raw = _strip_json_fence(text)
+        data = json.loads(raw)
+        if n == 1 and "scores" not in data and isinstance(data.get("score"), (int, float)):
+            v = max(0.0, min(1.0, float(data["score"])))
+            return [v]
+
+        arr = data.get("scores")
+        if not isinstance(arr, list):
+            return fb
+
+        out: list[float] = []
+        for i in range(n):
+            if i < len(arr):
+                try:
+                    v = float(arr[i])
+                    out.append(max(0.0, min(1.0, v)))
+                except (TypeError, ValueError):
+                    out.append(fb[i])
+            else:
+                out.append(fb[i])
+        return out
+    except Exception:
+        return fb
 
 
 def effective_llm_judge_max_rpm(run: dict) -> int:
@@ -430,11 +476,12 @@ def iter_run_llm_judge(
     max_requests_per_minute: int = 0,
 ) -> Generator[dict, None, None]:
     """
-    Score each (left_id, right_id, cosine, rerank_score) tuple using an LLM judge.
-    Appends (left_id, right_id, cosine, rerank_score, llm_score) to results_out.
-    Yields SSE dicts type llm_judge with processed/total per pair.
+    Score (left_id, right_id, cosine, rerank_score) tuples using an LLM judge.
+    One chat completion per left row: reference text + all candidate rights for that row.
+    Appends (left_id, right_id, cosine, rerank_score, llm_score) per pair to results_out.
+    Yields SSE dicts type llm_judge with processed/total per left batch.
 
-    max_requests_per_minute: > 0 enforces minimum spacing (60/rpm seconds) between call starts.
+    max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
     """
     system_prompt = prompt or DEFAULT_LLM_JUDGE_PROMPT
     client = OpenAI(base_url=url, api_key="ollama")
@@ -449,8 +496,8 @@ def iter_run_llm_judge(
         for row in cur.fetchall():
             content_map[row["id"]] = row["contextual_content"] or ""
 
-    total_p = len(candidates)
-    if total_p == 0:
+    total_pairs = len(candidates)
+    if total_pairs == 0:
         yield {
             "type": "llm_judge",
             "processed": 0,
@@ -460,20 +507,33 @@ def iter_run_llm_judge(
         }
         return
 
+    groups: dict[int, list[tuple]] = defaultdict(list)
+    left_order: list[int] = []
+    seen_left: set[int] = set()
+    for tup in candidates:
+        lid = tup[0]
+        groups[lid].append(tup)
+        if lid not in seen_left:
+            seen_left.add(lid)
+            left_order.append(lid)
+
+    total_batches = len(left_order)
     rpm = max(0, int(max_requests_per_minute or 0))
     throttle_note = f", max {rpm}/min" if rpm > 0 else ""
     yield {
         "type": "llm_judge",
         "processed": 0,
-        "total": total_p,
+        "total": total_batches,
         "percent": 0,
-        "message": f"LLM judge — {total_p} pair(s){throttle_note}",
+        "message": f"LLM judge — {total_batches} left row(s), {total_pairs} candidate pair(s){throttle_note}",
     }
 
     last_call_start: float | None = None
     min_gap_s = (60.0 / float(rpm)) if rpm > 0 else 0.0
+    pairs_done = 0
 
-    for pi, (left_id, right_id, cosine, rerank_score) in enumerate(candidates):
+    for bi, left_id in enumerate(left_order):
+        pairs = groups[left_id]
         if min_gap_s > 0 and last_call_start is not None:
             elapsed = time.monotonic() - last_call_start
             if elapsed < min_gap_s:
@@ -481,43 +541,54 @@ def iter_run_llm_judge(
         last_call_start = time.monotonic()
 
         query_text = content_map.get(left_id, "")
-        doc_text = content_map.get(right_id, "")
-        fallback = float(rerank_score) if rerank_score is not None else float(cosine)
+        doc_blocks = []
+        fallbacks: list[float] = []
+        for i, (_l, right_id, cosine, rerank_score) in enumerate(pairs, start=1):
+            doc_blocks.append(f"--- Candidate {i} ---\n{content_map.get(right_id, '')}")
+            fallbacks.append(float(rerank_score) if rerank_score is not None else float(cosine))
+
+        user_content = f"Reference:\n{query_text}\n\n" + "\n\n".join(doc_blocks)
 
         try:
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Query: {query_text}\n\nDocument: {doc_text}"},
+                    {"role": "user", "content": user_content},
                 ],
                 max_tokens=LLM_JUDGE_MAX_TOKENS,
                 temperature=LLM_JUDGE_TEMPERATURE,
             )
-            text = resp.choices[0].message.content.strip()
-            data = json.loads(text)
-            llm_score = float(data.get("score", fallback))
-            llm_score = max(0.0, min(1.0, llm_score))
+            text = (resp.choices[0].message.content or "").strip()
+            llm_scores = _parse_llm_judge_scores_batch(text, len(pairs), fallbacks)
         except Exception as e:
             logger.warning(
-                "run_llm_judge() fallback for left_id=%d right_id=%d — %s", left_id, right_id, e
+                "iter_run_llm_judge() batch fallback left_id=%d candidates=%d — %s",
+                left_id,
+                len(pairs),
+                e,
             )
-            llm_score = fallback
+            llm_scores = list(fallbacks)
 
-        results_out.append((left_id, right_id, cosine, rerank_score, llm_score))
+        for tup, llm_score in zip(pairs, llm_scores):
+            left_i, right_id, cosine, rerank_score = tup
+            results_out.append((left_i, right_id, cosine, rerank_score, llm_score))
 
-        pct = round(100 * (pi + 1) / total_p)
+        pairs_done += len(pairs)
+        pct = round(100 * (bi + 1) / total_batches) if total_batches else 100
         yield {
             "type": "llm_judge",
-            "processed": pi + 1,
-            "total": total_p,
+            "processed": bi + 1,
+            "total": total_batches,
             "percent": pct,
-            "message": f"Pair {pi + 1} / {total_p} (left {left_id} → right {right_id})",
+            "message": (
+                f"Left {bi + 1} / {total_batches} (id {left_id}, {len(pairs)} candidate(s)) "
+                f"— pairs scored {pairs_done} / {total_pairs}"
+            ),
             "left_id": left_id,
-            "right_id": right_id,
         }
 
-    logger.info("iter_run_llm_judge() done pairs=%d", len(results_out))
+    logger.info("iter_run_llm_judge() done pairs=%d batches=%d", len(results_out), total_batches)
 
 
 def run_llm_judge(
@@ -727,6 +798,7 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
                 yield prog
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)
             metrics["llm_judge_pairs"] = len(pairs_with_rerank)
+            metrics["llm_judge_requests"] = len({p[0] for p in pairs_with_rerank})
             metrics["llm_judge_max_tokens"] = LLM_JUDGE_MAX_TOKENS
             metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
             metrics["llm_judge_max_requests_per_minute"] = rpm_eff
@@ -744,10 +816,14 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
         metrics["write_matches_ms"] = int((time.monotonic() - t0) * 1000)
         metrics["total_ms"]         = int((time.monotonic() - t_total0) * 1000)
 
+        lr = metrics.get("llm_judge_requests")
         lp = metrics.get("llm_judge_pairs")
         lm = metrics.get("llm_judge_ms")
-        if lp and lm and lp > 0:
-            metrics["llm_judge_avg_ms_per_pair"] = round(lm / lp, 2)
+        if lm is not None:
+            if lr and lr > 0:
+                metrics["llm_judge_avg_ms_per_request"] = round(lm / lr, 2)
+            if lp and lp > 0:
+                metrics["llm_judge_avg_ms_per_pair"] = round(lm / lp, 2)
 
         metrics["embedding_job"] = {
             "embed_dims": job.get("embed_dims"),
