@@ -1,18 +1,20 @@
 ---
-name: docker-lab
+
+## name: docker-lab
+
 description: Enforces a predictable, proxy-friendly Docker Compose dev/prod workflow for lab environments.
 version: 1.0
 applies_to: ["docker", "docker-compose", "compose", "lab", "proxy", "pip", "npm", "dev-server", "ports", "profiles", "tmux"]
 rules:
-  - Always separate dev (FE dev server + API) from prod (single-origin static + API).
-  - Always use Compose profiles (or equivalent) to model dev vs prod.
-  - Always pass HTTP_PROXY/HTTPS_PROXY/NO_PROXY into Docker builds in restricted egress environments.
-  - Always keep browser traffic single-origin in dev (frontend dev server proxies to API).
-  - Never assume `docker compose restart` applies code changes; rebuild when code is baked into images.
+
+- Always separate dev (FE dev server + API) from prod (single-origin static + API).
+- Always use Compose profiles (or equivalent) to model dev vs prod.
+- Always pass HTTP_PROXY/HTTPS_PROXY/NO_PROXY into Docker builds in restricted egress environments.
+- Always keep browser traffic single-origin in dev (frontend dev server proxies to API).
+- Never assume `docker compose restart` applies code changes; rebuild when code is baked into images.
 usage:
-  - Use this guideline when creating or repairing Docker Compose workflows for web apps in lab/proxy environments.
-  - Apply by enforcing the port convention, profiles, proxy args, and documenting daily commands + verification checks.
----
+- Use this guideline when creating or repairing Docker Compose workflows for web apps in lab/proxy environments.
+- Apply by enforcing the port convention, profiles, proxy args, and documenting daily commands + verification checks.
 
 # SKILL: Docker Lab Compose Guidelines
 
@@ -241,3 +243,4 @@ logs-api:
 - **If the browser hits CORS**: ensure it talks to FE dev server only; FE proxies to API.
 - **If builds fail in lab**: verify proxy args are passed; use `pip-cache/` to avoid PyPI at build time.
 - **If calling host-only services**: document `host.docker.internal` usage and any required `extra_hosts`.
+

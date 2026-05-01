@@ -26,7 +26,7 @@ Run-level routes (under /compare/{job_id}/runs):
   PATCH /compare/{job_id}/runs/{run_id}                rename run
   GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2)
   GET  /compare/{job_id}/runs/{run_id}/review           stats
-  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem
+  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= filters left text)
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
   DELETE /compare/{job_id}/runs/{run_id}/review/{left_id} clear decision (back to pending)
   GET  /compare/{job_id}/runs/{run_id}/export           Excel download
@@ -42,7 +42,7 @@ import threading
 import time
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from comparator import (
@@ -127,6 +127,27 @@ def _filters_to_dicts(filters: list[CompareRowFilter] | None) -> list[dict]:
             continue
         out.append(d)
     return out
+
+
+_REVIEW_TEXT_CONTAINS_MAX_LEN = 500
+
+
+def _review_text_contains_clause(raw: str | None) -> tuple[str, list]:
+    """SQL fragment + bind values to restrict left rows by contextual_content / display_value (ILIKE)."""
+    if not raw:
+        return "", []
+    t = raw.strip()
+    if not t:
+        return "", []
+    if len(t) > _REVIEW_TEXT_CONTAINS_MAX_LEN:
+        raise HTTPException(status_code=422, detail="text_contains exceeds maximum length")
+    esc = t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pat = f"%{esc}%"
+    fragment = (
+        " AND (r.contextual_content ILIKE %s ESCAPE '\\' "
+        " OR COALESCE(r.display_value, '') ILIKE %s ESCAPE '\\')"
+    )
+    return fragment, [pat, pat]
 
 
 def _decode_job_filters(raw) -> list[CompareRowFilter]:
@@ -943,12 +964,14 @@ def next_review_item(
     min_score: float = 0.0,
     offset: int = 0,
     include_decided: bool = False,
+    text_contains: str | None = Query(default=None, description="Substring match on left contextual_content or display_value"),
 ):
     job = _job_or_404(job_id)
     _run_or_404(run_id, job_id)
     schema      = job["schema_name"]
     match_table = f"run_{run_id}_matches"
     dec_table   = f"run_{run_id}_decisions"
+    text_frag, text_params = _review_text_contains_clause(text_contains)
 
     if include_decided:
         query = f"""
@@ -957,6 +980,7 @@ def next_review_item(
             JOIN {schema}.{match_table} m ON m.left_id = r.id AND m.rank = 1
             WHERE r.side = 'left'
               AND m.final_score >= %s
+              {text_frag}
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
@@ -969,12 +993,15 @@ def next_review_item(
             WHERE r.side = 'left'
               AND d.left_id IS NULL
               AND m.final_score >= %s
+              {text_frag}
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
 
+    q_params = [min_score, *text_params, offset]
+
     with get_cursor() as (cur, _conn):
-        cur.execute(query, [min_score, offset])
+        cur.execute(query, q_params)
         left_row = cur.fetchone()
 
     if not left_row:

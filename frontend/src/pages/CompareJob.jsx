@@ -398,6 +398,8 @@ function ReviewTab({ job, run }) {
   const [savingLeftId, setSavingLeftId] = useState(null)
   const [rowStartedAt, setRowStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
+  const [textDraft, setTextDraft] = useState('')
+  const [textContains, setTextContains] = useState('')
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['run-review-stats', jobId, runId],
@@ -411,7 +413,12 @@ function ReviewTab({ job, run }) {
     try {
       const start = newOffset * rowsShown
       const reqs = Array.from({ length: rowsShown }, (_, i) =>
-        getNextRunReviewItem(jobId, runId, { minScore, offset: start + i, includeDecided: true })
+        getNextRunReviewItem(jobId, runId, {
+          minScore,
+          offset: start + i,
+          includeDecided: true,
+          textContains,
+        })
       )
       const results = await Promise.allSettled(reqs)
       const pageItems = results.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean)
@@ -439,14 +446,16 @@ function ReviewTab({ job, run }) {
     } finally {
       setLoading(false)
     }
-  }, [jobId, runId, minScore, rowsShown])
+  }, [jobId, runId, minScore, rowsShown, textContains])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => { fetchPage(0) }, [minScore, rowsShown])
+  useEffect(() => {
+    fetchPage(0)
+  }, [fetchPage])
 
   const handleSelect = async (leftId, rightId) => {
     if (savingLeftId != null) return
@@ -588,6 +597,39 @@ function ReviewTab({ job, run }) {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5">
+        <label htmlFor="review-text-filter" className="text-xs text-gray-500 whitespace-nowrap shrink-0">
+          Left text contains
+        </label>
+        <input
+          id="review-text-filter"
+          type="search"
+          value={textDraft}
+          onChange={e => setTextDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              setTextContains(textDraft.trim())
+            }
+          }}
+          placeholder="Type text, then press Enter…"
+          autoComplete="off"
+          className="flex-1 min-w-[10rem] max-w-md text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300"
+        />
+        {textDraft.trim() !== '' && (
+          <button
+            type="button"
+            onClick={() => { setTextDraft(''); setTextContains('') }}
+            className="text-xs text-gray-500 hover:text-gray-800 px-2 py-1 rounded border border-gray-200"
+          >
+            Clear
+          </button>
+        )}
+        <p className="text-xs text-gray-400 w-full sm:w-auto sm:flex-1 min-w-0">
+          Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s merged text or display value; works with min score and paging.
+        </p>
+      </div>
+
       {loading ? (
         <div className="text-center py-20 text-gray-400">Loading…</div>
       ) : noMore ? (
@@ -595,7 +637,9 @@ function ReviewTab({ job, run }) {
           <p className="text-gray-500 text-lg font-medium">
             {stats?.pending === 0
               ? '🎉 All rows reviewed!'
-              : 'No more rows match the current filter. Try lowering the min score.'}
+              : textContains
+                ? 'No left rows match this text (and the other filters) on this page. Try different words, clear the text filter, or lower the min score.'
+                : 'No more rows match the current filter. Try lowering the min score.'}
           </p>
         </div>
       ) : items.length > 0 ? (

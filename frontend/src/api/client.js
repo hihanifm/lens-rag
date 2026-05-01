@@ -297,9 +297,18 @@ export const deleteRun = (jobId, runId) =>
 export const getRunReviewStats = (jobId, runId) =>
   api.get(`compare/${jobId}/runs/${runId}/review`).then(r => r.data)
 
-export const getNextRunReviewItem = (jobId, runId, { minScore = 0, offset = 0, includeDecided = false } = {}) =>
+export const getNextRunReviewItem = (
+  jobId,
+  runId,
+  { minScore = 0, offset = 0, includeDecided = false, textContains = '' } = {},
+) =>
   api.get(`compare/${jobId}/runs/${runId}/review/next`, {
-    params: { min_score: minScore, offset, include_decided: includeDecided },
+    params: {
+      min_score: minScore,
+      offset,
+      include_decided: includeDecided,
+      ...(String(textContains).trim() ? { text_contains: String(textContains).trim() } : {}),
+    },
   }).then(r => r.data)
 
 export const submitRunDecision = (jobId, runId, leftId, matchedRightId) =>
