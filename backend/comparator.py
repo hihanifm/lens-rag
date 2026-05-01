@@ -56,6 +56,85 @@ def _one_line_preview(text: str, max_len: int = 320) -> str:
     return s[: max_len - 1] + "…"
 
 
+def _format_int_list_summary(xs: list[int], *, max_show: int = 32) -> str:
+    """Compact list of ints for logs when pairing many candidates."""
+    if not xs:
+        return "[]"
+    if len(xs) <= max_show:
+        return str(xs)
+    return (
+        f"n={len(xs)} min={min(xs)} max={max(xs)} sum={sum(xs)} "
+        f"first5={xs[:5]} … last5={xs[-5]}"
+    )
+
+
+# Excerpt length for DEBUG logs (full payload may be huge; httpx DEBUG also truncates).
+LLM_JUDGE_LOG_EXCERPT_CHARS = 720
+
+
+def _log_llm_judge_outbound_payload(
+    *,
+    left_id: int,
+    batch_num: int,
+    total_batches: int,
+    model: str,
+    max_completion_tokens: int,
+    system_prompt: str,
+    user_content: str,
+    reference_text: str,
+    candidate_body_chars: list[int],
+) -> None:
+    """
+    Logs exact string sizes we pass to chat.completions.create (nothing stripped by LENS).
+    OpenAI/httpx DEBUGRequest logs often truncate the JSON body — use this to verify.
+    """
+    sm = len(system_prompt)
+    um = len(user_content)
+    ref = len(reference_text)
+    sm_b = len(system_prompt.encode("utf-8"))
+    um_b = len(user_content.encode("utf-8"))
+    logger.info(
+        "LLM judge → POST /v1/chat/completions INPUT (built by LENS, not truncated before send):\n"
+        "  left_id=%s  batch %s/%s  model=%s  max_completion_tokens=%s\n"
+        "  system message: %s chars, %s UTF-8 bytes\n"
+        "  user message:   %s chars, %s UTF-8 bytes\n"
+        "  reference-only text length: %s chars (left contextual_content)\n"
+        "  candidates: %s  right-side body lengths (chars each): %s\n"
+        "  Note: SDK/httpx DEBUG may clip the printed JSON; sizes above are the real strings.",
+        left_id,
+        batch_num,
+        total_batches,
+        model,
+        max_completion_tokens,
+        sm,
+        sm_b,
+        um,
+        um_b,
+        ref,
+        len(candidate_body_chars),
+        _format_int_list_summary(candidate_body_chars),
+    )
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    ex = LLM_JUDGE_LOG_EXCERPT_CHARS
+    logger.debug(
+        "LLM judge SYSTEM (first %d of %d chars):\n%s",
+        ex,
+        sm,
+        system_prompt[:ex],
+    )
+    if sm > ex:
+        logger.debug("LLM judge SYSTEM (last %d chars):\n%s", ex, system_prompt[-ex:])
+    logger.debug(
+        "LLM judge USER (first %d of %d chars):\n%s",
+        ex,
+        um,
+        user_content[:ex],
+    )
+    if um > ex:
+        logger.debug("LLM judge USER (last %d chars):\n%s", ex, user_content[-ex:])
+
+
 def _job_row_filters(job: dict, key: str) -> list[dict]:
     raw = job.get(key)
     if raw is None:
@@ -695,6 +774,20 @@ def iter_run_llm_judge(
 
         user_content = f"Reference:\n{query_text}\n\n" + "\n\n".join(doc_blocks)
 
+        candidate_body_chars = [len(content_map.get(right_id, "")) for _, right_id, _, _ in pairs]
+        max_completion_tokens = llm_judge_completion_max_tokens(len(pairs))
+        _log_llm_judge_outbound_payload(
+            left_id=left_id,
+            batch_num=bi + 1,
+            total_batches=total_batches,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            system_prompt=system_prompt,
+            user_content=user_content,
+            reference_text=query_text,
+            candidate_body_chars=candidate_body_chars,
+        )
+
         text = ""
         detail: dict = {
             "phase": "llm_judge",
@@ -704,14 +797,13 @@ def iter_run_llm_judge(
             "candidates_in_batch": len(pairs),
         }
         try:
-            _mt = llm_judge_completion_max_tokens(len(pairs))
             resp = client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-                max_tokens=_mt,
+                max_tokens=max_completion_tokens,
                 temperature=LLM_JUDGE_TEMPERATURE,
             )
             detail["http_status"] = _openai_completion_http_status(resp)
