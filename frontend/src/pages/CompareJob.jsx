@@ -323,6 +323,27 @@ function RunStatsPane({ job, run }) {
   )
 }
 
+/** Pipe-separated contextual strings from ingestion — one block per segment for readability. */
+function ContextualPipeLines({ text, className }) {
+  const raw = text == null ? '' : String(text)
+  const segments = raw.split(/\s*\|\s*/).map(s => s.trim()).filter(s => s.length > 0)
+  if (segments.length === 0) return <div className={className} />
+  if (segments.length === 1) {
+    return <div className={className}>{segments[0]}</div>
+  }
+  return (
+    <div className={className}>
+      <div className="space-y-2">
+        {segments.map((seg, i) => (
+          <div key={i} className="border-l-2 border-gray-200 pl-2.5">
+            {seg}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Candidate card ─────────────────────────────────────────────────────────
 
 function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadge }) {
@@ -374,9 +395,10 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
       {candidate.display_value && (
         <p className="text-xs text-blue-600 font-medium mt-10 mb-1 truncate">{candidate.display_value}</p>
       )}
-      <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-10' : ''}`}>
-        {candidate.contextual_content}
-      </p>
+      <ContextualPipeLines
+        text={candidate.contextual_content}
+        className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-10' : ''}`}
+      />
 
       {(isSaved || isSelected) && (
         <div className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${isSaved ? 'bg-emerald-600' : 'bg-blue-600'}`}>
@@ -670,9 +692,10 @@ function ReviewTab({ job, run }) {
                       {it.display_value && (
                         <p className="text-xs text-blue-600 font-medium mt-6 mb-1 truncate">{it.display_value}</p>
                       )}
-                      <p className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-64 ${!it.display_value ? 'mt-6' : ''}`}>
-                        {it.contextual_content}
-                      </p>
+                      <ContextualPipeLines
+                        text={it.contextual_content}
+                        className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-64 ${!it.display_value ? 'mt-6' : ''}`}
+                      />
                       {it.is_decided && (
                         <span className="absolute bottom-3 right-3 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
                           {it.current_decision ? 'matched' : 'no match'}
