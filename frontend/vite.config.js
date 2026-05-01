@@ -20,6 +20,11 @@ export default defineConfig({
         target: API_PROXY_TARGET,
         bypass: (req) => {
           const url = req.url || ''
+          const m = (req.method || 'GET').toUpperCase()
+
+          // Never treat mutations as SPA navigations — some clients send Accept:
+          // text/html on XHR/fetch; routing those to index.html yields 405 Method Not Allowed.
+          if (m !== 'GET' && m !== 'HEAD') return undefined
 
           // SPA navigation: serve index.html from Vite
           if (req.headers.accept?.includes('text/html')) return '/index.html'
