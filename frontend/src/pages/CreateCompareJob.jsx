@@ -594,12 +594,17 @@ function StepColumns({ side, label, state, setState, onNext }) {
         </div>
       )}
 
-      <ColumnMultiSelect
-        columns={columns}
-        selected={ctx}
-        onChange={setCtx}
-        label="Columns to use for matching (all selected columns are merged into one text field)"
-      />
+      <div>
+        <ColumnMultiSelect
+          columns={columns}
+          selected={ctx}
+          onChange={setCtx}
+          label="Columns for similarity matching"
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          Selected columns are merged into one text field per row. That text is embedded and used to find similar rows on the other side (vector similarity, not exact key matching).
+        </p>
+      </div>
 
       <ColumnSingleSelect
         columns={columns}
