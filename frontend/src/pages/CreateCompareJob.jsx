@@ -29,47 +29,44 @@ const FILTER_VALUE_PICK_OPS = ['contains', 'not_contains', 'equals', 'not_equals
 const FILTER_VALUE_OTHER = '__other__'
 
 function RowFilterValueField({ column, op, value, tmpPath, sheetForApi, siblingFilters, onChange }) {
+  const [distinctMode, setDistinctMode] = useState(false)
   const [options, setOptions] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loadingDistinct, setLoadingDistinct] = useState(false)
   const [truncated, setTruncated] = useState(false)
 
   const siblingsKey = JSON.stringify(siblingFilters || [])
 
   useEffect(() => {
-    if (!FILTER_VALUE_PICK_OPS.includes(op) || !tmpPath || !String(column || '').trim()) {
-      setOptions([])
-      setTruncated(false)
-      return
-    }
-    let cancelled = false
-    const t = setTimeout(() => {
-      setLoading(true)
-      previewCompareColumnValues(tmpPath, {
-        sheetName: sheetForApi,
-        column: String(column).trim(),
-        rowFilters: siblingFilters || [],
-      })
-        .then((res) => {
-          if (!cancelled) {
-            setOptions(Array.isArray(res?.values) ? res.values : [])
-            setTruncated(!!res?.truncated)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setOptions([])
-            setTruncated(false)
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false)
-        })
-    }, 350)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
-    }
+    setDistinctMode(false)
+    setOptions([])
+    setTruncated(false)
+    setLoadingDistinct(false)
   }, [op, tmpPath, sheetForApi, column, siblingsKey])
+
+  const loadDistinctValues = useCallback(() => {
+    if (!FILTER_VALUE_PICK_OPS.includes(op) || !tmpPath || !String(column || '').trim()) return
+    setLoadingDistinct(true)
+    setOptions([])
+    previewCompareColumnValues(tmpPath, {
+      sheetName: sheetForApi,
+      column: String(column).trim(),
+      rowFilters: siblingFilters || [],
+    })
+      .then((res) => {
+        setOptions(Array.isArray(res?.values) ? res.values : [])
+        setTruncated(!!res?.truncated)
+      })
+      .catch(() => {
+        setOptions([])
+        setTruncated(false)
+      })
+      .finally(() => setLoadingDistinct(false))
+  }, [op, tmpPath, sheetForApi, column, siblingFilters])
+
+  const startDistinctPicker = () => {
+    setDistinctMode(true)
+    loadDistinctValues()
+  }
 
   if (op === 'regex') {
     return (
@@ -98,10 +95,31 @@ function RowFilterValueField({ column, op, value, tmpPath, sheetForApi, siblingF
     )
   }
 
-  if (loading) {
+  if (!distinctMode) {
+    return (
+      <div className="w-full min-w-[160px] flex-1 space-y-1">
+        <input
+          type="text"
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder="Value"
+          className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+        />
+        <button
+          type="button"
+          onClick={startDistinctPicker}
+          className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+        >
+          Browse distinct values…
+        </button>
+      </div>
+    )
+  }
+
+  if (loadingDistinct) {
     return (
       <div className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm text-gray-400 bg-white">
-        Loading values…
+        Loading distinct values…
       </div>
     )
   }
@@ -112,13 +130,23 @@ function RowFilterValueField({ column, op, value, tmpPath, sheetForApi, siblingF
 
   if (options.length === 0) {
     return (
-      <input
-        type="text"
-        value={value || ''}
-        onChange={e => onChange(e.target.value)}
-        placeholder="text"
-        className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
-      />
+      <div className="w-full min-w-[160px] flex-1 space-y-1">
+        <input
+          type="text"
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder="Value"
+          className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+        />
+        <p className="text-xs text-gray-500">No distinct values for this column with current filters.</p>
+        <button
+          type="button"
+          onClick={() => setDistinctMode(false)}
+          className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+        >
+          Plain text only
+        </button>
+      </div>
     )
   }
 
@@ -156,6 +184,13 @@ function RowFilterValueField({ column, op, value, tmpPath, sheetForApi, siblingF
           className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
         />
       )}
+      <button
+        type="button"
+        onClick={() => setDistinctMode(false)}
+        className="text-xs font-semibold text-gray-600 hover:text-gray-800"
+      >
+        Plain text only
+      </button>
     </div>
   )
 }
