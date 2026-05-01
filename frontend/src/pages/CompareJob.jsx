@@ -409,7 +409,7 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
   )
 }
 
-/** Short label for reviewed row: candidate pick + optional partial/fail flag (mutually exclusive outcomes). */
+/** Short label for reviewed row: candidate pick + optional outcome flag. "No match" only when outcome is explicitly no_match — cleared outcome (None) is not the same. */
 function formatReviewBadge(it) {
   if (!it?.is_decided) return ''
   const oc = it.review_outcome
@@ -421,7 +421,8 @@ function formatReviewBadge(it) {
   }
   if (oc === 'partial') return 'Partial'
   if (oc === 'fail') return 'Fail'
-  return 'No match'
+  if (oc === 'no_match') return 'No match'
+  return 'Reviewed'
 }
 
 const REVIEW_OUTCOME_CHIPS = [
