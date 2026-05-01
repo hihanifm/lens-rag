@@ -1,6 +1,6 @@
-# bookworm-slim: official Node 20 on Debian; pulls more reliably than alpine in some lab/proxy setups.
-# Override mirror: docker compose build --build-arg NODE_IMAGE=registry.local/node:20-bookworm-slim
-ARG NODE_IMAGE=node:20-bookworm-slim
+# Default: AWS Public ECR mirror of Docker Official Images (many labs block Docker Hub).
+# Override: NODE_IMAGE=docker.io/library/node:20-bookworm-slim or an internal registry path.
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:20-bookworm-slim
 FROM ${NODE_IMAGE}
 
 # Proxy build args — passed from docker-compose, empty if not set in .env

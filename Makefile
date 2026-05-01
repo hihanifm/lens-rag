@@ -3,6 +3,7 @@
 #   make rebuild                 — full --no-cache rebuild + up (after git pull if API/UI acts stale, e.g. 405s)
 #   make rebuild-api             — API image only (faster when only backend/ changed)
 #   make e2e-up                  — up with build (CI / fresh checkout)
+# Base images default to AWS Public ECR mirrors (see .env.example: PYTHON_IMAGE / NODE_IMAGE). Daemon proxy may still be required for pulls.
 .PHONY: help up down build rebuild rebuild-api rebuild-frontend logs logs-api logs-frontend logs-db logs-split prod-logs prod-logs-api prod-logs-db prod-logs-split restart prod-restart ps dev-up prod-up prod-down build-frontend e2e-up e2e e2e-down pip-cache clean
 
 help:

@@ -1,5 +1,7 @@
-# Python 3.11 — matches `make pip-cache` (--python-version 3.11 / cp311 wheels).
-FROM python:3.11-slim
+# Default: AWS Public ECR mirror of Docker Official Images (many labs block Docker Hub).
+# Override: PYTHON_IMAGE=docker.io/library/python:3.11-slim — matches `make pip-cache` (cp311 wheels).
+ARG PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 # Proxy build args — passed from docker-compose, empty if not set in .env
 ARG HTTP_PROXY

@@ -9,8 +9,8 @@ This file lists third-party software used by this repository and provides attrib
 
 ## Docker base images (from Dockerfiles / Compose)
 
-- **`python:3.11-slim`** (backend image base)
-- **`node:20-bookworm-slim`** (frontend dev image base; override via `NODE_IMAGE` build arg)
+- **`python:3.11-slim`** (backend image base; default pull via `PYTHON_IMAGE`, typically AWS Public ECR mirror `public.ecr.aws/docker/library/python:3.11-slim`)
+- **`node:20-bookworm-slim`** (frontend dev image base; default pull via `NODE_IMAGE`, typically AWS Public ECR mirror `public.ecr.aws/docker/library/node:20-bookworm-slim`)
 - **`pgvector/pgvector:pg16`** (Postgres + pgvector service image)
 
 Image licensing is governed by upstream projects and the image publishers; if you distribute images externally, consider producing an image SBOM and/or including the relevant upstream notices in your distribution process.
