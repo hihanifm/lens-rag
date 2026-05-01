@@ -20,6 +20,7 @@ from typing import Generator
 from openai import OpenAI
 
 from config import (
+    COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
     EMBEDDING_DIMS,
     LLM_COMPARE_MAX_RIGHTS_CAP,
     LLM_COMPARE_MAX_RIGHTS_DEFAULT,
@@ -244,13 +245,21 @@ def iter_vector_search(
     schema_name: str,
     top_k: int,
     candidates_out: list[tuple[int, int, float]],
+    max_left_rows: int | None = None,
 ) -> Generator[dict, None, None]:
     """
     For each left record, find the top_k closest right records by cosine similarity.
     Appends (left_id, right_id, cosine_score) tuples to candidates_out.
     Yields SSE dicts with type vector_search and processed/total/percent.
+
+    max_left_rows: if set, only the first N left rows (by id order) are processed — for quick pipeline tests.
     """
-    logger.info("iter_vector_search() schema=%s top_k=%d", schema_name, top_k)
+    logger.info(
+        "iter_vector_search() schema=%s top_k=%d max_left_rows=%s",
+        schema_name,
+        top_k,
+        max_left_rows,
+    )
     t0 = time.monotonic()
 
     with get_cursor() as (cur, _conn):
@@ -258,6 +267,17 @@ def iter_vector_search(
             f"SELECT id, embedding FROM {schema_name}.records WHERE side = 'left' ORDER BY id"
         )
         left_rows = cur.fetchall()
+
+    total_left_in_db = len(left_rows)
+    limited_from_total = False
+    if max_left_rows is not None:
+        cap = max(
+            1,
+            min(int(max_left_rows), COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP, total_left_in_db),
+        )
+        if cap < total_left_in_db:
+            limited_from_total = True
+        left_rows = left_rows[:cap]
 
     n = len(left_rows)
     if n == 0:
@@ -272,12 +292,15 @@ def iter_vector_search(
         logger.info("iter_vector_search() done left_rows=0 elapsed_ms=%d", elapsed)
         return
 
+    msg = f"Vector search — {n} left row(s)"
+    if limited_from_total:
+        msg += f" (limited from {total_left_in_db} total)"
     yield {
         "type": "vector_search",
         "processed": 0,
         "total": n,
         "percent": 0,
-        "message": f"Vector search — {n} left row(s)",
+        "message": msg,
     }
 
     for i, left_row in enumerate(left_rows):
@@ -318,10 +341,14 @@ def iter_vector_search(
     )
 
 
-def run_bidirectional_search(schema_name: str, top_k: int) -> list[tuple[int, int, float]]:
+def run_bidirectional_search(
+    schema_name: str,
+    top_k: int,
+    max_left_rows: int | None = None,
+) -> list[tuple[int, int, float]]:
     """Non-streaming wrapper (tests / callers that do not need SSE)."""
     out: list[tuple[int, int, float]] = []
-    for _ in iter_vector_search(schema_name, top_k, out):
+    for _ in iter_vector_search(schema_name, top_k, out, max_left_rows=max_left_rows):
         pass
     return out
 
@@ -331,10 +358,13 @@ def iter_cartesian_candidates(
     max_rights: int,
     candidates_out: list[tuple[int, int, float]],
     stats_out: dict | None = None,
+    max_left_rows: int | None = None,
 ) -> Generator[dict, None, None]:
     """
     For each left row, pair with up to max_rights right rows (by id order). Cosine placeholder 0.0.
     Used when vector retrieval is off and LLM scores all pairs in one call per left.
+
+    max_left_rows: if set, only the first N left rows (by id order) are paired — for quick pipeline tests.
     """
     max_rights = max(1, min(int(max_rights), LLM_COMPARE_MAX_RIGHTS_CAP))
 
@@ -353,6 +383,17 @@ def iter_cartesian_candidates(
             [max_rights],
         )
         right_rows = cur.fetchall()
+
+    total_left_in_db = len(left_rows)
+    limited_from_total = False
+    if max_left_rows is not None:
+        cap = max(
+            1,
+            min(int(max_left_rows), COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP, total_left_in_db),
+        )
+        if cap < total_left_in_db:
+            limited_from_total = True
+        left_rows = left_rows[:cap]
 
     right_ids = [r["id"] for r in right_rows]
     truncated = total_right > len(right_ids)
@@ -378,15 +419,18 @@ def iter_cartesian_candidates(
         )
         return
 
+    msg = (
+        f"LLM compare — {n_left} left × {len(right_ids)} right"
+        + (f" (showing first {len(right_ids)} of {total_right} right rows)" if truncated else "")
+    )
+    if limited_from_total:
+        msg += f" — left rows limited from {total_left_in_db} total"
     yield {
         "type": "vector_search",
         "processed": 0,
         "total": n_left,
         "percent": 0,
-        "message": (
-            f"LLM compare — {n_left} left × {len(right_ids)} right"
-            + (f" (showing first {len(right_ids)} of {total_right} right rows)" if truncated else "")
-        ),
+        "message": msg,
     }
 
     for i, left_row in enumerate(left_rows):
@@ -974,13 +1018,25 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
 
 # ── Run pipeline orchestrator (Phase 2 — search + rank) ────────────────────
 
-def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
+def run_pipeline(
+    job_id: int,
+    run_id: int,
+    *,
+    max_left_rows: int | None = None,
+) -> Generator[dict, None, None]:
     """
     Phase 2: vector search + optional rerank + optional LLM judge → write per-run matches.
     Reads run config from public.compare_runs.
     Yields SSE-style progress dicts.
+
+    max_left_rows: optional cap on how many left rows to process (by id order); unset = all rows.
     """
-    logger.info("run_pipeline() start job_id=%d run_id=%d", job_id, run_id)
+    logger.info(
+        "run_pipeline() start job_id=%d run_id=%d max_left_rows=%s",
+        job_id,
+        run_id,
+        max_left_rows,
+    )
 
     with get_cursor() as (cur, _conn):
         cur.execute("SELECT * FROM public.compare_jobs WHERE id = %s", [job_id])
@@ -1016,9 +1072,23 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
         candidates: list[tuple[int, int, float]] = []
         cartesian_stats: dict = {}
 
+        max_left_cap: int | None = None
+        if max_left_rows is not None:
+            try:
+                ml = int(max_left_rows)
+                if ml >= 1:
+                    max_left_cap = min(ml, COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP)
+            except (TypeError, ValueError):
+                max_left_cap = None
+
         if use_vector:
             t_vec0 = time.monotonic()
-            for prog in iter_vector_search(schema_name, top_k, candidates):
+            for prog in iter_vector_search(
+                schema_name,
+                top_k,
+                candidates,
+                max_left_rows=max_left_cap,
+            ):
                 yield prog
             metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
             metrics["pipeline_mode"] = "vector_top_k"
@@ -1045,7 +1115,13 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             max_rights = max(1, min(max_rights, LLM_COMPARE_MAX_RIGHTS_CAP))
 
             t_vec0 = time.monotonic()
-            for prog in iter_cartesian_candidates(schema_name, max_rights, candidates, cartesian_stats):
+            for prog in iter_cartesian_candidates(
+                schema_name,
+                max_rights,
+                candidates,
+                cartesian_stats,
+                max_left_rows=max_left_cap,
+            ):
                 yield prog
             metrics["vector_search_ms"] = int((time.monotonic() - t_vec0) * 1000)
             metrics["pipeline_mode"] = "llm_compare_cartesian"
@@ -1053,6 +1129,11 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
 
         metrics["candidate_pairs"] = len(candidates)
         metrics["vector_left_rows"] = len({left_id for left_id, _, _ in candidates})
+        if max_left_cap is not None:
+            metrics["pipeline_max_left_rows"] = max_left_cap
+        with get_cursor() as (cur, _conn):
+            cur.execute(f"SELECT COUNT(*) AS c FROM {schema_name}.records WHERE side = 'left'")
+            metrics["pipeline_left_rows_in_job"] = int((cur.fetchone() or {}).get("c") or 0)
 
         # ── Reranker (only when embedding retrieval produced cosine scores) ─
         pairs_with_rerank: list[tuple[int, int, float, float]] = []
@@ -1138,15 +1219,12 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             "embed_url": job.get("embed_url"),
         }
 
-        # Update row_count_left on the run
+        # Distinct left rows that received matches this run (equals processed left rows).
+        processed_left = metrics.get("vector_left_rows") or 0
         with get_cursor() as (cur, _conn):
             cur.execute(
-                f"SELECT COUNT(*) AS cnt FROM {schema_name}.records WHERE side = 'left'"
-            )
-            cnt = (cur.fetchone() or {}).get("cnt", 0)
-            cur.execute(
                 "UPDATE public.compare_runs SET row_count_left = %s, completed_at = NOW() WHERE id = %s",
-                [cnt, run_id],
+                [processed_left, run_id],
             )
 
         _set_run_status("ready", json.dumps({"message": "Run complete.", "metrics": metrics}))

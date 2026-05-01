@@ -49,8 +49,12 @@ test.describe.serial('compare flow', () => {
     // Ingestion + compare run (SSE). Wait for redirect to job page.
     await expect(page).toHaveURL(/\/compare\/\d+/, { timeout: 300_000 })
 
-    // Tabs exist
-    await expect(page.getByRole('button', { name: /Review/ })).toBeVisible()
+    // Open the pending run and start pipeline (UX requires explicit start).
+    await page.locator('div.cursor-pointer.rounded-xl').first().click({ timeout: 120_000 })
+    await page.getByRole('button', { name: 'Run pipeline' }).click()
+
+    // Run detail: Review tab appears after pipeline completes (Ollama may be slow).
+    await expect(page.getByRole('button', { name: /Review/ })).toBeVisible({ timeout: 300_000 })
     await expect(page.getByRole('button', { name: /Browse/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Config/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Export/ })).toBeVisible()

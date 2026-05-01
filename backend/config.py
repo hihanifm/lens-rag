@@ -74,6 +74,9 @@ LLM_JUDGE_MAX_REQUESTS_PER_MINUTE = int(os.getenv("LLM_JUDGE_MAX_REQUESTS_PER_MI
 LLM_COMPARE_MAX_RIGHTS_DEFAULT = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_DEFAULT", "100"))
 LLM_COMPARE_MAX_RIGHTS_CAP = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_CAP", "500"))
 
+# Compare run pipeline: optional ?max_left_rows= on execute — cap (sanity upper bound).
+COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP = int(os.getenv("COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP", "50000"))
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")

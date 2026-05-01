@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -1909,7 +1909,7 @@ function formatLlmJudgeDetailLine(d) {
   return bits.join(' · ')
 }
 
-function RunProgressView({ jobId, runId, onDone }) {
+function RunProgressView({ jobId, runId, onDone, maxLeftRows }) {
   const [events, setEvents] = useState([])
   const [activityLog, setActivityLog] = useState([])
   const [done, setDone] = useState(false)
@@ -1917,6 +1917,11 @@ function RunProgressView({ jobId, runId, onDone }) {
   const [startedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
   const logEndRef = useRef(null)
+
+  const executeQs =
+    maxLeftRows != null && Number.isFinite(maxLeftRows) && maxLeftRows >= 1
+      ? `?max_left_rows=${encodeURIComponent(String(Math.floor(maxLeftRows)))}`
+      : ''
 
   useEffect(() => {
     if (done) return
@@ -1926,7 +1931,7 @@ function RunProgressView({ jobId, runId, onDone }) {
 
   useEffect(() => {
     setActivityLog([])
-    const es = new EventSource(`${API_BASE_URL}/compare/${jobId}/runs/${runId}/execute`)
+    const es = new EventSource(`${API_BASE_URL}/compare/${jobId}/runs/${runId}/execute${executeQs}`)
     es.onmessage = (e) => {
       const raw = JSON.parse(e.data)
       const data = { ...raw, type: normalizeRunProgressType(raw.type) }
@@ -1949,7 +1954,7 @@ function RunProgressView({ jobId, runId, onDone }) {
     }
     es.onerror = () => { setError('Connection lost'); es.close() }
     return () => es.close()
-  }, [jobId, runId])
+  }, [jobId, runId, executeQs])
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -2139,7 +2144,24 @@ function EditableRunTitle({ jobId, run, onUpdated, titleClass = 'font-semibold t
 function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
   const queryClient = useQueryClient()
   const [subTab, setSubTab] = useState('review')
-  const [executing, setExecuting] = useState(run.status === 'pending' || run.status === 'running')
+  const [pipelineStarted, setPipelineStarted] = useState(() => run.status === 'running')
+  const [maxLeftRowsDraft, setMaxLeftRowsDraft] = useState('')
+
+  const parsedMaxLeft = useMemo(() => {
+    const t = maxLeftRowsDraft.trim()
+    if (!t) return null
+    const n = parseInt(t, 10)
+    return Number.isFinite(n) && n >= 1 ? n : null
+  }, [maxLeftRowsDraft])
+
+  const serverRunning = run.status === 'running'
+  const showProgress = serverRunning || (run.status === 'pending' && pipelineStarted)
+  const showStartGate = run.status === 'pending' && !pipelineStarted && !serverRunning
+
+  useEffect(() => {
+    setPipelineStarted(run.status === 'running')
+    setMaxLeftRowsDraft('')
+  }, [run.id])
 
   const statusColors = {
     ready: 'bg-emerald-100 text-emerald-700',
@@ -2183,14 +2205,62 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
         <span className="text-xs text-gray-400 ml-auto">K={run.top_k}</span>
       </div>
 
-      {/* Execution progress (auto-starts for pending/running) */}
-      {executing && (
+      {showStartGate && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 space-y-3">
+          <p className="text-sm font-medium text-amber-900">Start pipeline</p>
+          <p className="text-xs text-amber-900/90 leading-relaxed">
+            Optional: limit how many <strong className="font-semibold">left</strong> rows to process (database id order)
+            for a quick test with different models or settings. Leave blank or choose “All” to run the full job.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs text-amber-900 font-medium block">
+              Max left rows
+              <input
+                type="number"
+                min={1}
+                placeholder="All rows"
+                value={maxLeftRowsDraft}
+                onChange={(e) => setMaxLeftRowsDraft(e.target.value)}
+                className="mt-1 block w-32 border border-amber-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+              />
+            </label>
+            <div className="flex flex-wrap gap-1.5 items-center pb-0.5">
+              {[5, 10, 25].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setMaxLeftRowsDraft(String(n))}
+                  className="text-xs px-2 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setMaxLeftRowsDraft('')}
+                className="text-xs px-2 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              >
+                All
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPipelineStarted(true)}
+              className="ml-auto bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-800"
+            >
+              Run pipeline
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showProgress && (
         <div className="bg-white rounded-xl border border-gray-200 px-5">
           <RunProgressView
             jobId={job.id}
             runId={run.id}
+            maxLeftRows={parsedMaxLeft}
             onDone={async () => {
-              setExecuting(false)
               onRunComplete()
               try {
                 const fresh = await getRun(job.id, run.id)
@@ -2203,10 +2273,10 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
         </div>
       )}
 
-      {!executing && run.status === 'ready' && <RunStatsPane job={job} run={run} />}
+      {!showProgress && run.status === 'ready' && <RunStatsPane job={job} run={run} />}
 
       {/* Sub-tabs (only when ready) */}
-      {!executing && run.status === 'ready' && (
+      {!showProgress && run.status === 'ready' && (
         <>
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
             {[{ id: 'review', label: '👁 Review' }, { id: 'export', label: '⬇ Export' }].map(tab => (
@@ -2228,7 +2298,7 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
         </>
       )}
 
-      {!executing && run.status === 'error' && (
+      {!showProgress && run.status === 'error' && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-5 py-4 text-sm">
           {run.status_message || 'Run failed. Delete this run and try again.'}
         </div>

@@ -24,7 +24,7 @@ Run-level routes (under /compare/{job_id}/runs):
   GET  /compare/{job_id}/runs                           list runs
   GET  /compare/{job_id}/runs/{run_id}                  run detail
   PATCH /compare/{job_id}/runs/{run_id}                rename run
-  GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2)
+  GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2); optional ?max_left_rows=N
   GET  /compare/{job_id}/runs/{run_id}/review           stats
   GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= left or candidate-right text)
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
@@ -52,7 +52,7 @@ from comparator import (
     run_ingest_job,
     run_pipeline,
 )
-from config import EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE
+from config import COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP, EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE
 from db import (
     create_compare_schema,
     create_run_tables,
@@ -690,9 +690,24 @@ def delete_run(job_id: int, run_id: int):
 # ── Run pipeline SSE ───────────────────────────────────────────────────────
 
 @router.get("/{job_id}/runs/{run_id}/execute")
-def execute_run(job_id: int, run_id: int):
+def execute_run(
+    job_id: int,
+    run_id: int,
+    max_left_rows: int | None = Query(
+        default=None,
+        ge=1,
+        le=COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
+        description=(
+            "Optional: process only the first N left rows (by database id order). "
+            "Omit for a full run — useful for quick model/settings checks."
+        ),
+    ),
+):
     """
     SSE — Phase 2: run the search/rank pipeline for an existing run.
+
+    Query `max_left_rows` optionally limits the pipeline to the first N left rows (id order)
+    for faster iteration; omit for the full job.
 
     The pipeline runs in a background thread; closing this SSE connection does not cancel it.
     Opening this endpoint again while the same run is in flight reattaches to `_run_progress`
@@ -730,7 +745,7 @@ def execute_run(job_id: int, run_id: int):
 
     def _run_thread():
         try:
-            for event in run_pipeline(job_id, run_id):
+            for event in run_pipeline(job_id, run_id, max_left_rows=max_left_rows):
                 _run_progress[run_id] = event
         except Exception as e:
             logger.exception("run_pipeline failed job_id=%d run_id=%d", job_id, run_id)
