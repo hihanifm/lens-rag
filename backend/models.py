@@ -354,7 +354,7 @@ class ComparePreviewColumnSamplesRequest(BaseModel):
     sheet_name: Optional[str] = None
     row_filters: List[CompareRowFilter] = Field(default_factory=list)
     columns: List[str] = Field(default_factory=list)
-    n: int = 5
+    n: int = 1
 
 
 class ComparePreviewColumnSamplesResponse(BaseModel):

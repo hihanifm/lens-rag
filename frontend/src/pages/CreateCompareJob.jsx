@@ -13,7 +13,7 @@ import {
   API_BASE_URL,
 } from '../api/client'
 
-const STEPS = ['Names', 'Upload Left', 'Columns Left', 'Upload Right', 'Columns Right', 'Connection', 'Review']
+const STEPS = ['Names', 'Upload Left', 'Setup Left', 'Upload Right', 'Setup Right', 'Connection', 'Review']
 
 const FILTER_OPS = [
   { id: 'contains', label: 'contains' },
@@ -204,15 +204,15 @@ function StepHeader({ step, total, title }) {
 
 function formatColumnSamplesTooltip(samples) {
   if (!samples?.length) return ''
-  return samples.map((v, i) => `Row ${i + 1}: ${v === '' ? '(empty)' : v}`).join('\n')
+  const v = samples[0]
+  return v === '' ? '(empty)' : v
 }
 
 function formatColumnSamplesInline(samples) {
   if (!samples?.length) return ''
-  return samples
-    .map(v => (v === '' ? '(empty)' : v))
-    .map(v => (v.length > 44 ? `${v.slice(0, 41)}…` : v))
-    .join(' · ')
+  const v = samples[0]
+  const s = v === '' ? '(empty)' : v
+  return s.length > 120 ? `${s.slice(0, 117)}…` : s
 }
 
 function ColumnMultiSelect({ columns, selected, onChange, label, samplesByColumn = {}, samplesLoading = false }) {
@@ -225,7 +225,7 @@ function ColumnMultiSelect({ columns, selected, onChange, label, samplesByColumn
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
       <p className="text-xs text-gray-400 mb-2">
-        Sample values from the first 5 rows on this sheet (after row filters). Hover a row for full text.
+        One sample per column from the first data row (after row filters), so you can see what each field looks like for pattern matching. Hover for full text when truncated.
       </p>
       <div className="border border-gray-200 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
         {columns.map(col => {
@@ -620,7 +620,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
         sheetName: sheetForApi,
         rowFilters: apiFilters,
         columns,
-        n: 5,
+        n: 1,
       })
         .then((res) => {
           if (!cancelled) setColumnSamples(res?.samples_by_column || {})
@@ -640,7 +640,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
 
   return (
     <div className="space-y-5">
-      <StepHeader step={stepIdx} total={STEPS.length} title={`Column setup for "${label}"`} />
+      <StepHeader step={stepIdx} total={STEPS.length} title={`Sheet, filters, and columns for "${label}"`} />
 
       {sheetNames.length > 1 && (
         <div>
@@ -660,27 +660,6 @@ function StepColumns({ side, label, state, setState, onNext }) {
         </div>
       )}
 
-      <div>
-        <ColumnMultiSelect
-          columns={columns}
-          selected={ctx}
-          onChange={setCtx}
-          label="Columns for similarity matching"
-          samplesByColumn={columnSamples}
-          samplesLoading={columnSamplesLoading}
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Selected columns are merged into one text field per row. That text is embedded and used to find similar rows on the other side (vector similarity, not exact key matching).
-        </p>
-      </div>
-
-      <ColumnSingleSelect
-        columns={columns}
-        value={display}
-        onChange={setDisplay}
-        label="Identifier column (shown in review card & export — one column only)"
-      />
-
       <RowFiltersEditor
         columns={columns}
         filters={filters}
@@ -697,6 +676,32 @@ function StepColumns({ side, label, state, setState, onNext }) {
           <>…</>
         )}
       </p>
+
+      <div className="border-t border-gray-100 pt-5 space-y-5">
+        <p className="text-xs text-gray-500 uppercase tracking-wide font-semibold">
+          Column selection
+        </p>
+        <div>
+          <ColumnMultiSelect
+            columns={columns}
+            selected={ctx}
+            onChange={setCtx}
+            label="Columns for similarity matching"
+            samplesByColumn={columnSamples}
+            samplesLoading={columnSamplesLoading}
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Selected columns are merged into one text field per row. That text is embedded and used to find similar rows on the other side (vector similarity, not exact key matching).
+          </p>
+        </div>
+
+        <ColumnSingleSelect
+          columns={columns}
+          value={display}
+          onChange={setDisplay}
+          label="Identifier column (shown in review card & export — one column only)"
+        />
+      </div>
 
       <button
         onClick={onNext}

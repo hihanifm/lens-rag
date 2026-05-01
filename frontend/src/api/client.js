@@ -244,7 +244,7 @@ export const previewCompareColumnValues = (tmpPath, { sheetName = null, column, 
   }).then(r => r.data)
 
 /** First n row values per column (after filters); for column-picker hints. */
-export const previewCompareColumnSamples = (tmpPath, { sheetName = null, rowFilters = [], columns = [], n = 5 } = {}) =>
+export const previewCompareColumnSamples = (tmpPath, { sheetName = null, rowFilters = [], columns = [], n = 1 } = {}) =>
   api.post('compare/preview-column-samples', {
     tmp_path: tmpPath,
     sheet_name: sheetName || null,

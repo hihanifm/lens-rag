@@ -7,7 +7,7 @@ Job-level routes:
   POST /compare/preview-context       preview merged text strings
   POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/preview-column-values distinct values for a column (filter picker)
-  POST /compare/preview-column-samples   first N rows per column (column picker)
+  POST /compare/preview-column-samples   first N row(s) per column (column picker; default 1)
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -299,7 +299,7 @@ def preview_column_values(body: ComparePreviewColumnValuesRequest):
 
 @router.post("/preview-column-samples", response_model=ComparePreviewColumnSamplesResponse)
 def preview_column_samples(body: ComparePreviewColumnSamplesRequest):
-    """First n rows per column (strings), after sheet selection and row filters."""
+    """First n row(s) per column (strings), after sheet selection and row filters."""
     tmp_path = (body.tmp_path or "").strip()
     if not tmp_path or not os.path.exists(tmp_path):
         raise HTTPException(status_code=400, detail="Uploaded file not found. Please re-upload.")
@@ -314,7 +314,7 @@ def preview_column_samples(body: ComparePreviewColumnSamplesRequest):
     if not cols:
         cols = [c for c in df.columns if c != "sheet_name"]
 
-    n = max(1, min(int(body.n or 5), 10))
+    n = max(1, min(int(body.n or 1), 10))
     samples = compare_column_first_row_samples(df, cols, n)
     return ComparePreviewColumnSamplesResponse(samples_by_column=samples)
 
