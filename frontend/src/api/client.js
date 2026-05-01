@@ -273,6 +273,10 @@ export const browseCompareJob = (jobId, { side = null, limit = 25 } = {}) =>
 export const getCompareConfigStats = (jobId) =>
   api.get(`compare/${jobId}/config-stats`).then(r => r.data)
 
+/** Built-in LLM judge system prompt and generation limits (read-only). */
+export const getCompareLlmJudgeDefaults = () =>
+  api.get('compare/llm-judge-defaults').then(r => r.data)
+
 // ── Compare Runs ──────────────────────────────────────────────────────────
 
 export const createRun = (jobId, data) =>

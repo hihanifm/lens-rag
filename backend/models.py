@@ -361,6 +361,14 @@ class ComparePreviewColumnSamplesResponse(BaseModel):
     samples_by_column: Dict[str, List[str]]
 
 
+class CompareLlmJudgeDefaultsResponse(BaseModel):
+    """Built-in LLM judge settings for Compare runs (UI display + parity with pipeline)."""
+
+    default_system_prompt: str
+    max_tokens: int
+    temperature: float
+
+
 class CandidateItem(BaseModel):
     right_id: int
     contextual_content: str

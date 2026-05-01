@@ -368,7 +368,7 @@ def write_matches(
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
 
-_DEFAULT_LLM_JUDGE_PROMPT = """You compare test specifications from two sources (e.g. different clients or baselines).
+DEFAULT_LLM_JUDGE_PROMPT = """You compare test specifications from two sources (e.g. different clients or baselines).
 
 Domain context (critical):
 - These tests concern telecom protocol behavior as implemented on Android devices.
@@ -413,7 +413,7 @@ def iter_run_llm_judge(
     Appends (left_id, right_id, cosine, rerank_score, llm_score) to results_out.
     Yields SSE dicts type llm_judge with processed/total per pair.
     """
-    system_prompt = prompt or _DEFAULT_LLM_JUDGE_PROMPT
+    system_prompt = prompt or DEFAULT_LLM_JUDGE_PROMPT
     client = OpenAI(base_url=url, api_key="ollama")
 
     all_ids = list({row[0] for row in candidates} | {row[1] for row in candidates})

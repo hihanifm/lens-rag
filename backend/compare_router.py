@@ -8,6 +8,7 @@ Job-level routes:
   POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/preview-column-values distinct values for a column (filter picker)
   POST /compare/preview-column-samples   first N row(s) per column (column picker; default 1)
+  GET  /compare/llm-judge-defaults      built-in judge prompt + token settings
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -42,7 +43,13 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from comparator import run_ingest_job, run_pipeline
+from comparator import (
+    DEFAULT_LLM_JUDGE_PROMPT,
+    LLM_JUDGE_MAX_TOKENS,
+    LLM_JUDGE_TEMPERATURE,
+    run_ingest_job,
+    run_pipeline,
+)
 from config import EMBEDDING_DIMS
 from db import create_compare_schema, create_run_tables, drop_compare_schema, drop_run_tables, get_cursor
 from embedder import embed as _embed_probe
@@ -62,6 +69,7 @@ from models import (
     CompareJobResponse,
     CompareJobUpdate,
     CompareDecision,
+    CompareLlmJudgeDefaultsResponse,
     ComparePreviewColumnValuesRequest,
     ComparePreviewColumnValuesResponse,
     ComparePreviewColumnSamplesRequest,
@@ -421,6 +429,16 @@ def list_compare_jobs():
         )
         rows = cur.fetchall()
     return [_serialize_job(dict(r)) for r in rows]
+
+
+@router.get("/llm-judge-defaults", response_model=CompareLlmJudgeDefaultsResponse)
+def get_llm_judge_defaults():
+    """Expose the server default system prompt so the run wizard can show it read-only."""
+    return CompareLlmJudgeDefaultsResponse(
+        default_system_prompt=DEFAULT_LLM_JUDGE_PROMPT,
+        max_tokens=LLM_JUDGE_MAX_TOKENS,
+        temperature=LLM_JUDGE_TEMPERATURE,
+    )
 
 
 @router.get("/{job_id}", response_model=CompareJobResponse)

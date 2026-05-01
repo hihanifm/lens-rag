@@ -17,6 +17,7 @@ import {
   getSystemConfig,
   fetchModels,
   getRun,
+  getCompareLlmJudgeDefaults,
   API_BASE_URL,
 } from '../api/client'
 
@@ -83,6 +84,7 @@ function parseRunStatusPayload(statusMessage) {
 function RunStatsPane({ job, run }) {
   const [expanded, setExpanded] = useState(true)
   const [promptOpen, setPromptOpen] = useState(false)
+  const [builtinJudgePrompt, setBuiltinJudgePrompt] = useState(null)
   const payload = parseRunStatusPayload(run.status_message)
   const metrics = payload?.metrics && typeof payload.metrics === 'object' ? payload.metrics : null
   const embed = metrics?.embedding_job && typeof metrics.embedding_job === 'object' ? metrics.embedding_job : {}
@@ -142,6 +144,24 @@ function RunStatsPane({ job, run }) {
     ['Embedding model', embed.embed_model || job.embed_model || '—'],
     ['Embedding dims', embed.embed_dims != null ? fmtNum(embed.embed_dims) : '—'],
   ]
+
+  useEffect(() => {
+    if (!run.llm_judge_enabled || run.llm_judge_prompt?.trim()) {
+      setBuiltinJudgePrompt(null)
+      return
+    }
+    let cancelled = false
+    getCompareLlmJudgeDefaults()
+      .then((d) => {
+        if (!cancelled) setBuiltinJudgePrompt(d?.default_system_prompt ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setBuiltinJudgePrompt(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [run.llm_judge_enabled, run.llm_judge_prompt])
 
   const hasMetrics = metrics && Object.keys(metrics).length > 0
 
@@ -261,7 +281,9 @@ function RunStatsPane({ job, run }) {
               </button>
               {promptOpen && (
                 <pre className="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
-                  {run.llm_judge_prompt?.trim() ? run.llm_judge_prompt : 'Built-in server default (JSON score reply).'}
+                  {run.llm_judge_prompt?.trim()
+                    ? run.llm_judge_prompt
+                    : (builtinJudgePrompt ?? 'Loading built-in default prompt…')}
                 </pre>
               )}
             </div>
@@ -996,6 +1018,22 @@ function NewRunModal({ onClose, onCreated }) {
   const [llmModelsError, setLlmModelsError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [llmJudgeDefaults, setLlmJudgeDefaults] = useState(null)
+  const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    getCompareLlmJudgeDefaults()
+      .then((d) => {
+        if (!cancelled && d?.default_system_prompt) setLlmJudgeDefaults(d)
+      })
+      .catch(() => {
+        if (!cancelled) setLlmJudgeDefaultsErr('Could not load server default prompt.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -1258,14 +1296,40 @@ function NewRunModal({ onClose, onCreated }) {
                   {llmModelsError && <p className="text-xs text-red-600 mt-1">{llmModelsError}</p>}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    System prompt <span className="text-gray-400 font-normal">(blank = server default)</span>
+                  <details open className="border border-purple-100 rounded-lg bg-purple-50/30 overflow-hidden">
+                    <summary className="cursor-pointer text-xs font-semibold text-purple-900 px-3 py-2 hover:bg-purple-50 list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+                      <span className="text-gray-500 select-none" aria-hidden>▼</span>
+                      Server default system prompt
+                    </summary>
+                    <div className="px-3 pb-3 space-y-2 border-t border-purple-100 bg-white/70">
+                      {llmJudgeDefaultsErr && (
+                        <p className="text-xs text-red-600 pt-2">{llmJudgeDefaultsErr}</p>
+                      )}
+                      {!llmJudgeDefaults && !llmJudgeDefaultsErr && (
+                        <p className="text-xs text-gray-500 pt-2">Loading…</p>
+                      )}
+                      {llmJudgeDefaults && (
+                        <>
+                          <pre className="text-[11px] text-gray-700 whitespace-pre-wrap max-h-40 overflow-y-auto font-mono mt-2 p-2 rounded border border-gray-100 bg-gray-50">
+                            {llmJudgeDefaults.default_system_prompt}
+                          </pre>
+                          <p className="text-[11px] text-gray-500">
+                            Each pair is still sent as user message <span className="font-mono">Query: … / Document: …</span>
+                            {' '}
+                            · Generation: max_tokens={llmJudgeDefaults.max_tokens}, temperature={llmJudgeDefaults.temperature}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </details>
+                  <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">
+                    Custom system prompt <span className="text-gray-400 font-normal">(optional — replaces default above)</span>
                   </label>
                   <textarea
                     value={llmPrompt}
                     onChange={e => setLlmPrompt(e.target.value)}
-                    rows={4}
-                    placeholder={'Leave blank to use the default prompt:\n"Rate how well the right record matches the left record on a scale 0.0–1.0. Reply only with JSON: {\"score\": <float>}"'}
+                    rows={3}
+                    placeholder="Leave blank to use the server default shown above."
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
                 </div>
