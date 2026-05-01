@@ -241,11 +241,13 @@ def preview_context(body: CompareContextPreviewRequest):
     fl = _filters_to_dicts(body.row_filters)
     _validate_filters_against_df(df, fl, "Preview")
     df = apply_compare_row_filters(df, fl)
-    records = df.to_dict(orient="records")
 
     samples: list[str] = []
     n = max(1, min(int(body.n or 3), 5))
-    for row in records:
+    # Stream rows — to_dict(orient="records") materializes every row and is very slow on large sheets.
+    col_list = list(df.columns)
+    for tup in df.itertuples(index=False, name=None):
+        row = dict(zip(col_list, tup))
         sheet_name = str(row.get("sheet_name", ""))
         text = build_contextual_content(row, context_cols, content_col, sheet_name)
         if text and str(text).strip():
