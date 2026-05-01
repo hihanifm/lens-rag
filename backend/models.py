@@ -332,6 +332,21 @@ class ComparePreviewRowStatsResponse(BaseModel):
     row_count_filtered: int
 
 
+class ComparePreviewColumnValuesRequest(BaseModel):
+    """Distinct cell values for one column (Excel compare upload), optional sibling row filters."""
+
+    tmp_path: str
+    column: str
+    sheet_name: Optional[str] = None
+    row_filters: List[CompareRowFilter] = Field(default_factory=list)
+
+
+class ComparePreviewColumnValuesResponse(BaseModel):
+    column: str
+    values: List[str]
+    truncated: bool
+
+
 class CandidateItem(BaseModel):
     right_id: int
     contextual_content: str

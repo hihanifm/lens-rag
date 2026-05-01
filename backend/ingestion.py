@@ -81,13 +81,28 @@ def read_compare_dataframe(filepath: str, sheet_name: str | None) -> pd.DataFram
 
 
 def _row_cell_str(row: dict, col: str) -> str:
-    v = row.get(col)
+    return compare_scalar_cell_str(row.get(col))
+
+
+def compare_scalar_cell_str(v) -> str:
+    """Plain-text cell value for Compare filtering / distinct lists (matches row filter semantics)."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
     s = str(v).strip()
     if s.lower() == "nan":
         return ""
     return s
+
+
+def distinct_compare_column_strings(df: pd.DataFrame, column: str, max_values: int = 100) -> tuple[list[str], bool]:
+    """Sorted distinct string values for a column (after any caller-applied filters)."""
+    col = str(column or "").strip()
+    if not col or col not in df.columns:
+        raise ValueError("invalid_column")
+    strings = df[col].map(compare_scalar_cell_str)
+    uniq = sorted(set(strings), key=lambda x: (x.lower(), x))
+    truncated = len(uniq) > max_values
+    return uniq[:max_values], truncated
 
 
 def apply_compare_row_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:

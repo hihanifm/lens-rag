@@ -234,6 +234,15 @@ export const previewCompareRowStats = (tmpPath, { sheetName = null, rowFilters =
     row_filters: rowFilters,
   }).then(r => r.data)
 
+/** Distinct values for a column (max 100); rowFilters = sibling filters only. */
+export const previewCompareColumnValues = (tmpPath, { sheetName = null, column, rowFilters = [] } = {}) =>
+  api.post('compare/preview-column-values', {
+    tmp_path: tmpPath,
+    sheet_name: sheetName || null,
+    column: column || '',
+    row_filters: rowFilters,
+  }).then(r => r.data)
+
 export const listCompareJobs = () =>
   api.get('compare/').then(r => r.data)
 

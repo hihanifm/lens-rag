@@ -6,6 +6,7 @@ Job-level routes:
   POST /compare/preview-right         upload right file → columns + tmp_path
   POST /compare/preview-context       preview merged text strings
   POST /compare/preview-row-stats     row counts after sheet + filters
+  POST /compare/preview-column-values distinct values for a column (filter picker)
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -47,6 +48,7 @@ from embedder import embed as _embed_probe
 from ingestion import (
     apply_compare_row_filters,
     build_contextual_content,
+    distinct_compare_column_strings,
     excel_sheet_previews,
     read_compare_dataframe,
 )
@@ -58,6 +60,8 @@ from models import (
     CompareJobResponse,
     CompareJobUpdate,
     CompareDecision,
+    ComparePreviewColumnValuesRequest,
+    ComparePreviewColumnValuesResponse,
     ComparePreviewRowStatsRequest,
     ComparePreviewRowStatsResponse,
     CompareRunCreate,
@@ -261,6 +265,32 @@ def preview_row_stats(body: ComparePreviewRowStatsRequest):
         row_count_unfiltered=n0,
         row_count_filtered=len(df1),
     )
+
+
+@router.post("/preview-column-values", response_model=ComparePreviewColumnValuesResponse)
+def preview_column_values(body: ComparePreviewColumnValuesRequest):
+    """Up to 100 distinct string values for a column after optional sibling filters."""
+    tmp_path = (body.tmp_path or "").strip()
+    column = (body.column or "").strip()
+    if not tmp_path or not os.path.exists(tmp_path):
+        raise HTTPException(status_code=400, detail="Uploaded file not found. Please re-upload.")
+    if not column:
+        raise HTTPException(status_code=422, detail="column is required")
+
+    sheet_resolved = _require_sheet_if_multi(tmp_path, body.sheet_name, "Preview")
+    df0 = read_compare_dataframe(tmp_path, sheet_resolved)
+    fl = _filters_to_dicts(body.row_filters)
+    _validate_filters_against_df(df0, fl, "Preview")
+    df = apply_compare_row_filters(df0, fl)
+    try:
+        values, truncated = distinct_compare_column_strings(df, column)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown column: {column}")
+
+    # Avoid duplicate <option value=""> in filter dropdowns; use "is empty" for blank cells.
+    values = [v for v in values if v != ""]
+
+    return ComparePreviewColumnValuesResponse(column=column, values=values, truncated=truncated)
 
 
 # ── Job CRUD ──────────────────────────────────────────────────────────────

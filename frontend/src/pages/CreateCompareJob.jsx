@@ -4,6 +4,7 @@ import {
   previewCompareFile,
   previewCompareContext,
   previewCompareRowStats,
+  previewCompareColumnValues,
   createCompareJob,
   fetchModels,
   getSystemConfig,
@@ -22,6 +23,141 @@ const FILTER_OPS = [
   { id: 'not_empty', label: 'is not empty' },
   { id: 'regex', label: 'matches regex' },
 ]
+
+const FILTER_VALUE_PICK_OPS = ['contains', 'not_contains', 'equals', 'not_equals']
+const FILTER_VALUE_OTHER = '__other__'
+
+function RowFilterValueField({ column, op, value, tmpPath, sheetForApi, siblingFilters, onChange }) {
+  const [options, setOptions] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [truncated, setTruncated] = useState(false)
+
+  const siblingsKey = JSON.stringify(siblingFilters || [])
+
+  useEffect(() => {
+    if (!FILTER_VALUE_PICK_OPS.includes(op) || !tmpPath || !String(column || '').trim()) {
+      setOptions([])
+      setTruncated(false)
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(() => {
+      setLoading(true)
+      previewCompareColumnValues(tmpPath, {
+        sheetName: sheetForApi,
+        column: String(column).trim(),
+        rowFilters: siblingFilters || [],
+      })
+        .then((res) => {
+          if (!cancelled) {
+            setOptions(Array.isArray(res?.values) ? res.values : [])
+            setTruncated(!!res?.truncated)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setOptions([])
+            setTruncated(false)
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [op, tmpPath, sheetForApi, column, siblingsKey])
+
+  if (op === 'regex') {
+    return (
+      <input
+        type="text"
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        placeholder="pattern"
+        className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+      />
+    )
+  }
+
+  if (!FILTER_VALUE_PICK_OPS.includes(op)) {
+    return null
+  }
+
+  if (!String(column || '').trim()) {
+    return (
+      <input
+        type="text"
+        disabled
+        placeholder="Pick a column first"
+        className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm bg-gray-50 text-gray-400"
+      />
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm text-gray-400 bg-white">
+        Loading values…
+      </div>
+    )
+  }
+
+  const valueInList = options.includes(value)
+  const selectVal = value === '' ? '' : (valueInList ? value : FILTER_VALUE_OTHER)
+  const showCustomInput = selectVal === FILTER_VALUE_OTHER
+
+  if (options.length === 0) {
+    return (
+      <input
+        type="text"
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        placeholder="text"
+        className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+      />
+    )
+  }
+
+  return (
+    <div className="w-full min-w-[160px] flex-1 space-y-1">
+      <select
+        value={selectVal}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v === '') onChange('')
+          else if (v === FILTER_VALUE_OTHER) {
+            if (valueInList) onChange('')
+          }
+          else onChange(v)
+        }}
+        className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+      >
+        <option value="">— Select value —</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o.length > 90 ? `${o.slice(0, 87)}…` : o}</option>
+        ))}
+        <option value={FILTER_VALUE_OTHER}>Other…</option>
+      </select>
+      {truncated && (
+        <p className="text-[10px] text-amber-700 leading-tight">
+          First 100 distinct values shown. Choose Other… to type any value.
+        </p>
+      )}
+      {showCustomInput && (
+        <input
+          type="text"
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder="Type value"
+          className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+        />
+      )}
+    </div>
+  )
+}
 
 function pickDefaultContextColumns(cols) {
   const lower = (s) => String(s || '').toLowerCase()
@@ -113,7 +249,7 @@ function ColumnSingleSelect({ columns, value, onChange, label, required = false 
   )
 }
 
-function RowFiltersEditor({ columns, filters, onChange }) {
+function RowFiltersEditor({ columns, filters, onChange, tmpPath, sheetForApi }) {
   const add = () => onChange([...filters, { id: crypto.randomUUID(), column: '', op: 'contains', value: '' }])
   const remove = (id) => onChange(filters.filter(f => f.id !== id))
   const patch = (id, part) => onChange(filters.map(f => (f.id === id ? { ...f, ...part } : f)))
@@ -141,7 +277,7 @@ function RowFiltersEditor({ columns, filters, onChange }) {
                 <label className="block text-[11px] text-gray-400 mb-0.5">Column</label>
                 <select
                   value={f.column || ''}
-                  onChange={e => patch(f.id, { column: e.target.value })}
+                  onChange={e => patch(f.id, { column: e.target.value, value: '' })}
                   className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
                 >
                   <option value="">—</option>
@@ -152,7 +288,7 @@ function RowFiltersEditor({ columns, filters, onChange }) {
                 <label className="block text-[11px] text-gray-400 mb-0.5">Condition</label>
                 <select
                   value={f.op || 'contains'}
-                  onChange={e => patch(f.id, { op: e.target.value })}
+                  onChange={e => patch(f.id, { op: e.target.value, value: ['regex', 'contains', 'not_contains', 'equals', 'not_equals'].includes(e.target.value) ? f.value : '' })}
                   className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
                 >
                   {FILTER_OPS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -161,12 +297,14 @@ function RowFiltersEditor({ columns, filters, onChange }) {
               {!['empty', 'not_empty'].includes(f.op) && (
                 <div className="min-w-[160px] flex-1">
                   <label className="block text-[11px] text-gray-400 mb-0.5">Value</label>
-                  <input
-                    type="text"
+                  <RowFilterValueField
+                    column={f.column}
+                    op={f.op || 'contains'}
                     value={f.value || ''}
-                    onChange={e => patch(f.id, { value: e.target.value })}
-                    placeholder={f.op === 'regex' ? 'pattern' : 'text'}
-                    className="w-full border border-gray-200 rounded-md px-2 py-1.5 text-sm"
+                    tmpPath={tmpPath}
+                    sheetForApi={sheetForApi}
+                    siblingFilters={compareFiltersForApi(filters.filter(x => x.id !== f.id))}
+                    onChange={(v) => patch(f.id, { value: v })}
                   />
                 </div>
               )}
@@ -386,6 +524,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
   const perSheet = state[`perSheet${key}`] || []
   const filters = state[`rowFilters${key}`] || []
   const tmpPath = state[`tmpPath${key}`]
+  const sheetForApi = sheetNames.length > 1 ? sheet : null
   const rowCountSheet = state[`rowCount${key}`]
   const stepIdx = side === 'left' ? 2 : 4
 
@@ -420,7 +559,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
     let cancelled = false
     const t = setTimeout(() => {
       previewCompareRowStats(tmpPath, {
-        sheetName: sheetNames.length > 1 ? sheet : null,
+        sheetName: sheetForApi,
         rowFilters: apiFilters,
       })
         .then((res) => {
@@ -431,7 +570,7 @@ function StepColumns({ side, label, state, setState, onNext }) {
         })
     }, 400)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [tmpPath, sheet, sheetNames.length, filters])
+  }, [tmpPath, sheet, sheetForApi, filters])
 
   return (
     <div className="space-y-5">
@@ -469,7 +608,13 @@ function StepColumns({ side, label, state, setState, onNext }) {
         label="Identifier column (shown in review card & export — one column only)"
       />
 
-      <RowFiltersEditor columns={columns} filters={filters} onChange={setFilters} />
+      <RowFiltersEditor
+        columns={columns}
+        filters={filters}
+        onChange={setFilters}
+        tmpPath={tmpPath}
+        sheetForApi={sheetForApi}
+      />
 
       <p className="text-xs text-gray-500">
         Rows after filters
