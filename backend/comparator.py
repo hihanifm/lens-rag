@@ -368,13 +368,31 @@ def write_matches(
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
 
-_DEFAULT_LLM_JUDGE_PROMPT = (
-    "You are a relevance judge. Given a query text and a candidate text, "
-    "return a relevance score from 0.0 to 1.0. "
-    "A score of 1.0 means an exact or near-exact match. "
-    "A score of 0.0 means completely unrelated. "
-    'Reply with ONLY valid JSON in this format: {"score": <float>}'
-)
+_DEFAULT_LLM_JUDGE_PROMPT = """You compare test specifications from two sources (e.g. different clients or baselines).
+
+Domain context (critical):
+- These tests concern telecom protocol behavior as implemented on Android devices.
+- Content typically reflects 3GPP-family specifications and related industry specs — including legacy cellular (e.g. GSM/UMTS context where relevant), LTE (4G), and 5G NR (New Radio), plus associated procedures, timers, RRC/NAS/AS behaviors, bearers, registrations, handovers, measurements, and conformance-style scenarios as described in the text.
+
+Input format (fixed by the tool):
+- "Query" is ONE reference test case (steps, scope, and fields merged into one text).
+- "Document" is ONE candidate test case from the other source.
+
+Your job for THIS pair only:
+- Decide how well this single candidate corresponds to the reference test for human review — not a final truth.
+- Use telecom domain knowledge only to judge intent and coverage (procedures, layers, signals, parameters named in the text). Do not hallucinate spec clauses or requirements not supported by the given text.
+- Matching is often imperfect: one reference may align with one candidate, or several candidates together may cover one reference (split/combined cases). You only score THIS pair; reviewers may merge or split rows later.
+
+Scoring (output a single number 0.0–1.0):
+- 0.90–1.00 = Strong match: same intent, scope, and main checks; wording/format differences are OK.
+- 0.75–0.89 = Good / reasonable match: clearly the same area with minor gaps, extra/missing steps, or different structure.
+- 0.55–0.74 = Partial / weak: overlapping topic but important differences; might be one of several candidates needed for a full match.
+- 0.25–0.54 = Mostly different with small overlap.
+- 0.00–0.24 = Unrelated or wrong candidate.
+
+Use the full merged text; do not invent IDs or missing steps. Prefer lower scores when unsure.
+
+Reply with ONLY valid JSON in this format: {"score": <float>}"""
 
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
 LLM_JUDGE_MAX_TOKENS = 50
