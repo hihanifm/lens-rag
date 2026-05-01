@@ -84,7 +84,7 @@ function parseRunStatusPayload(statusMessage) {
 }
 
 function RunStatsPane({ job, run }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
   const [builtinJudgePrompt, setBuiltinJudgePrompt] = useState(null)
   const payload = parseRunStatusPayload(run.status_message)
