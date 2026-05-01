@@ -5,6 +5,7 @@ import {
   previewCompareContext,
   previewCompareRowStats,
   previewCompareColumnValues,
+  previewCompareColumnSamples,
   createCompareJob,
   fetchModels,
   getSystemConfig,
@@ -201,7 +202,20 @@ function StepHeader({ step, total, title }) {
   )
 }
 
-function ColumnMultiSelect({ columns, selected, onChange, label }) {
+function formatColumnSamplesTooltip(samples) {
+  if (!samples?.length) return ''
+  return samples.map((v, i) => `Row ${i + 1}: ${v === '' ? '(empty)' : v}`).join('\n')
+}
+
+function formatColumnSamplesInline(samples) {
+  if (!samples?.length) return ''
+  return samples
+    .map(v => (v === '' ? '(empty)' : v))
+    .map(v => (v.length > 44 ? `${v.slice(0, 41)}…` : v))
+    .join(' · ')
+}
+
+function ColumnMultiSelect({ columns, selected, onChange, label, samplesByColumn = {}, samplesLoading = false }) {
   const toggle = (col) => {
     onChange(
       selected.includes(col) ? selected.filter(c => c !== col) : [...selected, col]
@@ -210,18 +224,35 @@ function ColumnMultiSelect({ columns, selected, onChange, label }) {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
-      <div className="border border-gray-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-        {columns.map(col => (
-          <label key={col} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selected.includes(col)}
-              onChange={() => toggle(col)}
-              className="rounded border-gray-300 text-blue-600"
-            />
-            <span className="text-sm text-gray-700 truncate">{col}</span>
-          </label>
-        ))}
+      <p className="text-xs text-gray-400 mb-2">
+        Sample values from the first 5 rows on this sheet (after row filters). Hover a row for full text.
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+        {columns.map(col => {
+          const raw = samplesByColumn[col]
+          const line = formatColumnSamplesInline(raw)
+          const tip = formatColumnSamplesTooltip(raw)
+          return (
+            <label
+              key={col}
+              className="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(col)}
+                onChange={() => toggle(col)}
+                className="rounded border-gray-300 text-blue-600 mt-1 shrink-0"
+              />
+              <span className="text-sm text-gray-800 font-medium shrink-0 w-[28%] min-w-[6.5rem] break-words">{col}</span>
+              <span
+                className={`text-xs flex-1 min-w-0 leading-snug ${samplesLoading && !line ? 'text-gray-400 italic' : 'text-gray-500'}`}
+                title={tip || undefined}
+              >
+                {samplesLoading && !line ? 'Loading…' : (line || '—')}
+              </span>
+            </label>
+          )
+        })}
       </div>
       <p className="text-xs text-gray-400 mt-1">{selected.length} selected</p>
     </div>
@@ -529,6 +560,8 @@ function StepColumns({ side, label, state, setState, onNext }) {
   const stepIdx = side === 'left' ? 2 : 4
 
   const [filteredCount, setFilteredCount] = useState(null)
+  const [columnSamples, setColumnSamples] = useState({})
+  const [columnSamplesLoading, setColumnSamplesLoading] = useState(false)
 
   const setCtx = (v) => setState(s => ({ ...s, [`contextColumns${key}`]: v }))
   const setDisplay = (v) => setState(s => ({ ...s, [`displayColumn${key}`]: v }))
@@ -572,6 +605,39 @@ function StepColumns({ side, label, state, setState, onNext }) {
     return () => { cancelled = true; clearTimeout(t) }
   }, [tmpPath, sheet, sheetForApi, filters])
 
+  useEffect(() => {
+    if (!tmpPath || !sheet || !columns.length) {
+      setColumnSamples({})
+      setColumnSamplesLoading(false)
+      return
+    }
+    let cancelled = false
+    const apiFilters = compareFiltersForApi(filters)
+    const t = setTimeout(() => {
+      setColumnSamples({})
+      setColumnSamplesLoading(true)
+      previewCompareColumnSamples(tmpPath, {
+        sheetName: sheetForApi,
+        rowFilters: apiFilters,
+        columns,
+        n: 5,
+      })
+        .then((res) => {
+          if (!cancelled) setColumnSamples(res?.samples_by_column || {})
+        })
+        .catch(() => {
+          if (!cancelled) setColumnSamples({})
+        })
+        .finally(() => {
+          if (!cancelled) setColumnSamplesLoading(false)
+        })
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [tmpPath, sheet, sheetForApi, filters, columns])
+
   return (
     <div className="space-y-5">
       <StepHeader step={stepIdx} total={STEPS.length} title={`Column setup for "${label}"`} />
@@ -600,6 +666,8 @@ function StepColumns({ side, label, state, setState, onNext }) {
           selected={ctx}
           onChange={setCtx}
           label="Columns for similarity matching"
+          samplesByColumn={columnSamples}
+          samplesLoading={columnSamplesLoading}
         />
         <p className="text-xs text-gray-400 mt-1">
           Selected columns are merged into one text field per row. That text is embedded and used to find similar rows on the other side (vector similarity, not exact key matching).

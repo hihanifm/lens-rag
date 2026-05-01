@@ -105,6 +105,21 @@ def distinct_compare_column_strings(df: pd.DataFrame, column: str, max_values: i
     return uniq[:max_values], truncated
 
 
+def compare_column_first_row_samples(
+    df: pd.DataFrame,
+    column_names: list[str],
+    max_rows: int = 5,
+) -> dict[str, list[str]]:
+    """First N cell values per column as plain strings (compare semantics)."""
+    max_rows = max(1, min(int(max_rows), 20))
+    out: dict[str, list[str]] = {}
+    for col in column_names:
+        if col not in df.columns:
+            continue
+        out[col] = [compare_scalar_cell_str(v) for v in df[col].head(max_rows)]
+    return out
+
+
 def apply_compare_row_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
     """
     AND-combine row filters. All values compared as plain text (case-insensitive for contains/equals).

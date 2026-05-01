@@ -243,6 +243,16 @@ export const previewCompareColumnValues = (tmpPath, { sheetName = null, column, 
     row_filters: rowFilters,
   }).then(r => r.data)
 
+/** First n row values per column (after filters); for column-picker hints. */
+export const previewCompareColumnSamples = (tmpPath, { sheetName = null, rowFilters = [], columns = [], n = 5 } = {}) =>
+  api.post('compare/preview-column-samples', {
+    tmp_path: tmpPath,
+    sheet_name: sheetName || null,
+    row_filters: rowFilters,
+    columns,
+    n,
+  }).then(r => r.data)
+
 export const listCompareJobs = () =>
   api.get('compare/').then(r => r.data)
 

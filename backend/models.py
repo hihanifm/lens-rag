@@ -347,6 +347,20 @@ class ComparePreviewColumnValuesResponse(BaseModel):
     truncated: bool
 
 
+class ComparePreviewColumnSamplesRequest(BaseModel):
+    """First-row samples per column for compare column-picker UI."""
+
+    tmp_path: str
+    sheet_name: Optional[str] = None
+    row_filters: List[CompareRowFilter] = Field(default_factory=list)
+    columns: List[str] = Field(default_factory=list)
+    n: int = 5
+
+
+class ComparePreviewColumnSamplesResponse(BaseModel):
+    samples_by_column: Dict[str, List[str]]
+
+
 class CandidateItem(BaseModel):
     right_id: int
     contextual_content: str

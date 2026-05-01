@@ -7,6 +7,7 @@ Job-level routes:
   POST /compare/preview-context       preview merged text strings
   POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/preview-column-values distinct values for a column (filter picker)
+  POST /compare/preview-column-samples   first N rows per column (column picker)
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -48,6 +49,7 @@ from embedder import embed as _embed_probe
 from ingestion import (
     apply_compare_row_filters,
     build_contextual_content,
+    compare_column_first_row_samples,
     distinct_compare_column_strings,
     excel_sheet_previews,
     read_compare_dataframe,
@@ -62,6 +64,8 @@ from models import (
     CompareDecision,
     ComparePreviewColumnValuesRequest,
     ComparePreviewColumnValuesResponse,
+    ComparePreviewColumnSamplesRequest,
+    ComparePreviewColumnSamplesResponse,
     ComparePreviewRowStatsRequest,
     ComparePreviewRowStatsResponse,
     CompareRunCreate,
@@ -291,6 +295,28 @@ def preview_column_values(body: ComparePreviewColumnValuesRequest):
     values = [v for v in values if v != ""]
 
     return ComparePreviewColumnValuesResponse(column=column, values=values, truncated=truncated)
+
+
+@router.post("/preview-column-samples", response_model=ComparePreviewColumnSamplesResponse)
+def preview_column_samples(body: ComparePreviewColumnSamplesRequest):
+    """First n rows per column (strings), after sheet selection and row filters."""
+    tmp_path = (body.tmp_path or "").strip()
+    if not tmp_path or not os.path.exists(tmp_path):
+        raise HTTPException(status_code=400, detail="Uploaded file not found. Please re-upload.")
+
+    sheet_resolved = _require_sheet_if_multi(tmp_path, body.sheet_name, "Preview")
+    df0 = read_compare_dataframe(tmp_path, sheet_resolved)
+    fl = _filters_to_dicts(body.row_filters)
+    _validate_filters_against_df(df0, fl, "Preview")
+    df = apply_compare_row_filters(df0, fl)
+
+    cols = [str(c).strip() for c in (body.columns or []) if str(c).strip()]
+    if not cols:
+        cols = [c for c in df.columns if c != "sheet_name"]
+
+    n = max(1, min(int(body.n or 5), 10))
+    samples = compare_column_first_row_samples(df, cols, n)
+    return ComparePreviewColumnSamplesResponse(samples_by_column=samples)
 
 
 # ── Job CRUD ──────────────────────────────────────────────────────────────
