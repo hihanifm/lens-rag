@@ -10,7 +10,7 @@ This file lists third-party software used by this repository and provides attrib
 ## Docker base images (from Dockerfiles / Compose)
 
 - **`python:3.11-slim`** (backend image base)
-- **`node:20-alpine`** (frontend dev image base)
+- **`node:20-bookworm-slim`** (frontend dev image base; override via `NODE_IMAGE` build arg)
 - **`pgvector/pgvector:pg16`** (Postgres + pgvector service image)
 
 Image licensing is governed by upstream projects and the image publishers; if you distribute images externally, consider producing an image SBOM and/or including the relevant upstream notices in your distribution process.
