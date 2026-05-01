@@ -33,6 +33,29 @@ from ingestion import apply_compare_row_filters, build_contextual_content, read_
 logger = logging.getLogger("lens.comparator")
 
 
+def _openai_completion_http_status(resp) -> int | None:
+    """Best-effort HTTP status from OpenAI SDK chat completion (shape varies by SDK version)."""
+    for attr in ("response", "_response", "raw_response"):
+        r = getattr(resp, attr, None)
+        if r is not None:
+            sc = getattr(r, "status_code", None)
+            if isinstance(sc, int):
+                return sc
+    return None
+
+
+def _openai_error_http_status(exc: BaseException) -> int | None:
+    sc = getattr(exc, "status_code", None)
+    return sc if isinstance(sc, int) else None
+
+
+def _one_line_preview(text: str, max_len: int = 320) -> str:
+    s = (text or "").replace("\n", " ").replace("\r", " ").strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
+
 def _job_row_filters(job: dict, key: str) -> list[dict]:
     raw = job.get(key)
     if raw is None:
@@ -423,6 +446,15 @@ def run_reranking(
     return out
 
 
+def _final_score_for_ranking(cosine, rerank_score, llm_score) -> float:
+    """Ranking key for matches row; when LLM did not produce a score (NULL), use rerank then cosine."""
+    if llm_score is not None:
+        return float(llm_score)
+    if rerank_score is not None:
+        return float(rerank_score)
+    return float(cosine or 0.0)
+
+
 # ── Write matches ──────────────────────────────────────────────────────────
 
 def write_matches(
@@ -511,16 +543,14 @@ def _strip_json_fence(text: str) -> str:
     return raw.strip()
 
 
-def _parse_llm_judge_scores_batch(text: str, n: int, fallbacks: list[float]) -> list[float]:
+def _parse_llm_judge_scores_batch(text: str, n: int) -> list[float | None]:
     """
     Expect {"scores": [float, ...]} of length n, or {"score": float} when n==1.
-    On failure or wrong length, uses fallbacks (rerank/cosine) per slot.
+    Returns None per slot when JSON is invalid, truncated, or a value cannot be parsed —
+    honest "no score" (stored NULL), not a numeric fake.
     """
     if n <= 0:
         return []
-    fb = list(fallbacks[:n])
-    while len(fb) < n:
-        fb.append(0.0)
 
     try:
         raw = _strip_json_fence(text)
@@ -531,21 +561,36 @@ def _parse_llm_judge_scores_batch(text: str, n: int, fallbacks: list[float]) -> 
 
         arr = data.get("scores")
         if not isinstance(arr, list):
-            return fb
+            logger.warning(
+                'LLM judge JSON missing "scores" array (n=%d) | prefix=%r',
+                n,
+                _strip_json_fence(text)[:400],
+            )
+            return [None] * n
 
-        out: list[float] = []
+        out: list[float | None] = []
         for i in range(n):
             if i < len(arr):
                 try:
                     v = float(arr[i])
                     out.append(max(0.0, min(1.0, v)))
                 except (TypeError, ValueError):
-                    out.append(fb[i])
+                    out.append(None)
             else:
-                out.append(fb[i])
+                out.append(None)
         return out
-    except Exception:
-        return fb
+    except Exception as ex:
+        try:
+            rp = _strip_json_fence(text)[:400]
+        except Exception:
+            rp = (text or "")[:400]
+        logger.warning(
+            "LLM judge JSON parse failed (expect scores length %d): %s | prefix=%r",
+            n,
+            ex,
+            rp,
+        )
+        return [None] * n
 
 
 def effective_llm_judge_max_rpm(run: dict) -> int:
@@ -582,7 +627,7 @@ def iter_run_llm_judge(
     Score (left_id, right_id, cosine, rerank_score) tuples using an LLM judge.
     One chat completion per left row: reference text + all candidate rights for that row.
     Appends (left_id, right_id, cosine, rerank_score, llm_score) per pair to results_out.
-    Yields SSE dicts type llm_judge with processed/total per left batch.
+    llm_score may be None when the judge response is missing or not parseable (stored as NULL).
 
     max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
     """
@@ -645,13 +690,19 @@ def iter_run_llm_judge(
 
         query_text = content_map.get(left_id, "")
         doc_blocks = []
-        fallbacks: list[float] = []
         for i, (_l, right_id, cosine, rerank_score) in enumerate(pairs, start=1):
             doc_blocks.append(f"--- Candidate {i} ---\n{content_map.get(right_id, '')}")
-            fallbacks.append(float(rerank_score) if rerank_score is not None else float(cosine))
 
         user_content = f"Reference:\n{query_text}\n\n" + "\n\n".join(doc_blocks)
 
+        text = ""
+        detail: dict = {
+            "phase": "llm_judge",
+            "api_base": _one_line_preview(url, 200),
+            "model": model,
+            "left_id": left_id,
+            "candidates_in_batch": len(pairs),
+        }
         try:
             _mt = llm_judge_completion_max_tokens(len(pairs))
             resp = client.chat.completions.create(
@@ -663,16 +714,32 @@ def iter_run_llm_judge(
                 max_tokens=_mt,
                 temperature=LLM_JUDGE_TEMPERATURE,
             )
+            detail["http_status"] = _openai_completion_http_status(resp)
             text = (resp.choices[0].message.content or "").strip()
-            llm_scores = _parse_llm_judge_scores_batch(text, len(pairs), fallbacks)
+            llm_scores = _parse_llm_judge_scores_batch(text, len(pairs))
+            detail["response_chars"] = len(text)
+            detail["response_preview"] = _one_line_preview(text, 360)
+            n_ok = sum(1 for x in llm_scores if x is not None)
+            detail["scores_parsed"] = n_ok
+            detail["scores_total"] = len(llm_scores)
+            if n_ok < len(llm_scores):
+                detail["note"] = "Some scores missing — JSON incomplete or invalid for those slots (stored as null)."
         except Exception as e:
+            detail["http_status"] = detail.get("http_status") or _openai_error_http_status(e)
+            detail["error"] = f"{type(e).__name__}: {e}"[:500]
+            if text:
+                detail["response_preview"] = _one_line_preview(text, 360)
+                detail["response_chars"] = len(text)
             logger.warning(
-                "iter_run_llm_judge() batch fallback left_id=%d candidates=%d — %s",
+                "iter_run_llm_judge() batch failed left_id=%d candidates=%d — %s | response_prefix=%r",
                 left_id,
                 len(pairs),
                 e,
+                (text or "")[:400],
             )
-            llm_scores = list(fallbacks)
+            llm_scores = [None] * len(pairs)
+            detail["scores_parsed"] = 0
+            detail["scores_total"] = len(pairs)
 
         for tup, llm_score in zip(pairs, llm_scores):
             left_i, right_id, cosine, rerank_score = tup
@@ -690,6 +757,7 @@ def iter_run_llm_judge(
                 f"— pairs scored {pairs_done} / {total_pairs}"
             ),
             "left_id": left_id,
+            "detail": detail,
         }
 
     logger.info("iter_run_llm_judge() done pairs=%d batches=%d", len(results_out), total_batches)
@@ -943,7 +1011,10 @@ def run_pipeline(job_id: int, run_id: int) -> Generator[dict, None, None]:
             metrics["llm_judge_max_tokens"] = llm_judge_completion_max_tokens(max_grp)
             metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
             metrics["llm_judge_max_requests_per_minute"] = rpm_eff
-            scored_tuples = [(l, r, c, rs, ls, ls) for l, r, c, rs, ls in judged]
+            scored_tuples = [
+                (l, r, c, rs, ls, _final_score_for_ranking(c, rs, ls))
+                for l, r, c, rs, ls in judged
+            ]
         else:
             if not use_vector:
                 yield {"type": "error", "message": "LLM judge must be enabled when vector retrieval is off."}

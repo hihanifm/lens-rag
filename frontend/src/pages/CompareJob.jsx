@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -346,13 +346,13 @@ function ContextualPipeLines({ text, className }) {
 
 // ── Candidate card ─────────────────────────────────────────────────────────
 
-function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadge }) {
+function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadge, llmJudgeEnabled }) {
   const score = primaryScore(candidate)
   const cosine = candidate?.cosine_score
   const rerank = candidate?.rerank_score
   const llm = candidate?.llm_score
   const rerankIsNorm = isNormalized01(rerank)
-  const llmIsNorm = isNormalized01(llm)
+  const llmIsNorm = llm != null && isNormalized01(llm)
 
   return (
     <button
@@ -376,13 +376,16 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
             R {rerankIsNorm ? fmtPct01(rerank, 1) : fmtMaybeNumber(rerank)}
           </span>
         )}
-        {llm != null && (
+        {llmJudgeEnabled && (
           <span
+            title={llm != null ? undefined : 'No LLM score — judge response missing or not parseable as JSON scores'}
             className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
-              llmIsNorm ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+              llm != null
+                ? (llmIsNorm ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-gray-50 text-gray-600 border-gray-200')
+                : 'bg-gray-50 text-gray-500 border-gray-200 border-dashed'
             }`}
           >
-            LLM {llmIsNorm ? fmtPct01(llm, 1) : fmtMaybeNumber(llm)}
+            LLM {llm != null ? (llmIsNorm ? fmtPct01(llm, 1) : fmtMaybeNumber(llm)) : '—'}
           </span>
         )}
       </div>
@@ -843,6 +846,7 @@ function ReviewTab({ job, run }) {
                               isSaved={it.is_decided && it.current_decision === c.right_id}
                               onClick={() => handleSelect(it.left_id, c.right_id)}
                               showRerankBadge={!!run.reranker_enabled}
+                              llmJudgeEnabled={!!run.llm_judge_enabled}
                             />
                           ))
                       )}
@@ -1885,12 +1889,34 @@ function runPhaseIndex(t) {
   return i >= 0 ? i : -1
 }
 
+/** One line for the live LLM judge activity log (SSE `detail` from backend). */
+function formatLlmJudgeDetailLine(d) {
+  if (!d || typeof d !== 'object') return ''
+  const bits = []
+  bits.push(d.http_status != null ? `HTTP ${d.http_status}` : 'HTTP —')
+  if (d.left_id != null) bits.push(`left ${d.left_id}`)
+  if (d.candidates_in_batch != null) bits.push(`${d.candidates_in_batch} cand`)
+  if (d.api_base) bits.push(d.api_base)
+  if (d.model) bits.push(String(d.model))
+  if (d.error) bits.push(`ERR ${d.error}`)
+  else {
+    if (d.scores_parsed != null && d.scores_total != null) {
+      bits.push(`parsed ${d.scores_parsed}/${d.scores_total}`)
+    }
+    if (d.response_preview) bits.push(d.response_preview)
+    if (d.note) bits.push(d.note)
+  }
+  return bits.join(' · ')
+}
+
 function RunProgressView({ jobId, runId, onDone }) {
   const [events, setEvents] = useState([])
+  const [activityLog, setActivityLog] = useState([])
   const [done, setDone] = useState(false)
   const [error, setError] = useState(null)
   const [startedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
+  const logEndRef = useRef(null)
 
   useEffect(() => {
     if (done) return
@@ -1899,10 +1925,20 @@ function RunProgressView({ jobId, runId, onDone }) {
   }, [done])
 
   useEffect(() => {
+    setActivityLog([])
     const es = new EventSource(`${API_BASE_URL}/compare/${jobId}/runs/${runId}/execute`)
     es.onmessage = (e) => {
       const raw = JSON.parse(e.data)
       const data = { ...raw, type: normalizeRunProgressType(raw.type) }
+      if (data.type === 'llm_judge' && data.detail) {
+        const line = formatLlmJudgeDetailLine(data.detail)
+        if (line) {
+          setActivityLog(prev => {
+            const next = [...prev, line]
+            return next.length > 48 ? next.slice(-48) : next
+          })
+        }
+      }
       setEvents(prev => {
         const last = prev[prev.length - 1]
         if (last && last.type === data.type) return [...prev.slice(0, -1), data]
@@ -1914,6 +1950,10 @@ function RunProgressView({ jobId, runId, onDone }) {
     es.onerror = () => { setError('Connection lost'); es.close() }
     return () => es.close()
   }, [jobId, runId])
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [activityLog])
 
   const stages = [
     { type: 'vector_search', label: 'Vector search' },
@@ -1961,6 +2001,20 @@ function RunProgressView({ jobId, runId, onDone }) {
               {current.message}
             </p>
           )}
+        </div>
+      )}
+
+      {activityLog.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium text-gray-600">LLM judge (request / response)</p>
+          <div className="rounded-lg border border-gray-700 bg-gray-900 text-gray-100 p-3 max-h-36 overflow-y-auto text-[11px] leading-snug font-mono space-y-1">
+            {activityLog.map((line, i) => (
+              <div key={i} className="break-all border-b border-gray-800 pb-1 last:border-0 last:pb-0">
+                {line}
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
         </div>
       )}
 
