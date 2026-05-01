@@ -288,6 +288,9 @@ export const listRuns = (jobId) =>
 export const getRun = (jobId, runId) =>
   api.get(`compare/${jobId}/runs/${runId}`).then(r => r.data)
 
+export const updateRun = (jobId, runId, body) =>
+  api.patch(`compare/${jobId}/runs/${runId}`, body).then(r => r.data)
+
 export const deleteRun = (jobId, runId) =>
   api.delete(`compare/${jobId}/runs/${runId}`).then(r => r.data)
 

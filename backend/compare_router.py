@@ -23,6 +23,7 @@ Run-level routes (under /compare/{job_id}/runs):
   POST /compare/{job_id}/runs                           create run
   GET  /compare/{job_id}/runs                           list runs
   GET  /compare/{job_id}/runs/{run_id}                  run detail
+  PATCH /compare/{job_id}/runs/{run_id}                rename run
   GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2)
   GET  /compare/{job_id}/runs/{run_id}/review           stats
   GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem
@@ -86,6 +87,7 @@ from models import (
     ComparePreviewRowStatsResponse,
     CompareRunCreate,
     CompareRunResponse,
+    CompareRunUpdate,
     CompareRowFilter,
     ReviewItem,
 )
@@ -608,6 +610,29 @@ def list_runs(job_id: int):
 @router.get("/{job_id}/runs/{run_id}", response_model=CompareRunResponse)
 def get_run(job_id: int, run_id: int):
     _job_or_404(job_id)
+    return _run_response(run_id)
+
+
+@router.patch("/{job_id}/runs/{run_id}", response_model=CompareRunResponse)
+def patch_run(job_id: int, run_id: int, data: CompareRunUpdate):
+    _job_or_404(job_id)
+    _run_or_404(run_id, job_id)
+    payload = data.model_dump(exclude_unset=True)
+    if not payload:
+        return _run_response(run_id)
+    if "name" not in payload:
+        return _run_response(run_id)
+    raw = payload["name"]
+    name_val = None if raw is None else ((raw or "").strip() or None)
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            """
+            UPDATE public.compare_runs
+            SET name = %s
+            WHERE id = %s AND job_id = %s
+            """,
+            [name_val, run_id, job_id],
+        )
     return _run_response(run_id)
 
 

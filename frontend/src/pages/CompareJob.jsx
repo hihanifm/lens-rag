@@ -6,6 +6,7 @@ import {
   updateCompareJob,
   listRuns,
   createRun,
+  updateRun,
   deleteRun,
   getRunReviewStats,
   getNextRunReviewItem,
@@ -1604,9 +1605,82 @@ function RunProgressView({ jobId, runId, onDone }) {
   )
 }
 
+// ── Editable run title (list + detail) ────────────────────────────────────
+
+function EditableRunTitle({ jobId, run, onUpdated, titleClass = 'font-semibold text-gray-900 text-sm' }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const startEdit = (e) => {
+    e?.stopPropagation?.()
+    setDraft(run.name ?? '')
+    setEditing(true)
+  }
+
+  const cancel = () => setEditing(false)
+
+  const save = async () => {
+    const trimmed = draft.trim()
+    setSaving(true)
+    try {
+      const updated = await updateRun(jobId, run.id, { name: trimmed || null })
+      onUpdated(updated)
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-2 flex-wrap max-w-full min-w-0" onClick={e => e.stopPropagation()}>
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              save()
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          className={`${titleClass} border border-gray-300 rounded px-2 py-0.5 min-w-[10rem] max-w-[24rem] bg-white`}
+          autoFocus
+          disabled={saving}
+        />
+        <button type="button" onClick={save} disabled={saving} className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:opacity-40">
+          Save
+        </button>
+        <button type="button" onClick={cancel} disabled={saving} className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40">
+          Cancel
+        </button>
+      </span>
+    )
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1 min-w-0 max-w-full ${titleClass}`}>
+      <span className="truncate">{run.name || `Run #${run.id}`}</span>
+      <button
+        type="button"
+        onClick={startEdit}
+        className="shrink-0 text-gray-400 hover:text-blue-600 p-0.5 rounded"
+        title="Rename run"
+      >
+        ✎
+      </button>
+    </span>
+  )
+}
+
 // ── Run detail panel ────────────────────────────────────────────────────────
 
 function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
+  const queryClient = useQueryClient()
   const [subTab, setSubTab] = useState('review')
   const [executing, setExecuting] = useState(run.status === 'pending' || run.status === 'running')
 
@@ -1634,7 +1708,15 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
           ← All Runs
         </button>
         <span className="text-gray-300">/</span>
-        <span className="text-sm font-semibold text-gray-900">{run.name || `Run #${run.id}`}</span>
+        <EditableRunTitle
+          jobId={job.id}
+          run={run}
+          titleClass="text-sm font-semibold text-gray-900"
+          onUpdated={(r) => {
+            onRunUpdated(r)
+            queryClient.invalidateQueries({ queryKey: ['compare-runs', job.id] })
+          }}
+        />
         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
           {run.status}
         </span>
@@ -1700,7 +1782,7 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
 
 // ── Runs panel (list) ──────────────────────────────────────────────────────
 
-function RunsPanel({ job, onSelectRun }) {
+function RunsPanel({ job, onSelectRun, onRunUpdated }) {
   const jobId = job.id
   const queryClient = useQueryClient()
   const [showNewRun, setShowNewRun] = useState(false)
@@ -1795,8 +1877,15 @@ function RunsPanel({ job, onSelectRun }) {
               onClick={() => onSelectRun(run)}
               className="bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer p-4"
             >
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="font-semibold text-gray-900 text-sm">{run.name || `Run #${run.id}`}</span>
+              <div className="flex items-center gap-3 flex-wrap min-w-0">
+                <EditableRunTitle
+                  jobId={jobId}
+                  run={run}
+                  onUpdated={(r) => {
+                    refetch()
+                    onRunUpdated?.(r)
+                  }}
+                />
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
                   {run.status}
                 </span>
@@ -1951,7 +2040,11 @@ export default function CompareJob() {
               onRunUpdated={setSelectedRun}
             />
           ) : (
-            <RunsPanel job={job} onSelectRun={setSelectedRun} />
+            <RunsPanel
+              job={job}
+              onSelectRun={setSelectedRun}
+              onRunUpdated={(r) => setSelectedRun((prev) => (prev?.id === r.id ? r : prev))}
+            />
           )
         ) : activeTab === 'browse' ? (
           <BrowseTab job={job} />
