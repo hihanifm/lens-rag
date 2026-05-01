@@ -642,20 +642,31 @@ function StepColumns({ side, label, state, setState, onNext }) {
     <div className="space-y-5">
       <StepHeader step={stepIdx} total={STEPS.length} title={`Sheet, filters, and columns for "${label}"`} />
 
-      {sheetNames.length > 1 && (
+      {sheetNames.length > 0 && sheet && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Excel sheet</label>
-          <select
-            value={sheet}
-            onChange={e => applySheetChange(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
-          >
-            {sheetNames.map(sn => (
-              <option key={sn} value={sn}>{sn}</option>
-            ))}
-          </select>
+          {sheetNames.length > 1 ? (
+            <select
+              value={sheet}
+              onChange={e => applySheetChange(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            >
+              {sheetNames.map(sn => (
+                <option key={sn} value={sn}>{sn}</option>
+              ))}
+            </select>
+          ) : (
+            <div
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-gray-50"
+              title="This workbook has only one sheet"
+            >
+              {sheet}
+            </div>
+          )}
           <p className="text-xs text-gray-400 mt-1">
-            Only this sheet is embedded for this side ({rowCountSheet?.toLocaleString?.() ?? rowCountSheet} rows before filters).
+            {sheetNames.length > 1
+              ? `Only this sheet is embedded for this side (${rowCountSheet?.toLocaleString?.() ?? rowCountSheet} rows before filters).`
+              : `Single-sheet workbook — rows below use sheet "${sheet}" (${rowCountSheet?.toLocaleString?.() ?? rowCountSheet} rows before filters).`}
           </p>
         </div>
       )}
