@@ -377,6 +377,7 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     """Built-in LLM judge settings for Compare runs (UI display + parity with pipeline)."""
 
     default_system_prompt: str
+    fixed_suffix: str
     max_tokens: int
     temperature: float
     default_max_requests_per_minute: int

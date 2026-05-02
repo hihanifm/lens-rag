@@ -619,14 +619,18 @@ def write_matches(
 
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
+# Stored `llm_judge_prompt` on a run is a domain overlay only; PREFIX + SUFFIX are always
+# applied so the model sees fixed input-shape + rubric + JSON contract (_parse_llm_judge_scores_batch).
 
-DEFAULT_LLM_JUDGE_PROMPT = """You compare test specifications from two sources (e.g. different clients or baselines).
+LLM_JUDGE_PROMPT_PREFIX = """You compare test specifications from two sources (e.g. different clients or baselines).
 
 Domain context (critical):
-- These tests concern telecom protocol behavior as implemented on Android devices.
-- Content typically reflects 3GPP-family specifications and related industry specs — including legacy cellular (e.g. GSM/UMTS context where relevant), LTE (4G), and 5G NR (New Radio), plus associated procedures, timers, RRC/NAS/AS behaviors, bearers, registrations, handovers, measurements, and conformance-style scenarios as described in the text.
+"""
 
-Input format (fixed by the tool):
+LLM_JUDGE_PROMPT_DEFAULT_DOMAIN = """- These tests concern telecom protocol behavior as implemented on Android devices.
+- Content typically reflects 3GPP-family specifications and related industry specs — including legacy cellular (e.g. GSM/UMTS context where relevant), LTE (4G), and 5G NR (New Radio), plus associated procedures, timers, RRC/NAS/AS behaviors, bearers, registrations, handovers, measurements, and conformance-style scenarios as described in the text."""
+
+LLM_JUDGE_PROMPT_SUFFIX = """Input format (fixed by the tool):
 - "Reference" is ONE left-side test case (merged text).
 - "Candidate 1", "Candidate 2", … are top-ranked right-side rows for the SAME reference (same order as retrieval).
 
@@ -645,6 +649,21 @@ Per-candidate scores (each 0.0–1.0), aligned with candidate index order:
 Use the full merged text; do not invent IDs or missing steps. Prefer lower scores when unsure.
 
 Reply with ONLY valid JSON: {"scores": [<float>, ...]} — same length as the number of candidates, in order (scores[0] = Candidate 1). If there is exactly one candidate, {"score": <float>} is also accepted."""
+
+DEFAULT_LLM_JUDGE_PROMPT = (
+    LLM_JUDGE_PROMPT_PREFIX + LLM_JUDGE_PROMPT_DEFAULT_DOMAIN + "\n\n" + LLM_JUDGE_PROMPT_SUFFIX
+)
+
+
+def effective_llm_judge_system_prompt(domain_overlay: str | None) -> str:
+    """
+    Build the full judge system message. DB `llm_judge_prompt` holds domain-only text;
+    parser-bound tail (LLM_JUDGE_PROMPT_SUFFIX) is always appended.
+    """
+    t = (domain_overlay or "").strip()
+    if not t:
+        return DEFAULT_LLM_JUDGE_PROMPT
+    return LLM_JUDGE_PROMPT_PREFIX + t + "\n\n" + LLM_JUDGE_PROMPT_SUFFIX
 
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
 LLM_JUDGE_MAX_TOKENS = 512
@@ -753,8 +772,10 @@ def iter_run_llm_judge(
     llm_score may be None when the judge response is missing or not parseable (stored as NULL).
 
     max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
+
+    prompt: optional domain-only overlay (compare_runs.llm_judge_prompt); merged with fixed suffix.
     """
-    system_prompt = prompt or DEFAULT_LLM_JUDGE_PROMPT
+    system_prompt = effective_llm_judge_system_prompt(prompt)
     client = OpenAI(base_url=url, api_key="ollama")
 
     all_ids = list({row[0] for row in candidates} | {row[1] for row in candidates})

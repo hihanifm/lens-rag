@@ -54,6 +54,7 @@ See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React
 - **Ollama runs on HOST** — not inside Docker (needs direct GPU access)
 - **Docker Compose** manages: FastAPI + PostgreSQL only
 - **Compare LLM judge (optional)** — if enabled on a run, scores candidates via a user-configured OpenAI-compatible URL (same trust model as per-project embedding overrides); intended for on-prem inference, not mandatory for Compare.
+- **Compare `llm_judge_prompt`** — stores **domain-only** guidance; `comparator.effective_llm_judge_system_prompt()` always appends the fixed suffix (input-shape text, scoring rubric, JSON `scores` contract) so the response parser stays valid.
 
 ---
 

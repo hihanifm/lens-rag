@@ -8,7 +8,7 @@ Job-level routes:
   POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/preview-column-values distinct values for a column (filter picker)
   POST /compare/preview-column-samples   first N row(s) per column (column picker; default 1)
-  GET  /compare/llm-judge-defaults      built-in judge prompt + token settings
+  GET  /compare/llm-judge-defaults      built-in judge prompt + fixed_suffix + token settings
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -48,6 +48,7 @@ from fastapi.responses import Response, StreamingResponse
 from comparator import (
     DEFAULT_LLM_JUDGE_PROMPT,
     LLM_JUDGE_MAX_TOKENS,
+    LLM_JUDGE_PROMPT_SUFFIX,
     LLM_JUDGE_TEMPERATURE,
     run_ingest_job,
     run_pipeline,
@@ -483,6 +484,7 @@ def get_llm_judge_defaults():
     """Expose the server default system prompt so the run wizard can show it read-only."""
     return CompareLlmJudgeDefaultsResponse(
         default_system_prompt=DEFAULT_LLM_JUDGE_PROMPT,
+        fixed_suffix=LLM_JUDGE_PROMPT_SUFFIX,
         max_tokens=LLM_JUDGE_MAX_TOKENS,
         temperature=LLM_JUDGE_TEMPERATURE,
         default_max_requests_per_minute=max(0, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE),

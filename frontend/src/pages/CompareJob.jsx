@@ -309,11 +309,18 @@ function RunStatsPane({ job, run }) {
                 {promptOpen ? '▼ Hide judge prompt' : '▶ Show judge prompt'}
               </button>
               {promptOpen && (
-                <pre className="mt-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
-                  {run.llm_judge_prompt?.trim()
-                    ? run.llm_judge_prompt
-                    : (builtinJudgePrompt ?? 'Loading built-in default prompt…')}
-                </pre>
+                <div className="mt-2 space-y-2">
+                  <pre className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
+                    {run.llm_judge_prompt?.trim()
+                      ? run.llm_judge_prompt
+                      : (builtinJudgePrompt ?? 'Loading built-in default prompt…')}
+                  </pre>
+                  {run.llm_judge_prompt?.trim() && (
+                    <p className="text-[11px] text-gray-500">
+                      Stored text is <strong className="text-gray-700">domain guidance only</strong>; the server always appends the fixed scoring rubric and JSON <span className="font-mono">scores</span> contract.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -1797,7 +1804,8 @@ function NewRunModal({ onClose, onCreated, job }) {
                             {llmJudgeDefaults.default_system_prompt}
                           </pre>
                           <p className="text-[11px] text-gray-500">
-                            Each pair is still sent as user message <span className="font-mono">Query: … / Document: …</span>
+                            User message per left row: <span className="font-mono">Reference:</span> (left text) plus{' '}
+                            <span className="font-mono">--- Candidate 1 ---</span> blocks for each right candidate (same order as retrieval).
                             {' '}
                             · Generation: max_tokens={llmJudgeDefaults.max_tokens}, temperature={llmJudgeDefaults.temperature}
                           </p>
@@ -1805,14 +1813,32 @@ function NewRunModal({ onClose, onCreated, job }) {
                       )}
                     </div>
                   </details>
+                  {llmJudgeDefaults?.fixed_suffix && (
+                    <details className="mt-2 border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
+                      <summary className="cursor-pointer text-xs font-semibold text-gray-700 px-3 py-2 hover:bg-gray-100 list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+                        <span className="text-gray-500 select-none" aria-hidden>▶</span>
+                        Parser contract (always applied — do not duplicate in your text)
+                      </summary>
+                      <div className="px-3 pb-3 border-t border-gray-100">
+                        <pre className="text-[11px] text-gray-700 whitespace-pre-wrap max-h-36 overflow-y-auto font-mono mt-2 p-2 rounded border border-gray-100 bg-white">
+                          {llmJudgeDefaults.fixed_suffix}
+                        </pre>
+                      </div>
+                    </details>
+                  )}
                   <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">
-                    Custom system prompt <span className="text-gray-400 font-normal">(optional — replaces default above)</span>
+                    Domain-specific judge guidance{' '}
+                    <span className="text-gray-400 font-normal">(optional)</span>
                   </label>
+                  <p className="text-[11px] text-gray-500 mb-1.5 leading-relaxed">
+                    Describe only <strong className="text-gray-700">your domain</strong> (what rows mean, what to weight). Scoring bands, input-shape rules, and JSON output are{' '}
+                    <strong className="text-gray-700">fixed server-side</strong> for the parser — do not paste them here.
+                  </p>
                   <textarea
                     value={llmPrompt}
                     onChange={e => setLlmPrompt(e.target.value)}
                     rows={3}
-                    placeholder="Leave blank to use the server default shown above."
+                    placeholder="e.g. IT asset catalog: prioritize model/SKU alignment; treat status field as weak signal…"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
                   <div className="mt-3">
