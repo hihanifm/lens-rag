@@ -2550,7 +2550,9 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           const pipelineBadges = []
           if (run.vector_enabled !== false) pipelineBadges.push('Vector')
           if (run.reranker_enabled) pipelineBadges.push('Rerank')
-          if (run.llm_judge_enabled) pipelineBadges.push('LLM judge')
+          if (run.llm_judge_enabled) {
+            pipelineBadges.push(`LLM judge${run.llm_judge_model ? ': ' + run.llm_judge_model : ''}`)
+          }
 
           const listRunMetrics = parseRunStatusPayload(run.status_message)?.metrics
           const listUnparsed =
