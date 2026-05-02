@@ -638,6 +638,8 @@ Your job:
 - Score EACH candidate against the reference independently for human review — not final truth.
 - Use telecom domain knowledge only to judge intent and coverage (procedures, layers, signals, parameters named in the text). Do not hallucinate spec clauses not supported by the given text.
 - Matching is often imperfect; reviewers may merge or split rows later.
+- Do not force an exact match: wording, structure, or formatting differences must not dominate the score when the candidate still helps a reviewer relate equivalent or partially overlapping telecom test cases.
+- Treat scores as a usefulness ranking for that reviewer — how helpful each candidate is for mapping decisions across sides (including partial overlap); relative ordering among candidates matters more than a binary same-vs-different verdict.
 
 Per-candidate scores (each 0.0–1.0), aligned with candidate index order:
 - 0.90–1.00 = Strong match: same intent, scope, and main checks; wording/format differences are OK.
