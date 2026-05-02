@@ -277,6 +277,22 @@ export const getCompareConfigStats = (jobId) =>
 export const getCompareLlmJudgeDefaults = () =>
   api.get('compare/llm-judge-defaults').then(r => r.data)
 
+/** Global LLM judge domain-overlay presets (Compare runs). List is id + name only. */
+export const listPromptTemplates = () =>
+  api.get('compare/prompt-templates').then(r => r.data)
+
+export const getPromptTemplate = (templateId) =>
+  api.get(`compare/prompt-templates/${templateId}`).then(r => r.data)
+
+export const createPromptTemplate = (body) =>
+  api.post('compare/prompt-templates', body).then(r => r.data)
+
+export const updatePromptTemplate = (templateId, body) =>
+  api.patch(`compare/prompt-templates/${templateId}`, body).then(r => r.data)
+
+export const deletePromptTemplate = (templateId) =>
+  api.delete(`compare/prompt-templates/${templateId}`).then(r => r.data)
+
 // ── Compare Runs ──────────────────────────────────────────────────────────
 
 export const createRun = (jobId, data) =>

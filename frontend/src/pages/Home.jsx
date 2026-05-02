@@ -294,7 +294,13 @@ export default function Home() {
                 form; the system matches meaning, not just exact keywords!
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <Link
+                to="/prompts"
+                className="border border-blue-200 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-500 transition-colors"
+              >
+                Prompts
+              </Link>
               <Link
                 to="/system"
                 className="border border-blue-200 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-500 transition-colors"

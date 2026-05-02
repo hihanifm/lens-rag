@@ -11,6 +11,7 @@ import Cluster from './pages/Cluster'
 import System from './pages/System'
 import CreateCompareJob from './pages/CreateCompareJob'
 import CompareJob from './pages/CompareJob'
+import PromptPresets from './pages/PromptPresets'
 import Layout from './components/Layout'
 import { ProjectStateProvider } from './contexts/ProjectStateContext'
 
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/projects/:projectId/cluster" element={<Cluster />} />
             <Route path="/system" element={<System />} />
             <Route path="/history" element={<History />} />
+            <Route path="/prompts" element={<PromptPresets />} />
             <Route path="/compare/new" element={<CreateCompareJob />} />
             <Route path="/compare/:jobId" element={<CompareJob />} />
           </Routes>

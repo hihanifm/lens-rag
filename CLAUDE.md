@@ -24,7 +24,12 @@ Before writing any code or plan, Claude MUST:
 2. Wait for the user to respond
 3. Only proceed to coding after the user confirms you have enough context
 
-While planning an implementation (drafting or refining the approach, trade-offs, or steps before coding), **read and apply the `karpathy-guidelines` skill** — surface hidden assumptions, prefer the smallest viable change, and define success criteria you can verify.
+While planning an implementation (drafting or refining the approach, trade-offs, or steps before coding):
+
+1. **KISS** — default to the smallest change that satisfies the request (fewest files, no new layers, no “nice to have” scope creep). Escalate complexity only when the minimal approach is clearly insufficient.
+2. **`karpathy-guidelines` skill** — read and apply it when available: state assumptions, surface trade-offs, avoid speculative abstractions, define verifiable success criteria.
+
+Planning should explicitly reconcile **KISS + karpathy** (simple plan, honest assumptions, checkable outcomes). Do not produce plans that add APIs, tables, or UI chrome “for symmetry” unless the user asked or the minimal fix requires it.
 
 Do NOT jump straight into code. Always converse first.
 

@@ -53,6 +53,9 @@ export default function BottomBar() {
       </div>
 
         <div className="flex items-center gap-4">
+        <Link to="/prompts" className="hover:text-gray-700 transition-colors">
+          Prompts
+        </Link>
         <Link to="/history" className="hover:text-gray-700 transition-colors">
           History
         </Link>

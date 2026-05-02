@@ -193,6 +193,30 @@ def init_db():
         cur.execute(
             "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS notes TEXT;"
         )
+        cur.execute(
+            "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_prompt_preset_tag TEXT;"
+        )
+
+        # Global LLM judge domain-overlay presets (Compare runs — reusable named prompts).
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.compare_llm_prompt_templates (
+                id          SERIAL PRIMARY KEY,
+                name        TEXT NOT NULL,
+                body        TEXT NOT NULL,
+                version     INTEGER NOT NULL DEFAULT 1,
+                created_at  TIMESTAMP DEFAULT NOW(),
+                updated_at  TIMESTAMP DEFAULT NOW()
+            );
+        """)
+        cur.execute(
+            "ALTER TABLE public.compare_llm_prompt_templates ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;"
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS compare_llm_prompt_templates_name_uq
+                ON public.compare_llm_prompt_templates (name);
+            """
+        )
 
 
 def create_compare_schema(job_id: int, dims: int):

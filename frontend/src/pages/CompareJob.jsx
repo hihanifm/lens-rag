@@ -20,6 +20,9 @@ import {
   fetchModels,
   getRun,
   getCompareLlmJudgeDefaults,
+  listPromptTemplates,
+  getPromptTemplate,
+  createPromptTemplate,
   API_BASE_URL,
 } from '../api/client'
 
@@ -147,6 +150,9 @@ function RunStatsPane({ job, run }) {
     ['LLM judge', fmtBool(run.llm_judge_enabled)],
     ['LLM model', run.llm_judge_model || '—'],
     ['LLM endpoint', run.llm_judge_url || '—'],
+    ...(run.llm_judge_enabled && run.llm_judge_prompt_preset_tag?.trim()
+      ? [['Judge preset tag', run.llm_judge_prompt_preset_tag]]
+      : []),
     ...(run.llm_judge_enabled
       ? [[
           'LLM max req/min',
@@ -1397,6 +1403,7 @@ function ConfigStatsTab({ job }) {
 // ── New Run Modal ──────────────────────────────────────────────────────────
 
 function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
+  const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [topK, setTopK] = useState(3)
   const [vectorEnabled, setVectorEnabled] = useState(true)
@@ -1418,6 +1425,14 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
   const [llmMaxRpm, setLlmMaxRpm] = useState('')
   const [runNotes, setRunNotes] = useState('')
+  /** When set, run submit can attach llm_judge_prompt_preset_tag if textarea still matches body. */
+  const [loadedPresetRef, setLoadedPresetRef] = useState(null)
+
+  const { data: promptTemplates = [], isLoading: promptTemplatesLoading } = useQuery({
+    queryKey: ['compare-prompt-templates'],
+    queryFn: listPromptTemplates,
+    enabled: llmEnabled,
+  })
 
   useEffect(() => {
     if (!initialRun) return
@@ -1444,6 +1459,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
     setLlmModelOptions([])
     setLlmModelsError('')
     setRunNotes(initialRun.notes?.trim() ? initialRun.notes : '')
+    setLoadedPresetRef(null)
   }, [initialRun])
 
   useEffect(() => {
@@ -1547,6 +1563,16 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
       const topKResolved =
         typeof topK === 'number' ? Math.max(1, Math.min(topKMax, topK)) : 1
 
+      const promptText = llmEnabled && llmPrompt.trim() ? llmPrompt.trim() : null
+      let presetTag = null
+      if (
+        promptText &&
+        loadedPresetRef &&
+        promptText === loadedPresetRef.body.trim()
+      ) {
+        presetTag = `${loadedPresetRef.name}-v${loadedPresetRef.version}`.slice(0, 240)
+      }
+
       const data = {
         name: name.trim() || null,
         notes: runNotes.trim() || null,
@@ -1559,7 +1585,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
         llm_judge_enabled: llmEnabled,
         llm_judge_url: llmEnabled && llmUrl.trim() ? llmUrl.trim() : null,
         llm_judge_model: llmEnabled && llmModel.trim() ? llmModel.trim() : null,
-        llm_judge_prompt: llmEnabled && llmPrompt.trim() ? llmPrompt.trim() : null,
+        llm_judge_prompt: promptText,
+        llm_judge_prompt_preset_tag: presetTag,
         llm_judge_max_requests_per_minute: llmEnabled ? llmRpmPayload : null,
       }
       const run = await onCreated(data)
@@ -1891,6 +1918,77 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                     Describe only <strong className="text-gray-700">your domain</strong> (what rows mean, what to weight). Scoring bands, input-shape rules, and JSON output are{' '}
                     <strong className="text-gray-700">fixed server-side</strong> for the parser — do not paste them here.
                   </p>
+                  <div className="flex flex-wrap items-end gap-2 mb-2">
+                    <div className="flex-1 min-w-[160px]">
+                      <label className="block text-[11px] font-medium text-gray-600 mb-1">Load preset</label>
+                      <select
+                        defaultValue=""
+                        key={promptTemplatesLoading ? 'loading' : `${(promptTemplates || []).length}`}
+                        onChange={async (e) => {
+                          const raw = e.target.value
+                          if (!raw) return
+                          e.target.value = ''
+                          try {
+                            const t = await getPromptTemplate(parseInt(raw, 10))
+                            setLlmPrompt(t.body)
+                            setLoadedPresetRef({
+                              name: t.name,
+                              version: t.version ?? 1,
+                              body: t.body,
+                            })
+                            setError('')
+                          } catch (err) {
+                            setError(err?.response?.data?.detail || err.message || 'Could not load preset')
+                          }
+                        }}
+                        disabled={promptTemplatesLoading}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300 disabled:opacity-50"
+                      >
+                        <option value="">
+                          {promptTemplatesLoading
+                            ? 'Loading presets…'
+                            : (promptTemplates || []).length
+                              ? '— Load preset… —'
+                              : 'No saved presets'}
+                        </option>
+                        {(promptTemplates || []).map((t) => (
+                          <option key={t.id} value={String(t.id)}>
+                            {t.name} (v{t.version ?? 1})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const presetName = window.prompt('Name for this preset')
+                        if (!presetName?.trim()) return
+                        if (!llmPrompt.trim()) {
+                          window.alert('Enter domain guidance text before saving as a preset.')
+                          return
+                        }
+                        setError('')
+                        try {
+                          await createPromptTemplate({
+                            name: presetName.trim(),
+                            body: llmPrompt.trim(),
+                          })
+                          queryClient.invalidateQueries({ queryKey: ['compare-prompt-templates'] })
+                        } catch (err) {
+                          setError(
+                            typeof err?.response?.data?.detail === 'string'
+                              ? err.response.data.detail
+                              : err?.response?.data?.detail?.[0]?.msg ||
+                                  err.message ||
+                                  'Could not save preset',
+                          )
+                        }
+                      }}
+                      className="shrink-0 border border-purple-200 text-purple-800 bg-purple-50/80 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-purple-100 transition-colors"
+                    >
+                      Save current as preset
+                    </button>
+                  </div>
                   <textarea
                     value={llmPrompt}
                     onChange={e => setLlmPrompt(e.target.value)}
@@ -2265,17 +2363,26 @@ function EditableRunTitle({ jobId, run, onUpdated, titleClass = 'font-semibold t
     )
   }
 
+  const tag = run.llm_judge_prompt_preset_tag?.trim()
+
   return (
-    <span className={`inline-flex items-center gap-1 min-w-0 max-w-full ${titleClass}`}>
-      <span className="truncate">{run.name || `Run #${run.id}`}</span>
-      <button
-        type="button"
-        onClick={startEdit}
-        className="shrink-0 text-gray-400 hover:text-blue-600 p-0.5 rounded"
-        title="Rename run"
-      >
-        ✎
-      </button>
+    <span className={`inline-flex flex-col items-start gap-0 min-w-0 max-w-full ${titleClass}`}>
+      <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
+        <span className="truncate">{run.name || `Run #${run.id}`}</span>
+        <button
+          type="button"
+          onClick={startEdit}
+          className="shrink-0 text-gray-400 hover:text-blue-600 p-0.5 rounded"
+          title="Rename run"
+        >
+          ✎
+        </button>
+      </span>
+      {tag ? (
+        <span className="text-[10px] text-gray-400 font-normal truncate max-w-full" title={tag}>
+          {tag}
+        </span>
+      ) : null}
     </span>
   )
 }

@@ -281,6 +281,8 @@ class CompareRunCreate(BaseModel):
     llm_judge_url: Optional[str] = None
     llm_judge_model: Optional[str] = None
     llm_judge_prompt: Optional[str] = None
+    # Audit-only label when run used a named preset unchanged, e.g. "MyPreset-v3"
+    llm_judge_prompt_preset_tag: Optional[str] = Field(default=None, max_length=240)
     # None = use server env LLM_JUDGE_MAX_REQUESTS_PER_MINUTE; 0 = unlimited; N > 0 = max N calls/min
     llm_judge_max_requests_per_minute: Optional[int] = Field(default=None, ge=0, le=360)
     notes: Optional[str] = None
@@ -310,6 +312,7 @@ class CompareRunResponse(BaseModel):
     llm_judge_url: Optional[str] = None
     llm_judge_model: Optional[str] = None
     llm_judge_prompt: Optional[str] = None
+    llm_judge_prompt_preset_tag: Optional[str] = None
     llm_judge_max_requests_per_minute: Optional[int] = None
     row_count_left: Optional[int] = None
     created_at: datetime
@@ -385,6 +388,35 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     max_tokens: int
     temperature: float
     default_max_requests_per_minute: int
+
+
+class ComparePromptTemplateSummary(BaseModel):
+    """List row — id + name + version (body fetched on demand)."""
+
+    id: int
+    name: str
+    version: int
+
+
+class ComparePromptTemplateResponse(BaseModel):
+    """Full preset including domain overlay body."""
+
+    id: int
+    name: str
+    body: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ComparePromptTemplateCreate(BaseModel):
+    name: str
+    body: str
+
+
+class ComparePromptTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    body: Optional[str] = None
 
 
 class CandidateItem(BaseModel):

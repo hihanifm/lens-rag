@@ -9,6 +9,11 @@ Job-level routes:
   POST /compare/preview-column-values distinct values for a column (filter picker)
   POST /compare/preview-column-samples   first N row(s) per column (column picker; default 1)
   GET  /compare/llm-judge-defaults      built-in judge prompt + fixed_suffix + token settings
+  GET  /compare/prompt-templates       list LLM judge preset names (id + name)
+  GET  /compare/prompt-templates/{id}  full preset body
+  POST /compare/prompt-templates       create preset
+  PATCH /compare/prompt-templates/{id} update preset
+  DELETE /compare/prompt-templates/{id} delete preset
   POST /compare/                      create job (embed only, no pipeline)
   GET  /compare/                      list jobs
   GET  /compare/{job_id}              job detail
@@ -42,6 +47,7 @@ import threading
 import time
 
 import pandas as pd
+import psycopg2
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
@@ -86,6 +92,10 @@ from models import (
     ComparePreviewColumnSamplesResponse,
     ComparePreviewRowStatsRequest,
     ComparePreviewRowStatsResponse,
+    ComparePromptTemplateCreate,
+    ComparePromptTemplateResponse,
+    ComparePromptTemplateSummary,
+    ComparePromptTemplateUpdate,
     CompareRunCreate,
     CompareRunResponse,
     CompareRunUpdate,
@@ -491,6 +501,157 @@ def get_llm_judge_defaults():
     )
 
 
+def _serialize_prompt_template_row(row: dict) -> ComparePromptTemplateResponse:
+    return ComparePromptTemplateResponse(
+        id=row["id"],
+        name=row["name"],
+        body=row["body"],
+        version=int(row.get("version") or 1),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.get("/prompt-templates", response_model=list[ComparePromptTemplateSummary])
+def list_prompt_templates():
+    """Named LLM judge domain overlays (id + name + version); fetch full body via GET …/prompt-templates/{id}."""
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            """
+            SELECT id, name, version FROM public.compare_llm_prompt_templates
+            ORDER BY name ASC
+            """
+        )
+        rows = cur.fetchall()
+    return [
+        ComparePromptTemplateSummary(
+            id=r["id"], name=r["name"], version=int(r.get("version") or 1)
+        )
+        for r in rows
+    ]
+
+
+@router.get("/prompt-templates/{template_id}", response_model=ComparePromptTemplateResponse)
+def get_prompt_template(template_id: int):
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            "SELECT * FROM public.compare_llm_prompt_templates WHERE id = %s",
+            [template_id],
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Prompt template not found")
+    return _serialize_prompt_template_row(dict(row))
+
+
+@router.post("/prompt-templates", response_model=ComparePromptTemplateResponse)
+def create_prompt_template(data: ComparePromptTemplateCreate):
+    name = data.name.strip()
+    body = (data.body or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name cannot be empty")
+    if not body:
+        raise HTTPException(status_code=422, detail="body cannot be empty")
+    try:
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                """
+                INSERT INTO public.compare_llm_prompt_templates (name, body, version)
+                VALUES (%s, %s, 1)
+                RETURNING *
+                """,
+                [name, body],
+            )
+            row = cur.fetchone()
+    except psycopg2.IntegrityError as e:
+        if getattr(e, "pgcode", None) == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail="A preset with this name already exists.",
+            )
+        raise
+    return _serialize_prompt_template_row(dict(row))
+
+
+@router.patch("/prompt-templates/{template_id}", response_model=ComparePromptTemplateResponse)
+def update_prompt_template(template_id: int, data: ComparePromptTemplateUpdate):
+    patch = data.model_dump(exclude_unset=True)
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            "SELECT * FROM public.compare_llm_prompt_templates WHERE id = %s",
+            [template_id],
+        )
+        old_row = cur.fetchone()
+    if not old_row:
+        raise HTTPException(status_code=404, detail="Prompt template not found")
+    old = dict(old_row)
+
+    if not patch:
+        return _serialize_prompt_template_row(old)
+
+    if "name" in patch and patch["name"] is not None:
+        patch["name"] = str(patch["name"]).strip()
+        if not patch["name"]:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+    if "body" in patch and patch["body"] is not None:
+        patch["body"] = str(patch["body"]).strip()
+        if not patch["body"]:
+            raise HTTPException(status_code=422, detail="body cannot be empty")
+
+    bump_version = False
+    if "body" in patch and patch["body"] != old.get("body"):
+        bump_version = True
+
+    sets = []
+    vals = []
+    if "name" in patch:
+        sets.append("name = %s")
+        vals.append(patch["name"])
+    if "body" in patch:
+        sets.append("body = %s")
+        vals.append(patch["body"])
+    if bump_version:
+        sets.append("version = version + 1")
+    sets.append("updated_at = NOW()")
+    vals.append(template_id)
+
+    try:
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                f"""
+                UPDATE public.compare_llm_prompt_templates
+                SET {", ".join(sets)}
+                WHERE id = %s
+                RETURNING *
+                """,
+                vals,
+            )
+            row = cur.fetchone()
+    except psycopg2.IntegrityError as e:
+        if getattr(e, "pgcode", None) == "23505":
+            raise HTTPException(
+                status_code=409,
+                detail="A preset with this name already exists.",
+            )
+        raise
+    if not row:
+        raise HTTPException(status_code=404, detail="Prompt template not found")
+    return _serialize_prompt_template_row(dict(row))
+
+
+@router.delete("/prompt-templates/{template_id}")
+def delete_prompt_template(template_id: int):
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            "DELETE FROM public.compare_llm_prompt_templates WHERE id = %s RETURNING id",
+            [template_id],
+        )
+        deleted = cur.fetchone()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Prompt template not found")
+    return {"ok": True}
+
+
 @router.get("/{job_id}", response_model=CompareJobResponse)
 def get_compare_job(job_id: int):
     return _job_response(job_id)
@@ -608,6 +769,11 @@ def create_run(job_id: int, data: CompareRunCreate):
                 detail="LLM-only runs require llm_judge_url and llm_judge_model.",
             )
 
+    prompt_snap = (data.llm_judge_prompt or "").strip()
+    preset_tag = (data.llm_judge_prompt_preset_tag or "").strip()[:240] or None
+    if not data.llm_judge_enabled or not prompt_snap:
+        preset_tag = None
+
     with get_cursor() as (cur, _conn):
         notes_val = (data.notes or "").strip() or None
         cur.execute("""
@@ -616,8 +782,9 @@ def create_run(job_id: int, data: CompareRunCreate):
                  llm_compare_max_rights,
                  reranker_enabled, reranker_model, reranker_url,
                  llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt,
+                 llm_judge_prompt_preset_tag,
                  llm_judge_max_requests_per_minute, notes)
-            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, [
             job_id,
@@ -632,6 +799,7 @@ def create_run(job_id: int, data: CompareRunCreate):
             data.llm_judge_url or None,
             data.llm_judge_model or None,
             data.llm_judge_prompt or None,
+            preset_tag,
             data.llm_judge_max_requests_per_minute if data.llm_judge_enabled else None,
             notes_val,
         ])
@@ -1382,6 +1550,7 @@ def _serialize_run(row: dict) -> dict:
         "llm_judge_url": row.get("llm_judge_url"),
         "llm_judge_model": row.get("llm_judge_model"),
         "llm_judge_prompt": row.get("llm_judge_prompt"),
+        "llm_judge_prompt_preset_tag": row.get("llm_judge_prompt_preset_tag"),
         "llm_judge_max_requests_per_minute": row.get("llm_judge_max_requests_per_minute"),
         "row_count_left": row.get("row_count_left"),
         "created_at": row["created_at"],
