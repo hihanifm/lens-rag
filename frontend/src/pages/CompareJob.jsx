@@ -2014,6 +2014,7 @@ function RunProgressView({ jobId, runId, onDone, maxLeftRows }) {
         const line = formatLlmJudgeDetailLine(data.detail)
         if (line) {
           setActivityLog(prev => {
+            if (prev.length && prev[prev.length - 1] === line) return prev
             const next = [...prev, line]
             return next.length > 48 ? next.slice(-48) : next
           })
@@ -2550,10 +2551,6 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           const pipelineBadges = []
           if (run.vector_enabled !== false) pipelineBadges.push('Vector')
           if (run.reranker_enabled) pipelineBadges.push('Rerank')
-          if (run.llm_judge_enabled) {
-            pipelineBadges.push(`LLM judge${run.llm_judge_model ? ': ' + run.llm_judge_model : ''}`)
-          }
-
           const listRunMetrics = parseRunStatusPayload(run.status_message)?.metrics
           const listUnparsed =
             listRunMetrics && typeof listRunMetrics === 'object' ? listRunMetrics.llm_judge_unparsed_pairs : undefined
@@ -2569,60 +2566,77 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
               onClick={() => onSelectRun(run)}
               className="bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer p-4"
             >
-              <div className="flex items-center gap-3 flex-wrap min-w-0">
-                <EditableRunTitle
-                  jobId={jobId}
-                  run={run}
-                  onUpdated={(r) => {
-                    refetch()
-                    onRunUpdated?.(r)
-                  }}
-                />
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
-                  {run.status}
-                </span>
-                {pipelineBadges.map(b => (
-                  <span key={b} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{b}</span>
-                ))}
-                <span className="text-xs text-gray-400">K={run.top_k}</span>
-                <span className="flex-1" />
-                <span className="text-xs text-gray-400">{new Date(run.created_at).toLocaleDateString()}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setDuplicateSourceRun(run)
-                    setShowNewRun(true)
-                  }}
-                  disabled={job.status !== 'ready' || deletingId === run.id}
-                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
-                  title="Duplicate settings — open new run with this configuration"
-                >
-                  Dup
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => handleDelete(run.id, e)}
-                  disabled={deletingId === run.id}
-                  className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
-                  title="Delete run"
-                >
-                  {deletingId === run.id ? '…' : '✕'}
-                </button>
+              <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <EditableRunTitle
+                    jobId={jobId}
+                    run={run}
+                    onUpdated={(r) => {
+                      refetch()
+                      onRunUpdated?.(r)
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusColors[run.status] || 'bg-gray-100 text-gray-500'}`}>
+                    {run.status}
+                  </span>
+                  {pipelineBadges.map(b => (
+                    <span key={b} className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full whitespace-nowrap">{b}</span>
+                  ))}
+                  {run.llm_judge_enabled && (
+                    <span
+                      className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full max-w-[7.5rem] sm:max-w-[10rem] truncate min-w-0"
+                      title={run.llm_judge_model ? `LLM judge: ${run.llm_judge_model}` : 'LLM judge'}
+                    >
+                      {run.llm_judge_model ? `LLM: ${run.llm_judge_model}` : 'LLM judge'}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400 whitespace-nowrap">K={run.top_k}</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 ml-auto pl-1">
+                  <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(run.created_at).toLocaleDateString()}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setDuplicateSourceRun(run)
+                      setShowNewRun(true)
+                    }}
+                    disabled={job.status !== 'ready' || deletingId === run.id}
+                    className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
+                    title="Duplicate settings — open new run with this configuration"
+                  >
+                    Dup
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(run.id, e)}
+                    disabled={deletingId === run.id}
+                    className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
+                    title="Delete run"
+                  >
+                    {deletingId === run.id ? '…' : '✕'}
+                  </button>
+                </div>
               </div>
               {run.status === 'error' && run.status_message && (
                 <p className="text-xs text-red-600 mt-2">{run.status_message}</p>
               )}
-              {showLlmUnparsedWarn && (
-                <p
-                  className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2"
-                  title="Candidate pairs where the LLM returned no usable score (empty reply, HTTP error, or JSON/scores not parseable)."
-                >
-                  LLM: {listUnparsed.toLocaleString()} pair score{listUnparsed === 1 ? '' : 's'} missing
-                </p>
-              )}
-              {run.row_count_left != null && (
-                <p className="text-xs text-gray-400 mt-1">{run.row_count_left.toLocaleString()} left rows matched</p>
+              {(run.row_count_left != null || showLlmUnparsedWarn) && (
+                <div className="text-xs mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-400">
+                  {run.row_count_left != null && (
+                    <span>{run.row_count_left.toLocaleString()} left rows matched</span>
+                  )}
+                  {showLlmUnparsedWarn && (
+                    <span
+                      className="text-amber-800 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5"
+                      title="Candidate pairs where the LLM returned no usable score (empty reply, HTTP error, or JSON/scores not parseable)."
+                    >
+                      LLM: {listUnparsed.toLocaleString()} pair score{listUnparsed === 1 ? '' : 's'} missing
+                    </span>
+                  )}
+                </div>
               )}
               {run.notes?.trim() && (
                 <p
