@@ -1385,7 +1385,7 @@ function ConfigStatsTab({ job }) {
 
 // ── New Run Modal ──────────────────────────────────────────────────────────
 
-function NewRunModal({ onClose, onCreated, job }) {
+function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [name, setName] = useState('')
   const [topK, setTopK] = useState(3)
   const [vectorEnabled, setVectorEnabled] = useState(true)
@@ -1406,6 +1406,32 @@ function NewRunModal({ onClose, onCreated, job }) {
   const [llmJudgeDefaults, setLlmJudgeDefaults] = useState(null)
   const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
   const [llmMaxRpm, setLlmMaxRpm] = useState('')
+
+  useEffect(() => {
+    if (!initialRun) return
+    const baseName = initialRun.name?.trim() || `Run #${initialRun.id}`
+    setName(`Copy of ${baseName}`)
+    setTopK(initialRun.top_k ?? 3)
+    setVectorEnabled(initialRun.vector_enabled !== false)
+    setLlmCompareMaxRights(
+      initialRun.llm_compare_max_rights != null ? String(initialRun.llm_compare_max_rights) : '',
+    )
+    setRerankerEnabled(!!initialRun.reranker_enabled)
+    setRerankerModel(initialRun.reranker_model || '')
+    setRerankerUrl(initialRun.reranker_url || '')
+    setLlmEnabled(!!initialRun.llm_judge_enabled)
+    setLlmUrl((initialRun.llm_judge_url || '').trim())
+    setLlmModel((initialRun.llm_judge_model || '').trim())
+    setLlmApiKey('')
+    setLlmPrompt(initialRun.llm_judge_prompt || '')
+    setLlmMaxRpm(
+      initialRun.llm_judge_max_requests_per_minute != null
+        ? String(initialRun.llm_judge_max_requests_per_minute)
+        : '',
+    )
+    setLlmModelOptions([])
+    setLlmModelsError('')
+  }, [initialRun])
 
   useEffect(() => {
     let cancelled = false
@@ -1536,6 +1562,12 @@ function NewRunModal({ onClose, onCreated, job }) {
         <div className="px-6 pt-6 pb-4 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-900">New Run</h2>
           <p className="text-sm text-gray-500 mt-1">Configure the pipeline for this run. Uses embedded data already stored for this job.</p>
+          {initialRun && (
+            <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mt-2">
+              Settings copied from Run #{initialRun.id}
+              {initialRun.name ? ` (${initialRun.name})` : ''}.
+            </p>
+          )}
         </div>
 
         <div className="px-6 py-5 space-y-5">
@@ -2339,6 +2371,7 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
   const jobId = job.id
   const queryClient = useQueryClient()
   const [showNewRun, setShowNewRun] = useState(false)
+  const [duplicateSourceRun, setDuplicateSourceRun] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
 
   const { data: runs = [], isLoading, refetch } = useQuery({
@@ -2357,11 +2390,17 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
       await refetch()
       queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
       setShowNewRun(false)
+      setDuplicateSourceRun(null)
       onSelectRun(run)
       return run
     } catch (e) {
       throw e
     }
+  }
+
+  const closeNewRunModal = () => {
+    setShowNewRun(false)
+    setDuplicateSourceRun(null)
   }
 
   const handleDelete = async (runId, e) => {
@@ -2393,7 +2432,10 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
         </div>
         <button
           type="button"
-          onClick={() => setShowNewRun(true)}
+          onClick={() => {
+            setDuplicateSourceRun(null)
+            setShowNewRun(true)
+          }}
           disabled={job.status !== 'ready'}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors disabled:opacity-40"
         >
@@ -2409,7 +2451,10 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           <p className="text-sm text-gray-400 mt-1">Create a run to start matching.</p>
           <button
             type="button"
-            onClick={() => setShowNewRun(true)}
+            onClick={() => {
+              setDuplicateSourceRun(null)
+              setShowNewRun(true)
+            }}
             className="mt-4 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors"
           >
             + New Run
@@ -2450,6 +2495,19 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
                 <span className="text-xs text-gray-400">{new Date(run.created_at).toLocaleDateString()}</span>
                 <button
                   type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDuplicateSourceRun(run)
+                    setShowNewRun(true)
+                  }}
+                  disabled={job.status !== 'ready' || deletingId === run.id}
+                  className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
+                  title="Duplicate settings — open new run with this configuration"
+                >
+                  Dup
+                </button>
+                <button
+                  type="button"
                   onClick={(e) => handleDelete(run.id, e)}
                   disabled={deletingId === run.id}
                   className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
@@ -2471,8 +2529,10 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
 
       {showNewRun && (
         <NewRunModal
+          key={duplicateSourceRun ? `dup-${duplicateSourceRun.id}` : 'new-run'}
           job={job}
-          onClose={() => setShowNewRun(false)}
+          initialRun={duplicateSourceRun}
+          onClose={closeNewRunModal}
           onCreated={handleCreateRun}
         />
       )}
