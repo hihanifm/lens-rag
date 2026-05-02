@@ -83,6 +83,14 @@ function parseRunStatusPayload(statusMessage) {
   return null
 }
 
+/** Human-readable duration from pipeline `total_ms` (run list). */
+function formatPipelineDurationMs(ms) {
+  if (ms == null || typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return null
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return `${sec}s`
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`
+}
+
 function RunStatsPane({ job, run }) {
   const [expanded, setExpanded] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -2551,9 +2559,13 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           const pipelineBadges = []
           if (run.vector_enabled !== false) pipelineBadges.push('Vector')
           if (run.reranker_enabled) pipelineBadges.push('Rerank')
-          const listRunMetrics = parseRunStatusPayload(run.status_message)?.metrics
+          const listRunPayload = parseRunStatusPayload(run.status_message)
+          const listRunMetrics =
+            listRunPayload?.metrics && typeof listRunPayload.metrics === 'object' ? listRunPayload.metrics : null
           const listUnparsed =
             listRunMetrics && typeof listRunMetrics === 'object' ? listRunMetrics.llm_judge_unparsed_pairs : undefined
+          const pipelineDur =
+            run.status === 'ready' && listRunMetrics ? formatPipelineDurationMs(listRunMetrics.total_ms) : null
           const showLlmUnparsedWarn =
             run.status === 'ready' &&
             run.llm_judge_enabled &&
@@ -2595,7 +2607,17 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
                   <span className="text-xs text-gray-400 whitespace-nowrap">K={run.top_k}</span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 ml-auto pl-1">
-                  <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(run.created_at).toLocaleDateString()}</span>
+                  <span
+                    className="text-xs text-gray-400 whitespace-nowrap"
+                    title={
+                      run.completed_at
+                        ? `Created ${new Date(run.created_at).toLocaleString()} · Finished ${new Date(run.completed_at).toLocaleString()}`
+                        : `Created ${new Date(run.created_at).toLocaleString()}`
+                    }
+                  >
+                    {new Date(run.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                    {pipelineDur ? ` · ${pipelineDur}` : ''}
+                  </span>
                   <button
                     type="button"
                     onClick={(e) => {
