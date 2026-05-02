@@ -11,6 +11,8 @@ from config import (
     PGVECTOR_MAX_INDEXED_DIMS,
 )
 
+from prompt_seeds import PROMPT_TEMPLATE_SEEDS
+
 
 def embedding_dimension_exceeded_message(model_dims: int | None = None) -> str:
     """
@@ -216,6 +218,25 @@ def init_db():
             CREATE UNIQUE INDEX IF NOT EXISTS compare_llm_prompt_templates_name_uq
                 ON public.compare_llm_prompt_templates (name);
             """
+        )
+
+        _seed_prompt_templates(cur)
+
+
+def _seed_prompt_templates(cur):
+    """Insert starter presets once per DB name (idempotent)."""
+    for row in PROMPT_TEMPLATE_SEEDS:
+        name = row["name"]
+        body = row["body"]
+        cur.execute(
+            """
+            INSERT INTO public.compare_llm_prompt_templates (name, body, version)
+            SELECT %s, %s, 1
+            WHERE NOT EXISTS (
+                SELECT 1 FROM public.compare_llm_prompt_templates WHERE name = %s
+            )
+            """,
+            [name, body, name],
         )
 
 

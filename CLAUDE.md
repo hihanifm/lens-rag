@@ -31,6 +31,8 @@ While planning an implementation (drafting or refining the approach, trade-offs,
 
 Planning should explicitly reconcile **KISS + karpathy** (simple plan, honest assumptions, checkable outcomes). Do not produce plans that add APIs, tables, or UI chrome “for symmetry” unless the user asked or the minimal fix requires it.
 
+When you deliver a **written implementation plan** (steps, files, trade-offs), include an explicit **Planning discipline** note: state whether **KISS** was applied to scope the work (yes/no; if no, one line why a larger scope was required), and whether the **`karpathy-guidelines`** skill was **read and applied** (yes/no; if the skill was unavailable, say so). Do not omit this—readers should see at a glance whether those principles governed the plan.
+
 3. **Version** — If the agreed plan is **reasonably big** (e.g. new surface area across backend + frontend, migrations, multiple routes or screens—not a one-file tweak), **ask the user** whether to bump the **minor** version before coding. If yes, update `backend/main.py` (`FastAPI(..., version=...)`) and `frontend/package.json` / matching root entries in `frontend/package-lock.json` in the same release habit as the rest of the repo.
 
 Do NOT jump straight into code. Always converse first.

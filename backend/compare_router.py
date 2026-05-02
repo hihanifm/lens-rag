@@ -1,6 +1,10 @@
 """
 compare_router.py — FastAPI routes for the Compare project flavor.
 
+Preset templates (`/compare/prompt-templates`) use shared DB rows (optional starters may be
+seeded at init); canonical Compare LLM judge text when a run has no custom prompt is still
+defined in code (`comparator`), not by seeded rows.
+
 Job-level routes:
   POST /compare/preview-left          upload left file → columns + tmp_path
   POST /compare/preview-right         upload right file → columns + tmp_path
