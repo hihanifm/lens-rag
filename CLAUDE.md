@@ -10,6 +10,7 @@ A generic, on-premise RAG search portal for any Excel-based knowledge base.
 Not a chatbot. Not a reasoning engine. Just smart search — fast and accurate.
 
 Two project flavors:
+
 - **Search** — upload one Excel, embed it, query it with vector + BM25 + RRF + reranker (topic mode); optional legacy single-step retrieval; ID mode when an ID column is set.
 - **Compare** — upload two Excels (Left and Right), create a **job** whose schema holds embedded **records** only. **Phase 1** (`GET /compare/{job_id}/ingest`): embed both sides. **Phase 2**: create one or more **runs** under the job; each run stores `top_k` plus toggles for vector similarity, reranker, and optional **LLM judge** scoring, then `GET .../execute` runs the pipeline into per-run `matches` / `decisions` tables. Human review and Excel export are **per run** (`/compare/{job_id}/runs/{run_id}/...`).
 
@@ -23,13 +24,25 @@ Before writing any code or plan, Claude MUST:
 2. Wait for the user to respond
 3. Only proceed to coding after the user confirms you have enough context
 
+While planning an implementation (drafting or refining the approach, trade-offs, or steps before coding), **read and apply the `karpathy-guidelines` skill** — surface hidden assumptions, prefer the smallest viable change, and define success criteria you can verify.
+
 Do NOT jump straight into code. Always converse first.
 
 ---
 
 ## Best Practices
 
-See [BEST_PRACTICES.md](BEST_PRACTICES.md) for coding conventions covering React, FastAPI, Git, and general rules.
+**General coding rules** (Claude + developer — always apply):
+
+- **KISS** — if a simpler approach exists, take it; add complexity only when the simpler path provably fails
+- **No external API calls** — zero data leaves the network; no OpenAI, no cloud services
+- **No LLM in the query path** — search returns results, nothing more
+- **Config in one place** — `config.py` for backend, `client.js` for frontend API base
+- **No speculative abstractions** — solve the real problem in front of you; three similar lines beat a premature helper
+- **No comments explaining what code does** — only add a comment when the why is non-obvious (a workaround, a hidden constraint, a subtle invariant)
+- **No cleanup beyond the task** — a bug fix does not need surrounding refactoring; keep diffs small and reviewable
+
+Stack-specific detail (React, FastAPI, Git, workflow): [BEST_PRACTICES.md](BEST_PRACTICES.md).
 
 ---
 
@@ -133,7 +146,7 @@ EMBEDDING_PROVIDER=openai OPENAI_API_KEY=sk-... EMBEDDING_DIMS=1536 RERANKER_ENA
 
 Or set in a local `.env` file (never commit it).
 
-Candidate pool sizes for Search (`TOP_K_RETRIEVAL`, `TOP_K_DEFAULT`, `TOP_K_MAX`) and related limits live as constants in `config.py` (not all exposed as env vars). Compare **`top_k`** is stored per **run** in `public.compare_runs`; `COMPARE_TOP_K` / thresholds still apply to defaults and UI coloring.
+Candidate pool sizes for Search (`TOP_K_RETRIEVAL`, `TOP_K_DEFAULT`, `TOP_K_MAX`) and related limits live as constants in `config.py` (not all exposed as env vars). Compare `**top_k**` is stored per **run** in `public.compare_runs`; `COMPARE_TOP_K` / thresholds still apply to defaults and UI coloring.
 
 ---
 
@@ -189,9 +202,9 @@ CREATE INDEX ON project_{id}.records USING gin  (search_vector);
 
 ### Compare flavor — `public.compare_jobs` + `public.compare_runs` + per-job schema
 
-- **`public.compare_jobs`** — job metadata, column mapping, optional per-job `embed_url` / `embed_api_key` / `embed_model` / `embed_dims`, optional `notes`. Legacy `top_k` / `rerank_*` columns may exist for migrated rows; new jobs store pipeline settings on **runs**.
-- **`public.compare_runs`** — one row per pipeline execution: `top_k`, `vector_enabled`, `reranker_*`, `llm_judge_*`, `status`, timestamps.
-- **Schema `compare_{job_id}`** — shared **`records`** table (left + right embeddings only). Per-run tables: **`run_{run_id}_matches`** (candidates + `cosine_score`, `rerank_score`, `llm_score`, `final_score`, `rank`) and **`run_{run_id}_decisions`** (`left_id` PK, `matched_right_id` nullable for explicit no-match).
+- `**public.compare_jobs**` — job metadata, column mapping, optional per-job `embed_url` / `embed_api_key` / `embed_model` / `embed_dims`, optional `notes`. Legacy `top_k` / `rerank_*` columns may exist for migrated rows; new jobs store pipeline settings on **runs**.
+- `**public.compare_runs`** — one row per pipeline execution: `top_k`, `vector_enabled`, `reranker_*`, `llm_judge_*`, `status`, timestamps.
+- **Schema `compare_{job_id}`** — shared `**records**` table (left + right embeddings only). Per-run tables: `**run_{run_id}_matches**` (candidates + `cosine_score`, `rerank_score`, `llm_score`, `final_score`, `rank`) and `**run_{run_id}_decisions**` (`left_id` PK, `matched_right_id` nullable for explicit no-match).
 
 ```sql
 -- Per-job schema compare_{id} — embeddings only
@@ -321,58 +334,62 @@ SSE progress: `compare_router.py` uses `_job_ingest_progress[job_id]` for Phase 
 
 ### Search routes
 
-| Method | Path                                    | Description                                                      |
-| ------ | --------------------------------------- | ---------------------------------------------------------------- |
-| GET    | `/projects`                             | List all projects                                                |
-| GET    | `/projects/{id}`                        | Get project detail (includes `has_pin`, never returns raw `pin`) |
-| POST   | `/projects`                             | Create project metadata                                          |
-| PATCH  | `/projects/{id}`                        | Update name / display_columns / default_k / `rerank_enabled` / `rerank_model` (no re-ingest) |
-| DELETE | `/projects/{id}`                        | Delete project + schema                                          |
-| GET    | `/projects/{id}/columns`                | All original column names for the project schema                 |
-| GET    | `/projects/{id}/ingest?tmp_path=...`  | SSE ingestion stream                                             |
-| GET    | `/projects/{id}/search/stream`          | Streaming search SSE (query params; topic / id / legacy)         |
-| POST   | `/projects/{id}/search`                 | Non-streaming search                                             |
-| POST   | `/projects/{id}/export`                 | Search + return Excel download                                   |
-| GET    | `/projects/{id}/browse`                 | First 10 raw records (SELECT * LIMIT 10)                         |
-| POST   | `/projects/{id}/evaluate`               | SSE RAGAS export stream                                          |
-| POST   | `/projects/{id}/cluster`                | SSE cluster stream (KMeans/DBSCAN over embeddings)               |
-| POST   | `/projects/{id}/cluster/export`         | Same clustering as POST cluster, returns Excel download          |
-| GET    | `/projects/{id}/column-values`          | Distinct values for a column (cluster filter picker; max 100)    |
-| GET    | `/projects/{id}/system-config`          | Read-only retrieval stack summary (PIN if project locked)        |
-| POST   | `/projects/{id}/verify-pin`             | Body `{ "pin": "..." }` → `{ "ok": true }` or 401                 |
-| POST   | `/projects/preview`                     | Multipart Excel → columns, sheet_names, row_count, tmp_path        |
-| GET    | `/models?url=...&api_key=...`           | Proxy `/v1/models` from an OpenAI-compatible endpoint            |
-| POST   | `/embedding/verify`                     | Probe embed with optional URL/key/model (Create flow)            |
-| POST   | `/rerank/verify`                        | Probe reranker model (returns strategy)                          |
-| GET    | `/system-config`                        | Global live system config (no PIN)                             |
-| GET    | `/health`                               | Liveness + API `version`                                         |
+
+| Method | Path                                 | Description                                                                                  |
+| ------ | ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| GET    | `/projects`                          | List all projects                                                                            |
+| GET    | `/projects/{id}`                     | Get project detail (includes `has_pin`, never returns raw `pin`)                             |
+| POST   | `/projects`                          | Create project metadata                                                                      |
+| PATCH  | `/projects/{id}`                     | Update name / display_columns / default_k / `rerank_enabled` / `rerank_model` (no re-ingest) |
+| DELETE | `/projects/{id}`                     | Delete project + schema                                                                      |
+| GET    | `/projects/{id}/columns`             | All original column names for the project schema                                             |
+| GET    | `/projects/{id}/ingest?tmp_path=...` | SSE ingestion stream                                                                         |
+| GET    | `/projects/{id}/search/stream`       | Streaming search SSE (query params; topic / id / legacy)                                     |
+| POST   | `/projects/{id}/search`              | Non-streaming search                                                                         |
+| POST   | `/projects/{id}/export`              | Search + return Excel download                                                               |
+| GET    | `/projects/{id}/browse`              | First 10 raw records (SELECT * LIMIT 10)                                                     |
+| POST   | `/projects/{id}/evaluate`            | SSE RAGAS export stream                                                                      |
+| POST   | `/projects/{id}/cluster`             | SSE cluster stream (KMeans/DBSCAN over embeddings)                                           |
+| POST   | `/projects/{id}/cluster/export`      | Same clustering as POST cluster, returns Excel download                                      |
+| GET    | `/projects/{id}/column-values`       | Distinct values for a column (cluster filter picker; max 100)                                |
+| GET    | `/projects/{id}/system-config`       | Read-only retrieval stack summary (PIN if project locked)                                    |
+| POST   | `/projects/{id}/verify-pin`          | Body `{ "pin": "..." }` → `{ "ok": true }` or 401                                            |
+| POST   | `/projects/preview`                  | Multipart Excel → columns, sheet_names, row_count, tmp_path                                  |
+| GET    | `/models?url=...&api_key=...`        | Proxy `/v1/models` from an OpenAI-compatible endpoint                                        |
+| POST   | `/embedding/verify`                  | Probe embed with optional URL/key/model (Create flow)                                        |
+| POST   | `/rerank/verify`                     | Probe reranker model (returns strategy)                                                      |
+| GET    | `/system-config`                     | Global live system config (no PIN)                                                           |
+| GET    | `/health`                            | Liveness + API `version`                                                                     |
+
 
 ### Compare routes (registered at `/compare` prefix via `compare_router.py`)
 
 See module docstring in `compare_router.py` for the full list. Summary:
 
-| Method | Path | Description |
-| ------ | ---- | ----------- |
-| POST | `/compare/preview-left` / `preview-right` | Multipart upload → columns, sheet_names, row_count, tmp_path |
-| POST | `/compare/preview-context` | `{ tmp_path, match_columns, n }` → sample merged strings (server splits match_columns into context vs content heuristically for preview) |
-| POST | `/compare/` | Create job + schema (embed settings only; no pipeline yet) |
-| GET | `/compare/` | List jobs |
-| GET | `/compare/{job_id}` | Job detail (secrets / tmp paths stripped) |
-| PATCH | `/compare/{job_id}` | Update `name` / `notes` |
-| DELETE | `/compare/{job_id}` | Drop job schema + job + all runs |
-| GET | `/compare/{job_id}/ingest` | SSE Phase 1 — embed left + right into `records` |
-| POST | `/compare/{job_id}/runs` | Create run (`top_k`, vector / reranker / llm_judge flags + URLs/models) |
-| GET | `/compare/{job_id}/runs` | List runs |
-| GET | `/compare/{job_id}/runs/{run_id}` | Run detail |
-| DELETE | `/compare/{job_id}/runs/{run_id}` | Drop run tables + row |
-| GET | `/compare/{job_id}/runs/{run_id}/execute` | SSE Phase 2 — populate `run_{run_id}_matches` |
-| GET | `/compare/{job_id}/runs/{run_id}/review` | `{ total_left, reviewed, pending, no_match, matched }` |
-| GET | `/compare/{job_id}/runs/{run_id}/review/next` | Next `ReviewItem` (same query params as before; **run-scoped**) |
-| POST | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `{ matched_right_id }` (null = no match) |
-| GET | `/compare/{job_id}/runs/{run_id}/export` | Excel download; `type=raw` or `type=confirmed` (per run) |
-| GET | `/compare/{job_id}/browse` | Paginated raw `records` (optional `side=left\|right`) |
-| GET | `/compare/{job_id}/runs/{run_id}/browse-raw` | Slice of match pairs + scores for UI |
-| GET | `/compare/{job_id}/config-stats` | Job config + stats blob for UI / debugging |
+
+| Method | Path                                               | Description                                                                                                                              |
+| ------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/compare/preview-left` / `preview-right`          | Multipart upload → columns, sheet_names, row_count, tmp_path                                                                             |
+| POST   | `/compare/preview-context`                         | `{ tmp_path, match_columns, n }` → sample merged strings (server splits match_columns into context vs content heuristically for preview) |
+| POST   | `/compare/`                                        | Create job + schema (embed settings only; no pipeline yet)                                                                               |
+| GET    | `/compare/`                                        | List jobs                                                                                                                                |
+| GET    | `/compare/{job_id}`                                | Job detail (secrets / tmp paths stripped)                                                                                                |
+| PATCH  | `/compare/{job_id}`                                | Update `name` / `notes`                                                                                                                  |
+| DELETE | `/compare/{job_id}`                                | Drop job schema + job + all runs                                                                                                         |
+| GET    | `/compare/{job_id}/ingest`                         | SSE Phase 1 — embed left + right into `records`                                                                                          |
+| POST   | `/compare/{job_id}/runs`                           | Create run (`top_k`, vector / reranker / llm_judge flags + URLs/models)                                                                  |
+| GET    | `/compare/{job_id}/runs`                           | List runs                                                                                                                                |
+| GET    | `/compare/{job_id}/runs/{run_id}`                  | Run detail                                                                                                                               |
+| DELETE | `/compare/{job_id}/runs/{run_id}`                  | Drop run tables + row                                                                                                                    |
+| GET    | `/compare/{job_id}/runs/{run_id}/execute`          | SSE Phase 2 — populate `run_{run_id}_matches`                                                                                            |
+| GET    | `/compare/{job_id}/runs/{run_id}/review`           | `{ total_left, reviewed, pending, no_match, matched }`                                                                                   |
+| GET    | `/compare/{job_id}/runs/{run_id}/review/next`      | Next `ReviewItem` (same query params as before; **run-scoped**)                                                                          |
+| POST   | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `{ matched_right_id }` (null = no match)                                                                     |
+| GET    | `/compare/{job_id}/runs/{run_id}/export`           | Excel download; `type=raw` or `type=confirmed` (per run)                                                                                 |
+| GET    | `/compare/{job_id}/browse`                         | Paginated raw `records` (optional `side=left|right`)                                                                                     |
+| GET    | `/compare/{job_id}/runs/{run_id}/browse-raw`       | Slice of match pairs + scores for UI                                                                                                     |
+| GET    | `/compare/{job_id}/config-stats`                   | Job config + stats blob for UI / debugging                                                                                               |
+
 
 **Export details** (`export?type=` on a **run**):
 
@@ -384,7 +401,7 @@ See module docstring in `compare_router.py` for the full list. Summary:
 Projects can optionally be created with a PIN (`public.projects.pin`, stored as plain text).
 
 - **If a PIN is set**, these require header `X-Project-Pin: <pin>` (401 otherwise): `PATCH /projects/{id}`, `DELETE /projects/{id}`, `GET /projects/{id}/columns`, `GET /projects/{id}/browse`, `GET /projects/{id}/search/stream`, `POST /projects/{id}/search`, `POST /projects/{id}/export`, `POST /projects/{id}/cluster`, `POST /projects/{id}/cluster/export`, `GET /projects/{id}/column-values`, `GET /projects/{id}/system-config`, `POST /projects/{id}/evaluate`.
-- **`GET /projects/{id}/ingest`** is not PIN-gated (used right after create with a fresh `tmp_path`); treat project URLs accordingly.
+- `**GET /projects/{id}/ingest`** is not PIN-gated (used right after create with a fresh `tmp_path`); treat project URLs accordingly.
 - `POST /projects/{id}/verify-pin` checks the PIN in the JSON body (no `X-Project-Pin` required on that route).
 - Compare Jobs have no PIN in v1.
 
@@ -395,6 +412,7 @@ Projects can optionally be created with a PIN (`public.projects.pin`, stored as 
 Projects can override the system-level embedding model. Embedding URL / key / model / dims are fixed at **project create** (ingestion uses those fields).
 
 **Flow:**
+
 1. User provides `embed_url` + optional `embed_api_key` in the Connection step
 2. Frontend calls `GET /models?url=...` — backend proxies `/v1/models` and returns model IDs
 3. `POST /embedding/verify` can validate the endpoint before submit
@@ -413,6 +431,7 @@ Projects can override the system-level embedding model. Embedding URL / key / mo
 `frontend/src/contexts/ProjectStateContext.jsx` persists search and eval state per project across the tab bar.
 
 Key points:
+
 - `startSearch` / `startEval` live in the context, not in page components — lets eval SSE keep running even when `EvaluateProject` is unmounted.
 - Streaming search uses `fetch` + `ReadableStream` (not `EventSource`) so the PIN header can be sent; `EventSource` does not support custom headers.
 - Each project gets its own search/eval slice keyed by `projectId`.
@@ -431,13 +450,15 @@ Utility in `frontend/src/utils/history.js`: `saveSearch()`, `saveEval()`, `loadH
 
 Pattern: `{name-slug}_lens_{descriptor}_{YYYY-MM-DD}.ext`
 
-| Export                    | Filename                                       |
-| ------------------------- | ---------------------------------------------- |
-| Search → Excel            | `{project-name}_lens_results_{date}.xlsx`      |
-| Evaluate → RAGAS JSON     | `{project-name}_lens_ragas_{date}.json`        |
-| History → CSV             | `lens_history_{date}.csv`                      |
-| Compare raw export        | `{job-name}_lens_compare_raw_{date}.xlsx`      |
-| Compare confirmed export  | `{job-name}_lens_compare_confirmed_{date}.xlsx`|
+
+| Export                   | Filename                                        |
+| ------------------------ | ----------------------------------------------- |
+| Search → Excel           | `{project-name}_lens_results_{date}.xlsx`       |
+| Evaluate → RAGAS JSON    | `{project-name}_lens_ragas_{date}.json`         |
+| History → CSV            | `lens_history_{date}.csv`                       |
+| Compare raw export       | `{job-name}_lens_compare_raw_{date}.xlsx`       |
+| Compare confirmed export | `{job-name}_lens_compare_confirmed_{date}.xlsx` |
+
 
 ---
 
@@ -617,6 +638,7 @@ python scripts/your_script.py
 
 1. `make prod-up` — builds frontend under `/lens-rag/` base path, starts prod stack on port 37000.
 2. Caddy config:
+
 ```caddy
 your.server {
     handle /lens-rag/* {
@@ -627,6 +649,7 @@ your.server {
 ```
 
 ### Common Makefile targets
+
 
 | Command               | What it does                                                  |
 | --------------------- | ------------------------------------------------------------- |
@@ -649,6 +672,7 @@ your.server {
 | `make e2e-up`         | Start dev stack + build, then run Playwright suite            |
 | `make e2e`            | Run Playwright tests (stack must already be up)               |
 | `make e2e-down`       | Tear down stack after tests                                   |
+
 
 ### E2E Tests (Playwright)
 
@@ -687,3 +711,4 @@ Sample Excel files used by tests live in `backend/samples/`.
 - Compare vector stage is left→right nearest-neighbor over the shared `records` table (`side` filter)
 - `records` in compare job schemas holds both sides with a `side` column — single HNSW index per job
 - On-premise default: bge-m3 + bge-reranker-base via Ollama on host GPU; OpenAI embedding path is opt-in for development only
+
