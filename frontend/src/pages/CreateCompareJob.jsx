@@ -1416,6 +1416,9 @@ export default function CreateCompareJob() {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="w-[90%] mx-auto py-12">
+          <button onClick={() => navigate('/')} className="text-sm text-gray-400 hover:text-gray-600 mb-8 block">
+            ← Back to home
+          </button>
           <ProgressView
             jobId={createdJobId}
             onDone={(id) => navigate(`/compare/${id}`)}
@@ -1431,6 +1434,10 @@ export default function CreateCompareJob() {
     <div className="min-h-screen bg-gray-50">
       <div className="w-[90%] mx-auto py-12">
         <div className={`w-full ${step === 6 ? 'max-w-none' : 'max-w-lg'}`}>
+
+          <button onClick={() => navigate('/')} className="text-sm text-gray-400 hover:text-gray-600 mb-8 block">
+            ← Back to home
+          </button>
 
           {/* Step progress dots */}
           <div className="flex items-center gap-2 mb-8">
