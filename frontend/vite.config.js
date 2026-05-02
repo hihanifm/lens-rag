@@ -35,7 +35,8 @@ export default defineConfig({
             url.startsWith('/src/') ||
             url.startsWith('/node_modules/') ||
             url.startsWith('/assets/') ||
-            url === '/favicon.ico'
+            url === '/favicon.ico' ||
+            url === '/favicon.svg'
           ) return url
         },
       },
