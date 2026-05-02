@@ -2521,6 +2521,13 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
         <div>
           <p className="text-sm text-gray-600">Each run is an independent pipeline over the same embedded data.</p>
           <p className="text-xs text-gray-400 mt-0.5">Click a run to review and export its results.</p>
+          <p className="text-xs text-gray-500 mt-1.5">
+            Vector embedding:{' '}
+            <span className="font-medium text-gray-700">
+              {(job.embed_model && String(job.embed_model).trim()) ? String(job.embed_model).trim() : 'system default'}
+              {job.embed_dims != null ? ` · ${job.embed_dims}-dim` : ''}
+            </span>
+          </p>
         </div>
         <button
           type="button"

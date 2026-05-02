@@ -264,6 +264,7 @@ class CompareJobResponse(BaseModel):
     row_count_right: Optional[int] = None
     embed_url: Optional[str] = None
     embed_model: Optional[str] = None
+    embed_dims: Optional[int] = None
     created_at: datetime
 
 

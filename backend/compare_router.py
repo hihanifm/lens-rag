@@ -1359,6 +1359,7 @@ def _serialize_job(row: dict) -> dict:
         "row_count_right": row.get("row_count_right"),
         "embed_url": row.get("embed_url"),
         "embed_model": row.get("embed_model"),
+        "embed_dims": row.get("embed_dims"),
         "created_at": row["created_at"],
     }
 
