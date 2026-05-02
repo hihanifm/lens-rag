@@ -703,10 +703,13 @@ def _parse_llm_judge_scores_batch(text: str, n: int) -> list[float | None]:
 
         arr = data.get("scores")
         if not isinstance(arr, list):
+            raw_full = text or ""
             logger.warning(
-                'LLM judge JSON missing "scores" array (n=%d) | prefix=%r',
+                'LLM judge JSON missing "scores" array (n=%d) | stripped_prefix=%r | raw_len=%d | raw_repr=%s',
                 n,
                 _strip_json_fence(text)[:400],
+                len(raw_full),
+                repr(raw_full[:4000]) + ("…(truncated)" if len(raw_full) > 4000 else ""),
             )
             return [None] * n
 
@@ -726,11 +729,14 @@ def _parse_llm_judge_scores_batch(text: str, n: int) -> list[float | None]:
             rp = _strip_json_fence(text)[:400]
         except Exception:
             rp = (text or "")[:400]
+        raw_full = text or ""
         logger.warning(
-            "LLM judge JSON parse failed (expect scores length %d): %s | prefix=%r",
+            "LLM judge JSON parse failed (expect scores length %d): %s | stripped_prefix=%r | raw_len=%d | raw_repr=%s",
             n,
             ex,
             rp,
+            len(raw_full),
+            repr(raw_full[:4000]) + ("…(truncated)" if len(raw_full) > 4000 else ""),
         )
         return [None] * n
 
@@ -872,7 +878,20 @@ def iter_run_llm_judge(
                 temperature=LLM_JUDGE_TEMPERATURE,
             )
             detail["http_status"] = _openai_completion_http_status(resp)
-            text = (resp.choices[0].message.content or "").strip()
+            choice0 = resp.choices[0]
+            text = (choice0.message.content or "").strip()
+            if not text:
+                msg_dump = None
+                try:
+                    msg_dump = choice0.message.model_dump() if hasattr(choice0.message, "model_dump") else None
+                except Exception:
+                    msg_dump = {"repr": repr(choice0.message)}
+                logger.warning(
+                    "LLM judge empty assistant content left_id=%d finish_reason=%s message_dump=%s",
+                    left_id,
+                    getattr(choice0, "finish_reason", None),
+                    json.dumps(msg_dump, default=str)[:2500] if msg_dump is not None else "—",
+                )
             llm_scores = _parse_llm_judge_scores_batch(text, len(pairs))
             detail["response_chars"] = len(text)
             detail["response_preview"] = _one_line_preview(text, 360)
