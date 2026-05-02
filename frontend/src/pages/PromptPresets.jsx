@@ -9,6 +9,25 @@ import {
   deletePromptTemplate,
 } from '../api/client'
 
+/** FastAPI often returns `detail` as string or list of { msg, ... }; never pass raw objects to React children. */
+function formatApiDetail(detail) {
+  if (detail == null || detail === '') return null
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((x) => (typeof x === 'object' && x != null && 'msg' in x ? x.msg : JSON.stringify(x)))
+      .join(' — ')
+  }
+  if (typeof detail === 'object') return JSON.stringify(detail)
+  return String(detail)
+}
+
+function formatAxiosError(err, fallback) {
+  const d = formatApiDetail(err?.response?.data?.detail)
+  if (d) return d
+  return err?.message || fallback
+}
+
 export default function PromptPresets() {
   const queryClient = useQueryClient()
   const { data: rows = [], isLoading, isError, error } = useQuery({
@@ -39,7 +58,7 @@ export default function PromptPresets() {
       setEditBody(t.body)
       setEditMeta({ version: t.version, updated_at: t.updated_at })
     } catch (e) {
-      setFormError(e?.response?.data?.detail || e.message || 'Could not load preset')
+      setFormError(formatAxiosError(e, 'Could not load preset'))
     } finally {
       setBusy(false)
     }
@@ -65,8 +84,7 @@ export default function PromptPresets() {
       await invalidate()
       cancelEdit()
     } catch (e) {
-      const d = e?.response?.data?.detail
-      setFormError(typeof d === 'string' ? d : e.message || 'Could not save')
+      setFormError(formatAxiosError(e, 'Could not save'))
     } finally {
       setBusy(false)
     }
@@ -88,8 +106,7 @@ export default function PromptPresets() {
       setCreating(false)
       await invalidate()
     } catch (e) {
-      const d = e?.response?.data?.detail
-      setFormError(typeof d === 'string' ? d : e.message || 'Could not create')
+      setFormError(formatAxiosError(e, 'Could not create'))
     } finally {
       setBusy(false)
     }
@@ -104,7 +121,7 @@ export default function PromptPresets() {
       if (editingId === id) cancelEdit()
       await invalidate()
     } catch (e) {
-      setFormError(e?.response?.data?.detail || e.message || 'Could not delete')
+      setFormError(formatAxiosError(e, 'Could not delete'))
     } finally {
       setBusy(false)
     }
@@ -195,9 +212,15 @@ export default function PromptPresets() {
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Saved presets</h2>
           {isLoading && <p className="text-gray-400 text-sm">Loading…</p>}
           {isError && (
-            <p className="text-red-600 text-sm">
-              {error?.response?.data?.detail || error?.message || 'Failed to load presets'}
-            </p>
+            <div className="text-red-600 text-sm space-y-1">
+              <p>{formatAxiosError(error, 'Failed to load presets')}</p>
+              {error?.response?.status === 422 && (
+                <p className="text-xs text-gray-600">
+                  If this is a fresh preset setup, rebuild and restart the API container so{' '}
+                  <code className="font-mono bg-red-50 px-1 rounded">/compare/prompt-templates</code> is registered.
+                </p>
+              )}
+            </div>
           )}
           {!isLoading && !isError && rows.length === 0 && !creating && (
             <p className="text-gray-500 text-sm">No presets yet. Create one above or from a Compare job run.</p>
