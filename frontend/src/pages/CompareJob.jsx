@@ -121,6 +121,9 @@ function RunStatsPane({ job, run }) {
     ['Rerank pairs', 'rerank_pairs'],
     ['LLM judge pairs', 'llm_judge_pairs'],
     ['LLM chat calls (left batches)', 'llm_judge_requests'],
+    ...(run.llm_judge_enabled && typeof metrics?.llm_judge_unparsed_pairs === 'number'
+      ? [['LLM judge pairs without score', 'llm_judge_unparsed_pairs']]
+      : []),
     ['Match rows inserted', 'matches_inserted'],
   ]
 
@@ -1406,6 +1409,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [llmJudgeDefaults, setLlmJudgeDefaults] = useState(null)
   const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
   const [llmMaxRpm, setLlmMaxRpm] = useState('')
+  const [runNotes, setRunNotes] = useState('')
 
   useEffect(() => {
     if (!initialRun) return
@@ -1431,6 +1435,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
     )
     setLlmModelOptions([])
     setLlmModelsError('')
+    setRunNotes(initialRun.notes?.trim() ? initialRun.notes : '')
   }, [initialRun])
 
   useEffect(() => {
@@ -1536,6 +1541,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
 
       const data = {
         name: name.trim() || null,
+        notes: runNotes.trim() || null,
         top_k: topKResolved,
         vector_enabled: vectorEnabled,
         llm_compare_max_rights: vectorEnabled ? null : rightsPayload,
@@ -1580,6 +1586,17 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
               onChange={e => setName(e.target.value)}
               placeholder="e.g. with reranker v2"
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Comment <span className="text-gray-400 font-normal">(optional)</span></label>
+            <textarea
+              value={runNotes}
+              onChange={(e) => setRunNotes(e.target.value)}
+              rows={2}
+              placeholder="Notes for this run — shown in the runs list"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y min-h-[2.5rem]"
             />
           </div>
 
@@ -2125,6 +2142,60 @@ function RunProgressView({ jobId, runId, onDone, maxLeftRows }) {
   )
 }
 
+// ── Run comment (notes) — edit on detail; shown on list ────────────────────
+
+function RunNotesEditor({ jobId, run, onUpdated }) {
+  const [draft, setDraft] = useState(() => run.notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setDraft(run.notes ?? '')
+    setError('')
+  }, [run.id, run.notes])
+
+  const save = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const trimmed = draft.trim()
+      const updated = await updateRun(jobId, run.id, { notes: trimmed || null })
+      onUpdated(updated)
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message || 'Could not save comment')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const unchanged = (draft.trim() || '') === (run.notes?.trim() || '')
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2" onClick={(e) => e.stopPropagation()}>
+      <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wide">Run comment</label>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={3}
+        placeholder="Optional note — appears on the runs list for your team"
+        disabled={saving}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y min-h-[4rem]"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || unchanged}
+          className="text-sm font-medium px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? 'Saving…' : 'Save comment'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
 // ── Editable run title (list + detail) ────────────────────────────────────
 
 function EditableRunTitle({ jobId, run, onUpdated, titleClass = 'font-semibold text-gray-900 text-sm' }) {
@@ -2262,6 +2333,15 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
         ))}
         <span className="text-xs text-gray-400 ml-auto">K={run.top_k}</span>
       </div>
+
+      <RunNotesEditor
+        jobId={job.id}
+        run={run}
+        onUpdated={(r) => {
+          onRunUpdated(r)
+          queryClient.invalidateQueries({ queryKey: ['compare-runs', job.id] })
+        }}
+      />
 
       {showStartGate && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 space-y-3">
@@ -2469,6 +2549,15 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           if (run.reranker_enabled) pipelineBadges.push('Rerank')
           if (run.llm_judge_enabled) pipelineBadges.push('LLM judge')
 
+          const listRunMetrics = parseRunStatusPayload(run.status_message)?.metrics
+          const listUnparsed =
+            listRunMetrics && typeof listRunMetrics === 'object' ? listRunMetrics.llm_judge_unparsed_pairs : undefined
+          const showLlmUnparsedWarn =
+            run.status === 'ready' &&
+            run.llm_judge_enabled &&
+            typeof listUnparsed === 'number' &&
+            listUnparsed > 0
+
           return (
             <div
               key={run.id}
@@ -2519,8 +2608,24 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
               {run.status === 'error' && run.status_message && (
                 <p className="text-xs text-red-600 mt-2">{run.status_message}</p>
               )}
+              {showLlmUnparsedWarn && (
+                <p
+                  className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2"
+                  title="Candidate pairs where the LLM returned no usable score (empty reply, HTTP error, or JSON/scores not parseable)."
+                >
+                  LLM: {listUnparsed.toLocaleString()} pair score{listUnparsed === 1 ? '' : 's'} missing
+                </p>
+              )}
               {run.row_count_left != null && (
                 <p className="text-xs text-gray-400 mt-1">{run.row_count_left.toLocaleString()} left rows matched</p>
+              )}
+              {run.notes?.trim() && (
+                <p
+                  className="text-xs text-gray-600 mt-1.5 whitespace-pre-wrap line-clamp-4"
+                  title={run.notes}
+                >
+                  {run.notes.trim()}
+                </p>
               )}
             </div>
           )

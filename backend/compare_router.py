@@ -609,14 +609,15 @@ def create_run(job_id: int, data: CompareRunCreate):
             )
 
     with get_cursor() as (cur, _conn):
+        notes_val = (data.notes or "").strip() or None
         cur.execute("""
             INSERT INTO public.compare_runs
                 (job_id, name, status, top_k, vector_enabled,
                  llm_compare_max_rights,
                  reranker_enabled, reranker_model, reranker_url,
                  llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt,
-                 llm_judge_max_requests_per_minute)
-            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 llm_judge_max_requests_per_minute, notes)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, [
             job_id,
@@ -632,6 +633,7 @@ def create_run(job_id: int, data: CompareRunCreate):
             data.llm_judge_model or None,
             data.llm_judge_prompt or None,
             data.llm_judge_max_requests_per_minute if data.llm_judge_enabled else None,
+            notes_val,
         ])
         run_id = cur.fetchone()["id"]
 
@@ -665,18 +667,25 @@ def patch_run(job_id: int, run_id: int, data: CompareRunUpdate):
     payload = data.model_dump(exclude_unset=True)
     if not payload:
         return _run_response(run_id)
-    if "name" not in payload:
+    sets: list[str] = []
+    vals: list = []
+    if "name" in payload:
+        raw = payload["name"]
+        name_val = None if raw is None else ((raw or "").strip() or None)
+        sets.append("name = %s")
+        vals.append(name_val)
+    if "notes" in payload:
+        raw = payload["notes"]
+        notes_val = None if raw is None else ((raw or "").strip() or None)
+        sets.append("notes = %s")
+        vals.append(notes_val)
+    if not sets:
         return _run_response(run_id)
-    raw = payload["name"]
-    name_val = None if raw is None else ((raw or "").strip() or None)
+    vals.extend([run_id, job_id])
     with get_cursor() as (cur, _conn):
         cur.execute(
-            """
-            UPDATE public.compare_runs
-            SET name = %s
-            WHERE id = %s AND job_id = %s
-            """,
-            [name_val, run_id, job_id],
+            f"UPDATE public.compare_runs SET {', '.join(sets)} WHERE id = %s AND job_id = %s",
+            vals,
         )
     return _run_response(run_id)
 
@@ -1359,6 +1368,7 @@ def _serialize_run(row: dict) -> dict:
         "id": row["id"],
         "job_id": row["job_id"],
         "name": row.get("name"),
+        "notes": row.get("notes"),
         "status": row["status"],
         "status_message": row.get("status_message"),
         "top_k": row["top_k"],

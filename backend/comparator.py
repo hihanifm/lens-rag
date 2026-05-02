@@ -1224,6 +1224,7 @@ def run_pipeline(
             metrics["llm_judge_max_tokens"] = llm_judge_completion_max_tokens(max_grp)
             metrics["llm_judge_temperature"] = LLM_JUDGE_TEMPERATURE
             metrics["llm_judge_max_requests_per_minute"] = rpm_eff
+            metrics["llm_judge_unparsed_pairs"] = sum(1 for t in judged if t[4] is None)
             scored_tuples = [
                 (l, r, c, rs, ls, _final_score_for_ranking(c, rs, ls))
                 for l, r, c, rs, ls in judged

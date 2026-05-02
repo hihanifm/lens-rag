@@ -282,18 +282,21 @@ class CompareRunCreate(BaseModel):
     llm_judge_prompt: Optional[str] = None
     # None = use server env LLM_JUDGE_MAX_REQUESTS_PER_MINUTE; 0 = unlimited; N > 0 = max N calls/min
     llm_judge_max_requests_per_minute: Optional[int] = Field(default=None, ge=0, le=360)
+    notes: Optional[str] = None
 
 
 class CompareRunUpdate(BaseModel):
-    """Rename only — pipeline fields are immutable after create."""
+    """Name and optional notes — pipeline fields are immutable after create."""
 
     name: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class CompareRunResponse(BaseModel):
     id: int
     job_id: int
     name: Optional[str] = None
+    notes: Optional[str] = None
     status: str
     status_message: Optional[str] = None
     top_k: int
