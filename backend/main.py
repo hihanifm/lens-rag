@@ -35,6 +35,7 @@ from db import (
     migrate_legacy_compare_jobs,
     migrate_compare_decisions_review_comment,
     migrate_compare_decisions_review_outcome,
+    migrate_compare_matches_llm_judge_meta,
     validate_pgvector_embedding_dims,
 )
 from models import (
@@ -67,7 +68,7 @@ from evaluate import stream_ragas_export
 from clustering import cluster as do_cluster, stream_cluster
 from compare_router import router as compare_router
 
-app = FastAPI(title="LENS API", version="1.5.0", root_path=ROOT_PATH)
+app = FastAPI(title="LENS API", version="1.6.0", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
 
 app.add_middleware(
@@ -92,6 +93,7 @@ def startup():
     migrate_legacy_compare_jobs()
     migrate_compare_decisions_review_comment()
     migrate_compare_decisions_review_outcome()
+    migrate_compare_matches_llm_judge_meta()
     logger.info("DB initialised")
 
 _SAMPLES_DIR = os.environ.get(

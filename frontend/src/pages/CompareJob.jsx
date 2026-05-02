@@ -427,6 +427,17 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
         className={`text-sm text-gray-700 leading-relaxed overflow-y-auto max-h-48 ${!candidate.display_value ? 'mt-10' : ''}`}
       />
 
+      {llmJudgeEnabled && typeof candidate?.llm_judge_meta?.reason === 'string' && candidate.llm_judge_meta.reason.trim() && (
+        <p
+          className="mt-2 text-xs text-gray-500 italic leading-snug border-t border-gray-100 pt-2"
+          title={candidate.llm_judge_meta.reason}
+        >
+          {candidate.llm_judge_meta.reason.length > 160
+            ? `${candidate.llm_judge_meta.reason.slice(0, 160)}…`
+            : candidate.llm_judge_meta.reason}
+        </p>
+      )}
+
       {(isSaved || isSelected) && (
         <div className={`absolute bottom-3 right-3 text-white text-xs px-2 py-0.5 rounded-full font-medium ${isSaved ? 'bg-emerald-600' : 'bg-blue-600'}`}>
           {isSaved ? '✓ Saved' : '✓ Selected'}

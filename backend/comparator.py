@@ -18,6 +18,7 @@ from collections import defaultdict
 from typing import Generator
 
 from openai import OpenAI
+from psycopg2.extras import Json
 
 from config import (
     COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
@@ -588,7 +589,7 @@ def write_matches(
 ) -> int:
     """
     Per left_id: sort by final_score desc, take top_k, insert into {schema_name}.{table_name}.
-    scored_tuples: (left_id, right_id, cosine_score, rerank_score, llm_score, final_score)
+    scored_tuples: (left_id, right_id, cosine_score, rerank_score, llm_score, llm_judge_meta, final_score)
 
     For LLM Cartesian runs (many candidates per left), raise top_k on the run to persist more rows;
     it caps how many ranked pairs are stored after scoring.
@@ -600,9 +601,14 @@ def write_matches(
 
     rows_to_insert = []
     for left_id, pairs in groups.items():
-        sorted_pairs = sorted(pairs, key=lambda x: x[5], reverse=True)[:top_k]
-        for rank, (lid, right_id, cosine, rerank_score, llm_score, final_score) in enumerate(sorted_pairs, start=1):
-            rows_to_insert.append((lid, right_id, cosine, rerank_score, llm_score, final_score, rank))
+        sorted_pairs = sorted(pairs, key=lambda x: x[6], reverse=True)[:top_k]
+        for rank, (lid, right_id, cosine, rerank_score, llm_score, llm_meta, final_score) in enumerate(
+            sorted_pairs, start=1
+        ):
+            meta_sql = Json(llm_meta) if llm_meta else None
+            rows_to_insert.append(
+                (lid, right_id, cosine, rerank_score, llm_score, meta_sql, final_score, rank)
+            )
 
     n_insert = len(rows_to_insert)
     logger.info("write_matches() table=%s.%s inserting %d rows", schema_name, table_name, n_insert)
@@ -610,8 +616,8 @@ def write_matches(
         cur.executemany(
             f"""
             INSERT INTO {schema_name}.{table_name}
-                (left_id, right_id, cosine_score, rerank_score, llm_score, final_score, rank)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (left_id, right_id, cosine_score, rerank_score, llm_score, llm_judge_meta, final_score, rank)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             rows_to_insert,
         )
@@ -620,7 +626,7 @@ def write_matches(
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
 # Stored `llm_judge_prompt` on a run is a domain overlay only; PREFIX + SUFFIX are always
-# applied so the model sees fixed input-shape + rubric + JSON contract (_parse_llm_judge_scores_batch).
+# applied so the model sees fixed input-shape + rubric + JSON contract (_parse_llm_judge_batch).
 
 LLM_JUDGE_PROMPT_PREFIX = """You compare test specifications from two sources (e.g. different clients or baselines).
 
@@ -670,6 +676,8 @@ def effective_llm_judge_system_prompt(domain_overlay: str | None) -> str:
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
 LLM_JUDGE_MAX_TOKENS = 512
 LLM_JUDGE_TEMPERATURE = 0.0
+# Cap string values in llm_judge_meta (reason etc.) when persisting JSONB.
+LLM_JUDGE_META_VALUE_STR_CAP = 2000
 
 
 def llm_judge_completion_max_tokens(num_candidates: int) -> int:
@@ -687,45 +695,121 @@ def _strip_json_fence(text: str) -> str:
     return raw.strip()
 
 
-def _parse_llm_judge_scores_batch(text: str, n: int) -> list[float | None]:
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _meta_from_extra_keys(obj: dict) -> dict | None:
+    """Extra keys from an object-shaped slot (excluding score). Primitives only."""
+    out: dict = {}
+    for k, v in obj.items():
+        if k == "score":
+            continue
+        if isinstance(v, str):
+            s = v
+            if len(s) > LLM_JUDGE_META_VALUE_STR_CAP:
+                s = s[: LLM_JUDGE_META_VALUE_STR_CAP] + "…"
+            out[str(k)] = s
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[str(k)] = v
+    return out if out else None
+
+
+def _parse_llm_judge_slot(el) -> tuple[float | None, dict | None]:
+    """One candidate slot: float, or dict with numeric score plus optional metadata."""
+    if el is None:
+        return None, None
+    if isinstance(el, bool):
+        return None, None
+    if isinstance(el, (int, float)):
+        try:
+            return _clamp01(float(el)), None
+        except (TypeError, ValueError):
+            return None, None
+    if isinstance(el, dict):
+        raw_sc = el.get("score")
+        if not isinstance(raw_sc, (int, float)):
+            return None, None
+        try:
+            sc = _clamp01(float(raw_sc))
+        except (TypeError, ValueError):
+            return None, None
+        meta = _meta_from_extra_keys(el)
+        return sc, meta
+    return None, None
+
+
+def _parse_llm_judge_batch(text: str, n: int) -> tuple[list[float | None], list[dict | None]]:
     """
-    Expect {"scores": [float, ...]} of length n, or {"score": float} when n==1.
-    Returns None per slot when JSON is invalid, truncated, or a value cannot be parsed —
-    honest "no score" (stored NULL), not a numeric fake.
+    Parse judge JSON into per-candidate scores and optional metadata dicts.
+
+    Accepts:
+    - {"scores": [float | object, ...]} (legacy floats or objects with score + extras)
+    - [ {...}, ... ] root array of length n (e.g. score + reason per candidate)
+    - {"score": float, ...} when n==1
+
+    Returns parallel lists; unparsed slots are (None, None).
     """
     if n <= 0:
-        return []
+        return [], []
 
     try:
         raw = _strip_json_fence(text)
         data = json.loads(raw)
-        if n == 1 and "scores" not in data and isinstance(data.get("score"), (int, float)):
-            v = max(0.0, min(1.0, float(data["score"])))
-            return [v]
 
-        arr = data.get("scores")
-        if not isinstance(arr, list):
-            raw_full = text or ""
-            logger.warning(
-                'LLM judge JSON missing "scores" array (n=%d) | stripped_prefix=%r | raw_len=%d | raw_repr=%s',
-                n,
-                _strip_json_fence(text)[:400],
-                len(raw_full),
-                repr(raw_full[:4000]) + ("…(truncated)" if len(raw_full) > 4000 else ""),
-            )
-            return [None] * n
+        if isinstance(data, list):
+            if len(data) != n:
+                raw_full = text or ""
+                logger.warning(
+                    "LLM judge JSON root array length %d != n=%d | stripped_prefix=%r | raw_len=%d",
+                    len(data),
+                    n,
+                    raw[:400],
+                    len(raw_full),
+                )
+                return [None] * n, [None] * n
+            scores: list[float | None] = []
+            metas: list[dict | None] = []
+            for el in data:
+                s, m = _parse_llm_judge_slot(el)
+                scores.append(s)
+                metas.append(m)
+            return scores, metas
 
-        out: list[float | None] = []
-        for i in range(n):
-            if i < len(arr):
+        if isinstance(data, dict):
+            if n == 1 and "scores" not in data and isinstance(data.get("score"), (int, float)):
                 try:
-                    v = float(arr[i])
-                    out.append(max(0.0, min(1.0, v)))
+                    v = _clamp01(float(data["score"]))
                 except (TypeError, ValueError):
-                    out.append(None)
-            else:
-                out.append(None)
-        return out
+                    return [None], [None]
+                meta = _meta_from_extra_keys(data)
+                return [v], [meta]
+
+            arr = data.get("scores")
+            if not isinstance(arr, list):
+                raw_full = text or ""
+                logger.warning(
+                    'LLM judge JSON missing "scores" array (n=%d) | stripped_prefix=%r | raw_len=%d | raw_repr=%s',
+                    n,
+                    raw[:400],
+                    len(raw_full),
+                    repr(raw_full[:4000]) + ("…(truncated)" if len(raw_full) > 4000 else ""),
+                )
+                return [None] * n, [None] * n
+
+            out_s: list[float | None] = []
+            out_m: list[dict | None] = []
+            for i in range(n):
+                if i < len(arr):
+                    s, m = _parse_llm_judge_slot(arr[i])
+                    out_s.append(s)
+                    out_m.append(m)
+                else:
+                    out_s.append(None)
+                    out_m.append(None)
+            return out_s, out_m
+
+        return [None] * n, [None] * n
     except Exception as ex:
         try:
             rp = _strip_json_fence(text)[:400]
@@ -740,7 +824,7 @@ def _parse_llm_judge_scores_batch(text: str, n: int) -> list[float | None]:
             len(raw_full),
             repr(raw_full[:4000]) + ("…(truncated)" if len(raw_full) > 4000 else ""),
         )
-        return [None] * n
+        return [None] * n, [None] * n
 
 
 def effective_llm_judge_max_rpm(run: dict) -> int:
@@ -776,8 +860,9 @@ def iter_run_llm_judge(
     """
     Score (left_id, right_id, cosine, rerank_score) tuples using an LLM judge.
     One chat completion per left row: reference text + all candidate rights for that row.
-    Appends (left_id, right_id, cosine, rerank_score, llm_score) per pair to results_out.
+    Appends (left_id, right_id, cosine, rerank_score, llm_score, llm_judge_meta) per pair to results_out.
     llm_score may be None when the judge response is missing or not parseable (stored as NULL).
+    llm_judge_meta is optional dict (e.g. reason) from extended JSON; None when absent.
 
     max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
 
@@ -894,7 +979,7 @@ def iter_run_llm_judge(
                     getattr(choice0, "finish_reason", None),
                     json.dumps(msg_dump, default=str)[:2500] if msg_dump is not None else "—",
                 )
-            llm_scores = _parse_llm_judge_scores_batch(text, len(pairs))
+            llm_scores, llm_metas = _parse_llm_judge_batch(text, len(pairs))
             detail["response_chars"] = len(text)
             detail["response_preview"] = _one_line_preview(text, 360)
             n_ok = sum(1 for x in llm_scores if x is not None)
@@ -916,12 +1001,13 @@ def iter_run_llm_judge(
                 (text or "")[:400],
             )
             llm_scores = [None] * len(pairs)
+            llm_metas = [None] * len(pairs)
             detail["scores_parsed"] = 0
             detail["scores_total"] = len(pairs)
 
-        for tup, llm_score in zip(pairs, llm_scores):
+        for tup, llm_score, llm_meta in zip(pairs, llm_scores, llm_metas):
             left_i, right_id, cosine, rerank_score = tup
-            results_out.append((left_i, right_id, cosine, rerank_score, llm_score))
+            results_out.append((left_i, right_id, cosine, rerank_score, llm_score, llm_meta))
 
         pairs_done += len(pairs)
         pct = round(100 * (bi + 1) / total_batches) if total_batches else 100
@@ -1228,8 +1314,8 @@ def run_pipeline(
             metrics["llm_judge_max_requests_per_minute"] = rpm_eff
             metrics["llm_judge_unparsed_pairs"] = sum(1 for t in judged if t[4] is None)
             scored_tuples = [
-                (l, r, c, rs, ls, _final_score_for_ranking(c, rs, ls))
-                for l, r, c, rs, ls in judged
+                (l, r, c, rs, ls, lm, _final_score_for_ranking(c, rs, ls))
+                for l, r, c, rs, ls, lm in judged
             ]
         else:
             if not use_vector:
@@ -1237,7 +1323,7 @@ def run_pipeline(
                 _set_run_status("error", "LLM judge required for LLM-only compare")
                 return
             scored_tuples = [
-                (l, r, c, rs, None, float(rs) if rs is not None else float(c))
+                (l, r, c, rs, None, None, float(rs) if rs is not None else float(c))
                 for l, r, c, rs in pairs_with_rerank
             ]
 

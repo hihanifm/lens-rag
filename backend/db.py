@@ -294,6 +294,7 @@ def create_run_tables(schema_name: str, run_id: int):
                 cosine_score    FLOAT,
                 rerank_score    FLOAT,
                 llm_score       FLOAT,
+                llm_judge_meta  JSONB,
                 final_score     FLOAT NOT NULL DEFAULT 0,
                 rank            INTEGER NOT NULL
             );
@@ -355,6 +356,23 @@ def migrate_compare_decisions_review_outcome():
             )
 
 
+def migrate_compare_matches_llm_judge_meta():
+    """Add llm_judge_meta (JSONB) to existing per-run matches tables."""
+    with get_cursor() as (cur, _conn):
+        cur.execute("""
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema ~ '^compare_[0-9]+$'
+              AND table_name ~ '^run_[0-9]+_matches$'
+        """)
+        for row in cur.fetchall():
+            schema = row["table_schema"]
+            table = row["table_name"]
+            cur.execute(
+                f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS llm_judge_meta JSONB;'
+            )
+
+
 def migrate_legacy_compare_jobs():
     """
     One-time migration: jobs that were created before the Runs feature was added
@@ -413,6 +431,7 @@ def migrate_legacy_compare_jobs():
 
             # Add new score columns if missing
             cur.execute(f"ALTER TABLE {schema}.run_{run_id}_matches ADD COLUMN IF NOT EXISTS llm_score FLOAT;")
+            cur.execute(f"ALTER TABLE {schema}.run_{run_id}_matches ADD COLUMN IF NOT EXISTS llm_judge_meta JSONB;")
             cur.execute(f"ALTER TABLE {schema}.run_{run_id}_matches ADD COLUMN IF NOT EXISTS final_score FLOAT;")
             cur.execute(f"""
                 UPDATE {schema}.run_{run_id}_matches

@@ -146,6 +146,28 @@ def _filters_to_dicts(filters: list[CompareRowFilter] | None) -> list[dict]:
     return out
 
 
+def _coerce_llm_judge_meta(v) -> dict | None:
+    """Normalize JSONB / string from Postgres into a dict for API models."""
+    if v is None:
+        return None
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return None
+    return None
+
+
+def _llm_judge_meta_for_excel_cell(meta) -> str:
+    if meta is None:
+        return ""
+    if isinstance(meta, dict):
+        return json.dumps(meta, ensure_ascii=False)
+    return str(meta)
+
+
 _REVIEW_TEXT_CONTAINS_MAX_LEN = 500
 
 
@@ -1061,6 +1083,7 @@ def browse_compare_raw(job_id: int, run_id: int, limit: int = 50, left_row: int 
                 m.cosine_score         AS cosine_score,
                 m.rerank_score         AS rerank_score,
                 m.llm_score            AS llm_score,
+                m.llm_judge_meta       AS llm_judge_meta,
                 m.final_score          AS final_score
             FROM {schema}.{match_table} m
             JOIN {schema}.records lr ON lr.id = m.left_id
@@ -1235,7 +1258,7 @@ def next_review_item(
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            SELECT m.right_id, m.cosine_score, m.rerank_score, m.llm_score, m.final_score, m.rank,
+            SELECT m.right_id, m.cosine_score, m.rerank_score, m.llm_score, m.llm_judge_meta, m.final_score, m.rank,
                    r.contextual_content, r.display_value
             FROM {schema}.{match_table} m
             JOIN {schema}.records r ON r.id = m.right_id
@@ -1254,6 +1277,7 @@ def next_review_item(
             cosine_score=float(mr["cosine_score"] or 0),
             rerank_score=float(mr["rerank_score"]) if mr["rerank_score"] is not None else None,
             llm_score=float(mr["llm_score"]) if mr["llm_score"] is not None else None,
+            llm_judge_meta=_coerce_llm_judge_meta(mr.get("llm_judge_meta")),
             final_score=float(mr["final_score"] or 0),
             rank=mr["rank"],
         )
@@ -1359,6 +1383,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     m.cosine_score,
                     m.rerank_score,
                     m.llm_score,
+                    m.llm_judge_meta,
                     m.final_score,
                     CASE COALESCE(d.review_outcome, '')
                         WHEN 'no_match' THEN 'no match'
@@ -1375,6 +1400,9 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                 """,
             )
             rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if "llm_judge_meta" in r:
+                r["llm_judge_meta"] = _llm_judge_meta_for_excel_cell(r.get("llm_judge_meta"))
 
         df = pd.DataFrame(rows) if rows else pd.DataFrame()
         if not df.empty:
@@ -1382,7 +1410,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                 f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                 "Rank",
                 f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
-                "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                "Cosine Score", "Rerank Score", "LLM Score", "LLM Meta (JSON)", "Final Score",
                 "Review Outcome",
                 "Review Comment",
             ]
@@ -1408,6 +1436,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         m.cosine_score,
                         m.rerank_score,
                         m.llm_score,
+                        m.llm_judge_meta,
                         m.final_score,
                         CASE COALESCE(d.review_outcome, '')
                             WHEN 'no_match' THEN 'no match'
@@ -1427,13 +1456,16 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     """,
                 )
                 confirmed_rows = [dict(r) for r in cur.fetchall()]
+            for r in confirmed_rows:
+                if "llm_judge_meta" in r:
+                    r["llm_judge_meta"] = _llm_judge_meta_for_excel_cell(r.get("llm_judge_meta"))
 
             df_confirmed = pd.DataFrame(confirmed_rows) if confirmed_rows else pd.DataFrame()
             if not df_confirmed.empty:
                 df_confirmed.columns = [
                     f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
-                    "Cosine Score", "Rerank Score", "LLM Score", "Final Score",
+                    "Cosine Score", "Rerank Score", "LLM Score", "LLM Meta (JSON)", "Final Score",
                     "Review Outcome",
                     "Review Comment", "Decided At",
                 ]

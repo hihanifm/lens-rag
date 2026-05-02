@@ -426,6 +426,7 @@ class CandidateItem(BaseModel):
     cosine_score: float
     rerank_score: Optional[float] = None
     llm_score: Optional[float] = None
+    llm_judge_meta: Optional[Dict[str, Any]] = None
     final_score: Optional[float] = None
     rank: int
 
