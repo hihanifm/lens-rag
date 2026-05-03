@@ -115,7 +115,7 @@ from models import (
 
 logger = logging.getLogger("lens.compare_router")
 
-_REVIEW_OUTCOME_VALUES = frozenset({"no_match", "partial", "fail"})
+_REVIEW_OUTCOME_VALUES = frozenset({"no_match", "partial", "fail", "system_fail"})
 router = APIRouter()
 
 # Progress for job-level embedding (Phase 1), keyed by job_id
@@ -1325,7 +1325,10 @@ def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecisio
 
     outcome = data.review_outcome
     if outcome is not None and outcome not in _REVIEW_OUTCOME_VALUES:
-        raise HTTPException(status_code=400, detail="review_outcome must be no_match, partial, or fail")
+        raise HTTPException(
+            status_code=400,
+            detail="review_outcome must be no_match, partial, fail, system_fail, or null",
+        )
 
     mid = data.matched_right_id
     if outcome == "no_match":
@@ -1423,6 +1426,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         WHEN 'no_match' THEN 'no match'
                         WHEN 'partial' THEN 'partial'
                         WHEN 'fail' THEN 'fail'
+                        WHEN 'system_fail' THEN 'system failure'
                         ELSE ''
                     END AS review_outcome_display,
                     COALESCE(d.review_comment, '') AS review_comment
@@ -1476,6 +1480,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                             WHEN 'no_match' THEN 'no match'
                             WHEN 'partial' THEN 'partial'
                             WHEN 'fail' THEN 'fail'
+                            WHEN 'system_fail' THEN 'system failure'
                             ELSE ''
                         END AS review_outcome_display,
                         COALESCE(d.review_comment, '') AS review_comment,
@@ -1517,6 +1522,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                             WHEN d.left_id IS NULL THEN ''
                             WHEN d.review_outcome = 'partial' THEN 'partial'
                             WHEN d.review_outcome = 'fail' THEN 'fail'
+                            WHEN d.review_outcome = 'system_fail' THEN 'system failure'
                             WHEN d.review_outcome = 'no_match' THEN 'no match'
                             WHEN d.matched_right_id IS NULL THEN 'no match'
                             ELSE ''

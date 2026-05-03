@@ -396,7 +396,7 @@ See module docstring in `compare_router.py` for the full list. Summary:
 | GET    | `/compare/{job_id}/runs/{run_id}/execute`          | SSE Phase 2 — populate `run_{run_id}_matches`                                                                                            |
 | GET    | `/compare/{job_id}/runs/{run_id}/review`           | `{ total_left, reviewed, pending, no_match, matched }`                                                                                   |
 | GET    | `/compare/{job_id}/runs/{run_id}/review/next`      | Next `ReviewItem` (same query params as before; **run-scoped**)                                                                          |
-| POST   | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `{ matched_right_id }` (null = no match)                                                                     |
+| POST   | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `matched_right_id`, optional `review_comment`, optional `review_outcome` (`no_match`, `partial`, `fail`, `system_fail`) |
 | GET    | `/compare/{job_id}/runs/{run_id}/export`           | Excel download; `type=raw` or `type=confirmed` (per run)                                                                                 |
 | GET    | `/compare/{job_id}/browse`                         | Paginated raw `records` (optional `side=left|right`)                                                                                     |
 | GET    | `/compare/{job_id}/runs/{run_id}/browse-raw`       | Slice of match pairs + scores for UI                                                                                                     |

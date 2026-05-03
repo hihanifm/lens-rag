@@ -456,10 +456,12 @@ function formatReviewBadge(it) {
   if (hasPick) {
     if (oc === 'partial') return 'Matched · partial'
     if (oc === 'fail') return 'Matched · fail'
+    if (oc === 'system_fail') return 'Matched · system failure'
     return 'Matched'
   }
   if (oc === 'partial') return 'Partial'
   if (oc === 'fail') return 'Fail'
+  if (oc === 'system_fail') return 'System failure'
   if (oc === 'no_match') return 'No match'
   return 'Reviewed'
 }
@@ -469,6 +471,7 @@ const REVIEW_OUTCOME_CHIPS = [
   { value: 'no_match', label: 'No match' },
   { value: 'partial', label: 'Partial' },
   { value: 'fail', label: 'Fail' },
+  { value: 'system_fail', label: 'System failure' },
 ]
 
 const FAIL_OUTCOME_CONFIRM_SKIP_KEY = 'lens_compare_review_fail_confirm_skip'

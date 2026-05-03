@@ -11,6 +11,7 @@ Pipeline is split into two phases:
   2. run_pipeline()    — vector search + optional rerank + optional LLM judge → write per-run matches
 """
 import json
+import json_repair
 import logging
 import re
 import time
@@ -763,6 +764,13 @@ def _strip_json_fence(text: str) -> str:
     return raw.strip()
 
 
+def _loads_llm_judge_json(raw: str):
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return json_repair.loads(raw)
+
+
 def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
@@ -823,7 +831,7 @@ def _parse_llm_judge_batch(text: str, n: int) -> tuple[list[float | None], list[
 
     try:
         raw = _strip_json_fence(text)
-        data = json.loads(raw)
+        data = _loads_llm_judge_json(raw)
 
         if isinstance(data, list):
             raw_full = text or ""

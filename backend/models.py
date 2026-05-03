@@ -437,7 +437,7 @@ class CandidateItem(BaseModel):
     rank: int
 
 
-ReviewOutcome = Optional[Literal["no_match", "partial", "fail"]]
+ReviewOutcome = Optional[Literal["no_match", "partial", "fail", "system_fail"]]
 
 
 class ReviewItem(BaseModel):
@@ -448,7 +448,7 @@ class ReviewItem(BaseModel):
     current_decision: Optional[int] = None   # matched_right_id if already decided, else None
     is_decided: bool
     review_comment: str = ""
-    review_outcome: ReviewOutcome = None   # mutually exclusive quality flag (optional)
+    review_outcome: ReviewOutcome = None   # optional: semantic (no_match/partial/fail) or judge/pipeline (system_fail)
 
 
 class CompareDecision(BaseModel):

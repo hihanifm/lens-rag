@@ -340,7 +340,7 @@ def migrate_compare_decisions_review_comment():
 
 
 def migrate_compare_decisions_review_outcome():
-    """Add review_outcome (no_match | partial | fail) to per-run decisions tables."""
+    """Add review_outcome (no_match | partial | fail | system_fail, …) to per-run decisions tables."""
     with get_cursor() as (cur, _conn):
         cur.execute("""
             SELECT table_schema, table_name

@@ -338,9 +338,13 @@ export const submitRunDecision = (
   api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, {
     matched_right_id: matchedRightId ?? null,
     review_comment: typeof reviewComment === 'string' ? reviewComment : '',
-    review_outcome: reviewOutcome === 'no_match' || reviewOutcome === 'partial' || reviewOutcome === 'fail'
-      ? reviewOutcome
-      : null,
+    review_outcome:
+      reviewOutcome === 'no_match' ||
+      reviewOutcome === 'partial' ||
+      reviewOutcome === 'fail' ||
+      reviewOutcome === 'system_fail'
+        ? reviewOutcome
+        : null,
   }).then(r => r.data)
 
 export const clearRunReviewDecision = (jobId, runId, leftId) =>
