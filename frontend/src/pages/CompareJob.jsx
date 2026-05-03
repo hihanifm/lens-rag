@@ -12,6 +12,7 @@ import {
   getNextRunReviewItem,
   submitRunDecision,
   clearRunReviewDecision,
+  retryRunLlmJudge,
   downloadRunExport,
   browseCompareJob,
   browseRunRaw,
@@ -504,6 +505,8 @@ function ReviewTab({ job, run }) {
   const [outcomeByLeft, setOutcomeByLeft] = useState(() => new Map())
   const [failConfirm, setFailConfirm] = useState(null)
   const [failConfirmDontShowAgain, setFailConfirmDontShowAgain] = useState(false)
+  const [retryingLeftId, setRetryingLeftId] = useState(null)
+  const [retryError, setRetryError] = useState(null)
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['run-review-stats', jobId, runId],
@@ -822,6 +825,12 @@ function ReviewTab({ job, run }) {
         </p>
       </div>
 
+      {retryError && (
+        <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {retryError}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-20 text-gray-400">Loading…</div>
       ) : noMore ? (
@@ -889,6 +898,38 @@ function ReviewTab({ job, run }) {
                   </div>
                   <div className="mt-3 px-1 flex flex-nowrap items-center gap-x-2 overflow-x-auto max-w-full pb-0.5 [-webkit-overflow-scrolling:touch]">
                     <span className="text-xs text-gray-500 font-medium shrink-0">Outcome</span>
+                    {run.llm_judge_enabled && job.status === 'ready' && run.status === 'ready' && it.candidates.length > 0 && (
+                      <button
+                        type="button"
+                        disabled={retryingLeftId !== null || savingLeftId !== null}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setRetryError(null)
+                          setRetryingLeftId(it.left_id)
+                          retryRunLlmJudge(jobId, runId, it.left_id)
+                            .then(async () => {
+                              await refetchStats()
+                              queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+                              await fetchPage(offset)
+                            })
+                            .catch((err) => {
+                              const d = err?.response?.data?.detail
+                              const msg =
+                                typeof d === 'string'
+                                  ? d
+                                  : Array.isArray(d)
+                                    ? d.map((x) => x.msg ?? JSON.stringify(x)).join(' ')
+                                    : err?.message ?? 'Retry failed'
+                              setRetryError(msg)
+                            })
+                            .finally(() => setRetryingLeftId(null))
+                        }}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-900 bg-amber-50 hover:bg-amber-100 shrink-0 disabled:opacity-40"
+                      >
+                        {retryingLeftId === it.left_id ? 'Retrying judge…' : 'Retry judge'}
+                      </button>
+                    )}
                     {REVIEW_OUTCOME_CHIPS.map(({ value, label }) => {
                       const curOc = outcomeByLeft.get(it.left_id) ?? null
                       const active = value === null ? curOc == null : curOc === value

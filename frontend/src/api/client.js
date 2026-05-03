@@ -346,6 +346,10 @@ export const submitRunDecision = (
 export const clearRunReviewDecision = (jobId, runId, leftId) =>
   api.delete(`compare/${jobId}/runs/${runId}/review/${leftId}`).then(r => r.data)
 
+/** Re-run LLM judge for one left row (uses stored match rows as candidates). */
+export const retryRunLlmJudge = (jobId, runId, leftId) =>
+  api.post(`compare/${jobId}/runs/${runId}/retry-llm-judge/${leftId}`).then(r => r.data)
+
 export const downloadRunExport = async (jobId, runId, type = 'confirmed', jobName = '') => {
   const response = await api.get(`compare/${jobId}/runs/${runId}/export`, {
     params: { type },

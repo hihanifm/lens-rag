@@ -38,6 +38,7 @@ Run-level routes (under /compare/{job_id}/runs):
   GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= left or candidate-right text)
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
   DELETE /compare/{job_id}/runs/{run_id}/review/{left_id} clear decision (back to pending)
+  POST /compare/{job_id}/runs/{run_id}/retry-llm-judge/{left_id}  re-run LLM judge for one left row (stored candidates)
   GET  /compare/{job_id}/runs/{run_id}/export           Excel download
   DELETE /compare/{job_id}/runs/{run_id}                delete run
 """
@@ -59,6 +60,7 @@ from comparator import (
     DEFAULT_LLM_JUDGE_PROMPT,
     LLM_JUDGE_PROMPT_SUFFIX,
     LLM_JUDGE_TEMPERATURE,
+    rerun_llm_judge_for_left,
     run_ingest_job,
     run_pipeline,
 )
@@ -1354,6 +1356,30 @@ def clear_decision(job_id: int, run_id: int, left_id: int):
 
     with get_cursor() as (cur, _conn):
         cur.execute(f"DELETE FROM {schema}.{dec_table} WHERE left_id = %s", [left_id])
+
+
+_RETRY_LLM_JUDGE_ERR = {
+    "JOB_OR_RUN_NOT_FOUND": (404, "Job or run not found."),
+    "JOB_NOT_READY": (400, "Job embeddings are not ready."),
+    "RUN_NOT_READY": (400, "Run must be complete before retrying the judge."),
+    "LLM_JUDGE_DISABLED": (400, "LLM judge is not enabled for this run."),
+    "LLM_JUDGE_NOT_CONFIGURED": (400, "LLM judge URL or model is missing."),
+    "NO_MATCHES_FOR_LEFT": (404, "No stored match rows for this left row — run the pipeline first."),
+}
+
+
+@router.post("/{job_id}/runs/{run_id}/retry-llm-judge/{left_id}")
+def retry_llm_judge_endpoint(job_id: int, run_id: int, left_id: int):
+    """Re-score one left row with the LLM judge using existing candidate rows (no vector/rerank rerun)."""
+    try:
+        return rerun_llm_judge_for_left(job_id, run_id, left_id)
+    except ValueError as e:
+        code = str(e)
+        tup = _RETRY_LLM_JUDGE_ERR.get(code)
+        if tup:
+            raise HTTPException(status_code=tup[0], detail=tup[1])
+        logger.exception("retry_llm_judge unexpected ValueError: %s", code)
+        raise HTTPException(status_code=500, detail="Retry failed.") from e
 
 
 # ── Run export ────────────────────────────────────────────────────────────

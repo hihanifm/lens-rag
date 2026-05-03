@@ -1146,6 +1146,134 @@ def run_llm_judge(
     return out
 
 
+def rerun_llm_judge_for_left(job_id: int, run_id: int, left_id: int) -> dict:
+    """
+    Re-run the LLM judge only for one left row, using rows already in run_{run_id}_matches
+    as fixed candidates (cosine/rerank unchanged). Replaces match rows for that left_id.
+
+    Raises ValueError with a short reason code as the sole message.
+    """
+    with get_cursor() as (cur, _conn):
+        cur.execute("SELECT * FROM public.compare_jobs WHERE id = %s", [job_id])
+        job_row = cur.fetchone()
+        cur.execute(
+            "SELECT * FROM public.compare_runs WHERE id = %s AND job_id = %s",
+            [run_id, job_id],
+        )
+        run_row = cur.fetchone()
+
+    if not job_row or not run_row:
+        raise ValueError("JOB_OR_RUN_NOT_FOUND")
+
+    job = dict(job_row)
+    run = dict(run_row)
+
+    if job.get("status") != "ready":
+        raise ValueError("JOB_NOT_READY")
+    if run.get("status") != "ready":
+        raise ValueError("RUN_NOT_READY")
+    if not run.get("llm_judge_enabled"):
+        raise ValueError("LLM_JUDGE_DISABLED")
+    url = (run.get("llm_judge_url") or "").strip()
+    model = (run.get("llm_judge_model") or "").strip()
+    if not url or not model:
+        raise ValueError("LLM_JUDGE_NOT_CONFIGURED")
+
+    schema_name = job["schema_name"]
+    table_name = f"run_{run_id}_matches"
+    top_k = max(1, int(run.get("top_k") or 1))
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            f"""
+            SELECT right_id, cosine_score, rerank_score, rank
+            FROM {schema_name}.{table_name}
+            WHERE left_id = %s
+            ORDER BY rank ASC
+            """,
+            [left_id],
+        )
+        match_rows = cur.fetchall()
+
+    if not match_rows:
+        raise ValueError("NO_MATCHES_FOR_LEFT")
+
+    def _opt_float(x):
+        if x is None:
+            return None
+        return float(x)
+
+    pairs = []
+    for mr in match_rows:
+        cos = mr["cosine_score"]
+        rr = mr["rerank_score"]
+        pairs.append(
+            (
+                left_id,
+                mr["right_id"],
+                _opt_float(cos) if cos is not None else None,
+                _opt_float(rr) if rr is not None else None,
+            )
+        )
+
+    rpm = effective_llm_judge_max_rpm(run)
+    judged = run_llm_judge(
+        schema_name,
+        pairs,
+        url=url,
+        model=model,
+        prompt=run.get("llm_judge_prompt") or None,
+        max_requests_per_minute=rpm,
+    )
+
+    scored_tuples = [
+        (l, r, c, rs, ls, lm, _final_score_for_ranking(c, rs, ls))
+        for l, r, c, rs, ls, lm in judged
+    ]
+
+    groups: dict[int, list] = defaultdict(list)
+    for row in scored_tuples:
+        groups[row[0]].append(row)
+
+    rows_to_insert = []
+    for _lid_g, plist in groups.items():
+        sorted_pairs = sorted(plist, key=lambda x: x[6], reverse=True)[:top_k]
+        for rank, (lid, right_id, cosine, rerank_score, llm_score, llm_meta, final_score) in enumerate(
+            sorted_pairs, start=1
+        ):
+            meta_sql = Json(llm_meta) if llm_meta else None
+            rows_to_insert.append(
+                (lid, right_id, cosine, rerank_score, llm_score, meta_sql, final_score, rank)
+            )
+
+    with get_cursor() as (cur, _conn):
+        cur.execute(f"DELETE FROM {schema_name}.{table_name} WHERE left_id = %s", [left_id])
+        if rows_to_insert:
+            cur.executemany(
+                f"""
+                INSERT INTO {schema_name}.{table_name}
+                    (left_id, right_id, cosine_score, rerank_score, llm_score, llm_judge_meta, final_score, rank)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                rows_to_insert,
+            )
+
+    n = len(rows_to_insert)
+    logger.info(
+        "rerun_llm_judge_for_left() job_id=%d run_id=%d left_id=%d rows_written=%d",
+        job_id,
+        run_id,
+        left_id,
+        n,
+    )
+    return {
+        "ok": True,
+        "left_id": left_id,
+        "matches_written": n,
+        "llm_judge_pairs": len(pairs),
+    }
+
+
 # ── Job ingest orchestrator (Phase 1 — embed only) ─────────────────────────
 
 def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
