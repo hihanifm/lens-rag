@@ -2784,10 +2784,10 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
                       setShowNewRun(true)
                     }}
                     disabled={job.status !== 'ready' || deletingId === run.id}
-                    className="text-xs text-gray-400 hover:text-blue-600 transition-colors px-1.5 py-0.5 rounded disabled:opacity-40"
+                    className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/70 transition-colors px-2 py-0.5 rounded disabled:opacity-40 whitespace-nowrap shrink-0"
                     title="Duplicate settings — open new run with this configuration"
                   >
-                    Dup
+                    Duplicate
                   </button>
                   <button
                     type="button"
