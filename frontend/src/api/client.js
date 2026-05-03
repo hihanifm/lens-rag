@@ -331,12 +331,20 @@ export const submitRunDecision = (
   jobId,
   runId,
   leftId,
-  matchedRightId,
+  matchedRightIds,
   reviewComment = '',
   reviewOutcome = null,
-) =>
-  api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, {
-    matched_right_id: matchedRightId ?? null,
+) => {
+  let matched_right_ids = null
+  if (Array.isArray(matchedRightIds)) {
+    matched_right_ids = matchedRightIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
+  } else if (matchedRightIds != null) {
+    const n = Number(matchedRightIds)
+    matched_right_ids = Number.isFinite(n) ? [n] : []
+  }
+  return api.post(`compare/${jobId}/runs/${runId}/review/${leftId}`, {
+    matched_right_ids,
+    matched_right_id: null,
     review_comment: typeof reviewComment === 'string' ? reviewComment : '',
     review_outcome:
       reviewOutcome === 'no_match' ||
@@ -346,6 +354,7 @@ export const submitRunDecision = (
         ? reviewOutcome
         : null,
   }).then(r => r.data)
+}
 
 export const clearRunReviewDecision = (jobId, runId, leftId) =>
   api.delete(`compare/${jobId}/runs/${runId}/review/${leftId}`).then(r => r.data)

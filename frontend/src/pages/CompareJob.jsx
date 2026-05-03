@@ -452,7 +452,7 @@ function CandidateCard({ candidate, isSelected, isSaved, onClick, showRerankBadg
 function formatReviewBadge(it) {
   if (!it?.is_decided) return ''
   const oc = it.review_outcome
-  const hasPick = it.current_decision != null
+  const hasPick = (it.matched_right_ids?.length ?? 0) > 0
   if (hasPick) {
     if (oc === 'partial') return 'Matched · partial'
     if (oc === 'fail') return 'Matched · fail'
@@ -545,7 +545,7 @@ function ReviewTab({ job, run }) {
       setActiveIdx(0)
       setSelectedByLeft(() => {
         const m = new Map()
-        for (const it of pageItems) m.set(it.left_id, it.current_decision ?? null)
+        for (const it of pageItems) m.set(it.left_id, it.matched_right_ids ?? [])
         return m
       })
       setCommentByLeft(() => {
@@ -597,26 +597,25 @@ function ReviewTab({ job, run }) {
     if (savingLeftId != null) return
     const row = items.find(i => i.left_id === leftId)
     const commentDraft = commentByLeft.get(leftId) ?? ''
-    let mid = row?.is_decided ? row.current_decision : selectedByLeft.get(leftId)
-    if (mid === undefined) mid = null
-    if (outcome === 'no_match') mid = null
+    let ids = selectedByLeft.get(leftId) ?? row?.matched_right_ids ?? []
+    if (outcome === 'no_match') ids = []
 
     setSavingLeftId(leftId)
     try {
-      await submitRunDecision(jobId, runId, leftId, mid ?? null, commentDraft, outcome)
+      await submitRunDecision(jobId, runId, leftId, ids, commentDraft, outcome)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, outcome); return m })
       setSelectedByLeft(prev => {
         const m = new Map(prev)
-        if (outcome === 'no_match') m.set(leftId, null)
+        if (outcome === 'no_match') m.set(leftId, [])
         return m
       })
       setItems(prev => prev.map(it =>
         it.left_id === leftId ? {
           ...it,
           is_decided: true,
-          current_decision: mid ?? null,
+          matched_right_ids: ids,
           review_comment: commentDraft,
           review_outcome: outcome,
         } : it,
@@ -654,42 +653,94 @@ function ReviewTab({ job, run }) {
   const handleSelect = async (leftId, rightId) => {
     if (savingLeftId != null) return
     const row = items.find(i => i.left_id === leftId)
-    if (row?.is_decided && row.current_decision === rightId) {
+    const commentDraft = commentByLeft.get(leftId) ?? ''
+    let oc = outcomeByLeft.get(leftId) ?? null
+    if (oc === 'no_match') oc = null
+
+    const saved = row?.matched_right_ids ?? []
+    const cur = selectedByLeft.get(leftId) ?? saved
+
+    if (row?.is_decided) {
+      if (saved.length === 1 && saved[0] === rightId) {
+        setSavingLeftId(leftId)
+        try {
+          await clearRunReviewDecision(jobId, runId, leftId)
+          refetchStats()
+          queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+          setSelectedByLeft(prev => {
+            const m = new Map(prev)
+            m.set(leftId, [])
+            return m
+          })
+          setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
+          setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
+          setItems(prev =>
+            prev.map(it =>
+              it.left_id === leftId
+                ? { ...it, is_decided: false, matched_right_ids: [], review_comment: '', review_outcome: null }
+                : it,
+            ),
+          )
+        } finally {
+          setSavingLeftId(null)
+        }
+        return
+      }
+      if (saved.includes(rightId)) {
+        const next = saved.filter(id => id !== rightId)
+        setSavingLeftId(leftId)
+        try {
+          await submitRunDecision(jobId, runId, leftId, next, commentDraft, oc)
+          refetchStats()
+          queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
+          setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, oc); return m })
+          setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, next); return m })
+          setItems(prev => prev.map(it =>
+            it.left_id === leftId
+              ? { ...it, is_decided: true, matched_right_ids: next, review_comment: commentDraft, review_outcome: oc }
+              : it,
+          ))
+        } finally {
+          setSavingLeftId(null)
+        }
+        return
+      }
+      const next = [...saved, rightId]
       setSavingLeftId(leftId)
       try {
-        await clearRunReviewDecision(jobId, runId, leftId)
+        await submitRunDecision(jobId, runId, leftId, next, commentDraft, oc)
         refetchStats()
         queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
-        setSelectedByLeft(prev => {
-          const m = new Map(prev)
-          m.set(leftId, null)
-          return m
-        })
-        setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
-        setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
-        setItems(prev =>
-          prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '', review_outcome: null } : it,
-          ),
-        )
+        setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, oc); return m })
+        setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, next); return m })
+        setItems(prev => prev.map(it =>
+          it.left_id === leftId
+            ? { ...it, is_decided: true, matched_right_ids: next, review_comment: commentDraft, review_outcome: oc }
+            : it,
+        ))
       } finally {
         setSavingLeftId(null)
       }
       return
     }
 
-    const commentDraft = commentByLeft.get(leftId) ?? ''
-    let oc = outcomeByLeft.get(leftId) ?? null
-    if (oc === 'no_match') oc = null
-    setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, rightId); return m })
+    let next
+    if (cur.includes(rightId)) {
+      next = cur.filter(id => id !== rightId)
+    } else {
+      next = [...cur, rightId]
+    }
+    setSelectedByLeft(prev => { const m = new Map(prev); m.set(leftId, next); return m })
     setSavingLeftId(leftId)
     try {
-      await submitRunDecision(jobId, runId, leftId, rightId, commentDraft, oc)
+      await submitRunDecision(jobId, runId, leftId, next, commentDraft, oc)
       refetchStats()
       queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
       setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, oc); return m })
       setItems(prev => prev.map(it =>
-        it.left_id === leftId ? { ...it, is_decided: true, current_decision: rightId, review_comment: commentDraft, review_outcome: oc } : it,
+        it.left_id === leftId
+          ? { ...it, is_decided: true, matched_right_ids: next, review_comment: commentDraft, review_outcome: oc }
+          : it,
       ))
     } finally {
       setSavingLeftId(null)
@@ -699,7 +750,7 @@ function ReviewTab({ job, run }) {
   const handleNoMatch = async (leftId) => {
     if (savingLeftId != null) return
     const row = items.find(i => i.left_id === leftId)
-    if (row?.is_decided && row.current_decision == null) {
+    if (row?.is_decided && (!row.matched_right_ids?.length)) {
       setSavingLeftId(leftId)
       try {
         await clearRunReviewDecision(jobId, runId, leftId)
@@ -707,14 +758,14 @@ function ReviewTab({ job, run }) {
         queryClient.invalidateQueries({ queryKey: ['compare-jobs'] })
         setSelectedByLeft(prev => {
           const m = new Map(prev)
-          m.set(leftId, null)
+          m.set(leftId, [])
           return m
         })
         setCommentByLeft(prev => { const m = new Map(prev); m.set(leftId, ''); return m })
         setOutcomeByLeft(prev => { const m = new Map(prev); m.set(leftId, null); return m })
         setItems(prev =>
           prev.map(it =>
-            it.left_id === leftId ? { ...it, is_decided: false, current_decision: null, review_comment: '', review_outcome: null } : it,
+            it.left_id === leftId ? { ...it, is_decided: false, matched_right_ids: [], review_comment: '', review_outcome: null } : it,
           ),
         )
       } finally {
@@ -851,7 +902,7 @@ function ReviewTab({ job, run }) {
           <div className="space-y-4">
             {items.map((it, idx) => {
               const isActive = idx === activeIdx
-              const selectedRightId = selectedByLeft.get(it.left_id) ?? null
+              const effectiveIds = selectedByLeft.get(it.left_id) ?? it.matched_right_ids ?? []
               const isSaving = savingLeftId === it.left_id
               return (
                 <div
@@ -889,8 +940,8 @@ function ReviewTab({ job, run }) {
                             <CandidateCard
                               key={c.right_id}
                               candidate={c}
-                              isSelected={selectedRightId === c.right_id}
-                              isSaved={it.is_decided && it.current_decision === c.right_id}
+                              isSelected={effectiveIds.includes(c.right_id)}
+                              isSaved={it.is_decided && (it.matched_right_ids ?? []).includes(c.right_id)}
                               onClick={() => handleSelect(it.left_id, c.right_id)}
                               showRerankBadge={!!run.reranker_enabled}
                               llmJudgeEnabled={!!run.llm_judge_enabled}
@@ -978,7 +1029,7 @@ function ReviewTab({ job, run }) {
                           jobId,
                           runId,
                           it.left_id,
-                          row.current_decision,
+                          row.matched_right_ids ?? [],
                           draft,
                           outcomeByLeft.get(it.left_id) ?? null,
                         )

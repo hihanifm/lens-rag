@@ -35,6 +35,7 @@ from db import (
     migrate_legacy_compare_jobs,
     migrate_compare_decisions_review_comment,
     migrate_compare_decisions_review_outcome,
+    migrate_compare_decisions_matched_right_ids,
     migrate_compare_matches_llm_judge_meta,
     validate_pgvector_embedding_dims,
 )
@@ -93,6 +94,7 @@ def startup():
     migrate_legacy_compare_jobs()
     migrate_compare_decisions_review_comment()
     migrate_compare_decisions_review_outcome()
+    migrate_compare_decisions_matched_right_ids()
     migrate_compare_matches_llm_judge_meta()
     logger.info("DB initialised")
 

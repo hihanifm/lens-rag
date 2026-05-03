@@ -445,13 +445,14 @@ class ReviewItem(BaseModel):
     contextual_content: str
     display_value: Optional[str] = None
     candidates: List[CandidateItem]
-    current_decision: Optional[int] = None   # matched_right_id if already decided, else None
+    matched_right_ids: List[int] = Field(default_factory=list)
     is_decided: bool
     review_comment: str = ""
     review_outcome: ReviewOutcome = None   # optional: semantic (no_match/partial/fail) or judge/pipeline (system_fail)
 
 
 class CompareDecision(BaseModel):
-    matched_right_id: Optional[int] = None   # None = no candidate chosen (see review_outcome)
+    matched_right_id: Optional[int] = None   # legacy single-id submit; ignored when matched_right_ids is set
+    matched_right_ids: Optional[List[int]] = None  # authoritative multi-select when present (including [])
     review_comment: str = ""
     review_outcome: ReviewOutcome = None

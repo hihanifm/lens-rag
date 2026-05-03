@@ -118,6 +118,42 @@ logger = logging.getLogger("lens.compare_router")
 _REVIEW_OUTCOME_VALUES = frozenset({"no_match", "partial", "fail", "system_fail"})
 router = APIRouter()
 
+
+def _dedupe_matched_right_ids(ids: list) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for x in ids:
+        if x is None:
+            continue
+        xi = int(x)
+        if xi not in seen:
+            seen.add(xi)
+            out.append(xi)
+    return out
+
+
+def _effective_ids_from_dec_row(dec: dict | None) -> list[int]:
+    if not dec:
+        return []
+    raw = dec.get("matched_right_ids")
+    if raw is not None:
+        got = list(raw) if not isinstance(raw, list) else raw
+        return _dedupe_matched_right_ids(got)
+    mid = dec.get("matched_right_id")
+    if mid is not None:
+        return [int(mid)]
+    return []
+
+
+def _resolve_submit_matched_right_ids(data: CompareDecision, outcome: str | None) -> list[int]:
+    if outcome == "no_match":
+        return []
+    if data.matched_right_ids is not None:
+        return _dedupe_matched_right_ids(data.matched_right_ids)
+    if data.matched_right_id is not None:
+        return [int(data.matched_right_id)]
+    return []
+
 # Progress for job-level embedding (Phase 1), keyed by job_id
 _job_ingest_progress: dict[int, dict] = {}
 # Progress for run-level pipeline (Phase 2), keyed by run_id
@@ -996,7 +1032,15 @@ def run_review_stats(job_id: int, run_id: int):
         cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.{dec_table}")
         reviewed = (cur.fetchone() or {}).get("cnt", 0)
 
-        cur.execute(f"SELECT COUNT(*) AS cnt FROM {schema}.{dec_table} WHERE matched_right_id IS NULL")
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS cnt FROM {schema}.{dec_table}
+            WHERE NOT (
+                (matched_right_ids IS NOT NULL AND COALESCE(cardinality(matched_right_ids), 0) > 0)
+                OR (matched_right_id IS NOT NULL)
+            )
+            """
+        )
         no_match = (cur.fetchone() or {}).get("cnt", 0)
 
     return {
@@ -1296,20 +1340,24 @@ def next_review_item(
 
     with get_cursor() as (cur, _conn):
         cur.execute(
-            f"SELECT matched_right_id, review_comment, review_outcome FROM {schema}.{dec_table} WHERE left_id = %s",
+            f"""
+            SELECT matched_right_id, matched_right_ids, review_comment, review_outcome
+            FROM {schema}.{dec_table} WHERE left_id = %s
+            """,
             [left_id],
         )
         dec = cur.fetchone()
 
     raw_oc = (dec.get("review_outcome") if dec else None) or None
     norm_oc = raw_oc if raw_oc in _REVIEW_OUTCOME_VALUES else None
+    eff_ids = _effective_ids_from_dec_row(dict(dec) if dec else None)
 
     return ReviewItem(
         left_id=left_id,
         contextual_content=left_row["contextual_content"] or "",
         display_value=left_row["display_value"],
         candidates=candidates,
-        current_decision=dec["matched_right_id"] if dec else None,
+        matched_right_ids=eff_ids,
         is_decided=dec is not None,
         review_comment=(dec.get("review_comment") or "") if dec else "",
         review_outcome=norm_oc,
@@ -1320,8 +1368,9 @@ def next_review_item(
 def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecision):
     job = _job_or_404(job_id)
     _run_or_404(run_id, job_id)
-    schema    = job["schema_name"]
-    dec_table = f"run_{run_id}_decisions"
+    schema      = job["schema_name"]
+    dec_table   = f"run_{run_id}_decisions"
+    match_table = f"run_{run_id}_matches"
 
     outcome = data.review_outcome
     if outcome is not None and outcome not in _REVIEW_OUTCOME_VALUES:
@@ -1330,22 +1379,40 @@ def submit_decision(job_id: int, run_id: int, left_id: int, data: CompareDecisio
             detail="review_outcome must be no_match, partial, fail, system_fail, or null",
         )
 
-    mid = data.matched_right_id
-    if outcome == "no_match":
-        mid = None
+    ids = _resolve_submit_matched_right_ids(data, outcome)
+    first_right = ids[0] if ids else None
+
+    if ids:
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                f"""
+                SELECT m.right_id FROM {schema}.{match_table} m
+                WHERE m.left_id = %s AND m.right_id = ANY(%s)
+                """,
+                [left_id, ids],
+            )
+            ok = {row["right_id"] for row in cur.fetchall()}
+        missing = [rid for rid in ids if rid not in ok]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"matched_right_ids not among candidates for this left row: {missing}",
+            )
 
     with get_cursor() as (cur, _conn):
         cur.execute(
             f"""
-            INSERT INTO {schema}.{dec_table} (left_id, matched_right_id, decided_at, review_comment, review_outcome)
-            VALUES (%s, %s, NOW(), %s, %s)
+            INSERT INTO {schema}.{dec_table}
+                (left_id, matched_right_id, matched_right_ids, decided_at, review_comment, review_outcome)
+            VALUES (%s, %s, %s, NOW(), %s, %s)
             ON CONFLICT (left_id) DO UPDATE
                 SET matched_right_id = EXCLUDED.matched_right_id,
+                    matched_right_ids = EXCLUDED.matched_right_ids,
                     decided_at = NOW(),
                     review_comment = EXCLUDED.review_comment,
                     review_outcome = EXCLUDED.review_outcome
             """,
-            [left_id, mid, data.review_comment or "", outcome],
+            [left_id, first_right, ids, data.review_comment or "", outcome],
         )
 
 
@@ -1476,6 +1543,14 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         m.llm_score,
                         m.llm_judge_meta,
                         m.final_score,
+                        CASE
+                            WHEN d.matched_right_ids IS NOT NULL
+                                AND COALESCE(cardinality(d.matched_right_ids), 0) > 0
+                                THEN COALESCE(cardinality(d.matched_right_ids), 0)
+                            WHEN d.matched_right_id IS NOT NULL THEN 1
+                            ELSE 0
+                        END AS selected_rights_count,
+                        u.match_index,
                         CASE COALESCE(d.review_outcome, '')
                             WHEN 'no_match' THEN 'no match'
                             WHEN 'partial' THEN 'partial'
@@ -1486,12 +1561,24 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                         COALESCE(d.review_comment, '') AS review_comment,
                         d.decided_at
                     FROM {schema}.{dec_table} d
+                    JOIN LATERAL (
+                        SELECT x.right_id, x.match_index
+                        FROM unnest(
+                            CASE
+                                WHEN d.matched_right_ids IS NOT NULL
+                                    AND COALESCE(cardinality(d.matched_right_ids), 0) > 0
+                                    THEN d.matched_right_ids
+                                WHEN d.matched_right_id IS NOT NULL
+                                    THEN ARRAY[d.matched_right_id]::INTEGER[]
+                                ELSE ARRAY[]::INTEGER[]
+                            END
+                        ) WITH ORDINALITY AS x(right_id, match_index)
+                    ) u ON TRUE
                     JOIN {schema}.records lr ON lr.id = d.left_id
-                    JOIN {schema}.records rr ON rr.id = d.matched_right_id
+                    JOIN {schema}.records rr ON rr.id = u.right_id
                     JOIN {schema}.{match_table} m
-                        ON m.left_id = d.left_id AND m.right_id = d.matched_right_id
-                    WHERE d.matched_right_id IS NOT NULL
-                    ORDER BY lr.original_row ASC
+                        ON m.left_id = d.left_id AND m.right_id = u.right_id
+                    ORDER BY lr.original_row ASC, u.match_index ASC
                     """,
                 )
                 confirmed_rows = [dict(r) for r in cur.fetchall()]
@@ -1505,6 +1592,8 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     f"{label_l} Row", f"{label_l} Display", f"{label_l} Content",
                     f"{label_r} Row", f"{label_r} Display", f"{label_r} Content",
                     "Cosine Score", "Rerank Score", "LLM Score", "LLM Meta (JSON)", "Final Score",
+                    "Selected rights count",
+                    "Match index",
                     "Review Outcome",
                     "Review Comment", "Decided At",
                 ]
@@ -1524,17 +1613,20 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                             WHEN d.review_outcome = 'fail' THEN 'fail'
                             WHEN d.review_outcome = 'system_fail' THEN 'system failure'
                             WHEN d.review_outcome = 'no_match' THEN 'no match'
-                            WHEN d.matched_right_id IS NULL THEN 'no match'
+                            WHEN COALESCE(cardinality(d.matched_right_ids), 0) = 0
+                                AND d.matched_right_id IS NULL THEN 'no match'
                             ELSE ''
                         END AS human_review,
                         COALESCE(d.review_comment, '') AS review_comment
                     FROM {schema}.records lr
-                    LEFT JOIN {schema}.{dec_table} d
-                        ON d.left_id = lr.id AND d.matched_right_id IS NULL
-                    LEFT JOIN {schema}.{dec_table} d2
-                        ON d2.left_id = lr.id AND d2.matched_right_id IS NOT NULL
+                    LEFT JOIN {schema}.{dec_table} d ON d.left_id = lr.id
                     WHERE lr.side = 'left'
-                      AND d2.left_id IS NULL
+                      AND lr.id NOT IN (
+                          SELECT left_id FROM {schema}.{dec_table}
+                          WHERE (matched_right_ids IS NOT NULL
+                                 AND COALESCE(cardinality(matched_right_ids), 0) > 0)
+                             OR matched_right_id IS NOT NULL
+                      )
                     ORDER BY lr.original_row ASC
                     """,
                 )
@@ -1557,8 +1649,16 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                     FROM {schema}.records rr
                     WHERE rr.side = 'right'
                       AND rr.id NOT IN (
-                          SELECT matched_right_id FROM {schema}.{dec_table}
-                          WHERE matched_right_id IS NOT NULL
+                          SELECT DISTINCT rid FROM (
+                              SELECT unnest(matched_right_ids) AS rid
+                              FROM {schema}.{dec_table}
+                              WHERE matched_right_ids IS NOT NULL
+                                AND COALESCE(cardinality(matched_right_ids), 0) > 0
+                              UNION ALL
+                              SELECT matched_right_id AS rid
+                              FROM {schema}.{dec_table}
+                              WHERE matched_right_id IS NOT NULL
+                          ) t WHERE rid IS NOT NULL
                       )
                     ORDER BY rr.original_row ASC
                     """,

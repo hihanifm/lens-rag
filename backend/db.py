@@ -305,11 +305,12 @@ def create_run_tables(schema_name: str, run_id: int):
         """)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {schema_name}.run_{run_id}_decisions (
-                left_id          INTEGER PRIMARY KEY,
-                matched_right_id INTEGER,
-                decided_at       TIMESTAMP DEFAULT NOW(),
-                review_comment   TEXT,
-                review_outcome   TEXT
+                left_id             INTEGER PRIMARY KEY,
+                matched_right_id    INTEGER,
+                matched_right_ids   INTEGER[],
+                decided_at          TIMESTAMP DEFAULT NOW(),
+                review_comment      TEXT,
+                review_outcome        TEXT
             );
         """)
 
@@ -353,6 +354,31 @@ def migrate_compare_decisions_review_outcome():
             table = row["table_name"]
             cur.execute(
                 f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS review_outcome TEXT;'
+            )
+
+
+def migrate_compare_decisions_matched_right_ids():
+    """Add matched_right_ids (multi-select confirms) and backfill from matched_right_id."""
+    with get_cursor() as (cur, _conn):
+        cur.execute("""
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_schema ~ '^compare_[0-9]+$'
+              AND table_name ~ '^run_[0-9]+_decisions$'
+        """)
+        for row in cur.fetchall():
+            schema = row["table_schema"]
+            table = row["table_name"]
+            cur.execute(
+                f'ALTER TABLE "{schema}"."{table}" ADD COLUMN IF NOT EXISTS matched_right_ids INTEGER[];'
+            )
+            cur.execute(
+                f"""
+                UPDATE "{schema}"."{table}"
+                SET matched_right_ids = ARRAY[matched_right_id]
+                WHERE matched_right_id IS NOT NULL
+                  AND matched_right_ids IS NULL;
+                """
             )
 
 
