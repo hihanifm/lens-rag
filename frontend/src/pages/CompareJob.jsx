@@ -489,7 +489,7 @@ function ReviewTab({ job, run }) {
 
   const [minScore, setMinScore] = useState(0)
   const [offset, setOffset] = useState(0)
-  const [rowsShown, setRowsShown] = useState(3)
+  const [rowsShown, setRowsShown] = useState(5)
   const [items, setItems] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -770,7 +770,7 @@ function ReviewTab({ job, run }) {
             onChange={e => setRowsShown(parseInt(e.target.value, 10))}
             className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
           >
-            {[1, 3, 5].map(v => <option key={v} value={v}>{v}</option>)}
+            {[1, 3, 5, 10].map(v => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-2">
