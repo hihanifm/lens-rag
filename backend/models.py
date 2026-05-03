@@ -384,7 +384,13 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     """Built-in LLM judge settings for Compare runs (UI display + parity with pipeline)."""
 
     default_system_prompt: str
-    fixed_suffix: str
+    fixed_suffix: str = Field(
+        ...,
+        description=(
+            "Tail section embedded in default_system_prompt when llm_judge_prompt is empty; "
+            "not appended when the run supplies a custom judge prompt."
+        ),
+    )
     max_tokens: int
     temperature: float
     default_max_requests_per_minute: int

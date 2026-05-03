@@ -625,8 +625,8 @@ def write_matches(
 
 
 # ── LLM Judge ─────────────────────────────────────────────────────────────
-# Stored `llm_judge_prompt` on a run is a domain overlay only; PREFIX + SUFFIX are always
-# applied so the model sees fixed input-shape + rubric + JSON contract (_parse_llm_judge_batch).
+# Empty `llm_judge_prompt` → DEFAULT_LLM_JUDGE_PROMPT (intro + default domain + JSON tail).
+# Non-empty → that text is the full system message (no server prefix/suffix; _parse_llm_judge_batch).
 
 LLM_JUDGE_PROMPT_PREFIX = """You compare test specifications from two sources (e.g. different clients or baselines).
 
@@ -665,13 +665,14 @@ DEFAULT_LLM_JUDGE_PROMPT = (
 
 def effective_llm_judge_system_prompt(domain_overlay: str | None) -> str:
     """
-    Build the full judge system message. DB `llm_judge_prompt` holds domain-only text;
-    parser-bound tail (LLM_JUDGE_PROMPT_SUFFIX) is always appended.
+    Build the LLM judge system message from `compare_runs.llm_judge_prompt`.
+    Empty or whitespace → built-in default (includes LLM_JUDGE_PROMPT_SUFFIX / scores contract).
+    Non-empty → return that string only (full user-controlled system prompt).
     """
     t = (domain_overlay or "").strip()
     if not t:
         return DEFAULT_LLM_JUDGE_PROMPT
-    return LLM_JUDGE_PROMPT_PREFIX + t + "\n\n" + LLM_JUDGE_PROMPT_SUFFIX
+    return t
 
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
 LLM_JUDGE_MAX_TOKENS = 512
@@ -866,7 +867,7 @@ def iter_run_llm_judge(
 
     max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
 
-    prompt: optional domain-only overlay (compare_runs.llm_judge_prompt); merged with fixed suffix.
+    prompt: compare_runs.llm_judge_prompt; empty → built-in default, non-empty → full system prompt.
     """
     system_prompt = effective_llm_judge_system_prompt(prompt)
     client = OpenAI(base_url=url, api_key="ollama")
