@@ -810,7 +810,7 @@ def _parse_llm_judge_batch(text: str, n: int) -> tuple[list[float | None], list[
 
     Accepts:
     - {"scores": [float | object, ...]} (legacy floats or objects with score + extras)
-    - [ {...}, ... ] root array of length n (e.g. score + reason per candidate)
+    - [ {...}, ... ] root array — shorter arrays padded with nulls; longer truncated to n
     - {"score": float, ...} when n==1
 
     Returns parallel lists; unparsed slots are (None, None).
@@ -823,22 +823,33 @@ def _parse_llm_judge_batch(text: str, n: int) -> tuple[list[float | None], list[
         data = json.loads(raw)
 
         if isinstance(data, list):
-            if len(data) != n:
-                raw_full = text or ""
-                logger.warning(
-                    "LLM judge JSON root array length %d != n=%d | stripped_prefix=%r | raw_len=%d",
-                    len(data),
+            raw_full = text or ""
+            got = len(data)
+            if got > n:
+                logger.debug(
+                    "LLM judge JSON root array got=%d > n=%d — using first n | raw_len=%d",
+                    got,
                     n,
-                    raw[:400],
                     len(raw_full),
                 )
-                return [None] * n, [None] * n
+                data = data[:n]
+            elif got < n:
+                logger.info(
+                    "LLM judge JSON root array got=%d < n=%d — padding missing slots | raw_len=%d",
+                    got,
+                    n,
+                    len(raw_full),
+                )
             scores: list[float | None] = []
             metas: list[dict | None] = []
-            for el in data:
-                s, m = _parse_llm_judge_slot(el)
-                scores.append(s)
-                metas.append(m)
+            for i in range(n):
+                if i < len(data):
+                    s, m = _parse_llm_judge_slot(data[i])
+                    scores.append(s)
+                    metas.append(m)
+                else:
+                    scores.append(None)
+                    metas.append(None)
             return scores, metas
 
         if isinstance(data, dict):
