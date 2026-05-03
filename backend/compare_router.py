@@ -57,13 +57,17 @@ from fastapi.responses import Response, StreamingResponse
 
 from comparator import (
     DEFAULT_LLM_JUDGE_PROMPT,
-    LLM_JUDGE_MAX_TOKENS,
     LLM_JUDGE_PROMPT_SUFFIX,
     LLM_JUDGE_TEMPERATURE,
     run_ingest_job,
     run_pipeline,
 )
-from config import COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP, EMBEDDING_DIMS, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE
+from config import (
+    COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
+    EMBEDDING_DIMS,
+    LLM_JUDGE_MAX_REQUESTS_PER_MINUTE,
+    LLM_JUDGE_MAX_TOKENS,
+)
 from db import (
     create_compare_schema,
     create_run_tables,

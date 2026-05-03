@@ -25,7 +25,9 @@ from config import (
     EMBEDDING_DIMS,
     LLM_COMPARE_MAX_RIGHTS_CAP,
     LLM_COMPARE_MAX_RIGHTS_DEFAULT,
+    LLM_JUDGE_COMPLETION_MAX,
     LLM_JUDGE_MAX_REQUESTS_PER_MINUTE,
+    LLM_JUDGE_MAX_TOKENS,
     RERANKER_ENABLED,
 )
 from db import get_cursor, create_compare_schema
@@ -717,7 +719,7 @@ def effective_llm_judge_system_prompt(domain_overlay: str | None) -> str:
     return t
 
 # OpenAI-compatible chat params for LLM judge (surfaced in run metrics JSON).
-LLM_JUDGE_MAX_TOKENS = 512
+# LLM_JUDGE_MAX_TOKENS — see config.py (env floor for completion budget).
 LLM_JUDGE_TEMPERATURE = 0.0
 # Cap string values in llm_judge_meta (reason etc.) when persisting JSONB.
 LLM_JUDGE_META_VALUE_STR_CAP = 2000
@@ -726,8 +728,28 @@ LLM_JUDGE_META_VALUE_STR_CAP = 2000
 def llm_judge_completion_max_tokens(num_candidates: int) -> int:
     """Ensure JSON scores array fits when scoring many candidates per request."""
     n = max(1, int(num_candidates))
-    est = 128 + n * 28
-    return min(8192, max(LLM_JUDGE_MAX_TOKENS, est))
+    est = 258 + n * 128
+    return min(LLM_JUDGE_COMPLETION_MAX, max(LLM_JUDGE_MAX_TOKENS, est))
+
+
+def _llm_judge_message_parse_text(message) -> str:
+    """Prefer content; reasoning models may put JSON in reasoning with empty content."""
+    c = (getattr(message, "content", None) or "").strip()
+    if c:
+        return c
+    r = getattr(message, "reasoning", None)
+    if isinstance(r, str) and r.strip():
+        return r.strip()
+    try:
+        d = message.model_dump() if hasattr(message, "model_dump") else None
+    except Exception:
+        d = None
+    if isinstance(d, dict):
+        for key in ("content", "reasoning", "text"):
+            v = d.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
 
 
 def _strip_json_fence(text: str) -> str:
@@ -1009,13 +1031,22 @@ def iter_run_llm_judge(
             )
             detail["http_status"] = _openai_completion_http_status(resp)
             choice0 = resp.choices[0]
-            text = (choice0.message.content or "").strip()
+            fr = getattr(choice0, "finish_reason", None)
+            text = _llm_judge_message_parse_text(choice0.message)
+            if fr == "length":
+                logger.warning(
+                    "LLM judge completion truncated (finish_reason=length) left_id=%d "
+                    "max_completion_tokens=%d model=%r — raise LLM_JUDGE_MAX_TOKENS if JSON scores were cut off",
+                    left_id,
+                    max_completion_tokens,
+                    model,
+                )
             _log_llm_judge_inbound_response(
                 left_id=left_id,
                 batch_num=bi + 1,
                 total_batches=total_batches,
                 text=text,
-                finish_reason=getattr(choice0, "finish_reason", None),
+                finish_reason=fr,
             )
             if not text:
                 msg_dump = None
@@ -1026,7 +1057,7 @@ def iter_run_llm_judge(
                 logger.warning(
                     "LLM judge empty assistant content left_id=%d finish_reason=%s message_dump=%s",
                     left_id,
-                    getattr(choice0, "finish_reason", None),
+                    fr,
                     json.dumps(msg_dump, default=str)[:2500] if msg_dump is not None else "—",
                 )
             llm_scores, llm_metas = _parse_llm_judge_batch(text, len(pairs))

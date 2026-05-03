@@ -132,6 +132,9 @@ RERANKER_MODEL=bbjson/bge-reranker-base:latest
 COMPARE_TOP_K=3                 # candidates per left row stored at comparison time
 COMPARE_MATCH_THRESHOLD=0.85    # used for color-coding in review UI (green ≥ this)
 COMPARE_REVIEW_THRESHOLD=0.60   # amber ≥ this; gray below
+# Compare LLM judge: minimum per-batch max_tokens floor (completion budget also capped at 8192 in code).
+# Reasoning models may need a higher value; truncation (finish_reason=length) is logged on the API server.
+LLM_JUDGE_MAX_TOKENS=2048
 
 # Database
 DB_HOST=lens-postgres

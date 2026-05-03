@@ -70,6 +70,12 @@ COMPARE_REVIEW_THRESHOLD = float(os.getenv("COMPARE_REVIEW_THRESHOLD", "0.60"))
 # Runs may override via llm_judge_max_requests_per_minute; NULL uses this default.
 LLM_JUDGE_MAX_REQUESTS_PER_MINUTE = int(os.getenv("LLM_JUDGE_MAX_REQUESTS_PER_MINUTE", "0"))
 
+# Compare LLM judge: floor for per-batch max_tokens (see llm_judge_completion_max_tokens in comparator).
+# Hard ceiling is LLM_JUDGE_COMPLETION_MAX (8192). Reasoning models may need a higher floor; if the API
+# returns finish_reason=length, check server logs and raise this env var.
+LLM_JUDGE_MAX_TOKENS = int(os.getenv("LLM_JUDGE_MAX_TOKENS", "2048"))
+LLM_JUDGE_COMPLETION_MAX = 8192
+
 # LLM-only compare runs (vector retrieval off): max right rows paired per left (run column overrides default).
 LLM_COMPARE_MAX_RIGHTS_DEFAULT = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_DEFAULT", "100"))
 LLM_COMPARE_MAX_RIGHTS_CAP = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_CAP", "500"))
