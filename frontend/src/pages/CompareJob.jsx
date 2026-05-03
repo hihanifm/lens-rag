@@ -2433,7 +2433,7 @@ function EditableRunTitle({ jobId, run, onUpdated, titleClass = 'font-semibold t
 
 // ── Run detail panel ────────────────────────────────────────────────────────
 
-function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
+function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated, onDuplicateRun }) {
   const queryClient = useQueryClient()
   const [subTab, setSubTab] = useState('review')
   const [pipelineStarted, setPipelineStarted] = useState(() => run.status === 'running')
@@ -2494,7 +2494,20 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
         {pipelineBadges.map(b => (
           <span key={b} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{b}</span>
         ))}
-        <span className="text-xs text-gray-400 ml-auto">K={run.top_k}</span>
+        <div className="flex items-center gap-2 ml-auto shrink-0 flex-wrap justify-end">
+          <span className="text-xs text-gray-400 whitespace-nowrap">K={run.top_k}</span>
+          {onDuplicateRun && (
+            <button
+              type="button"
+              onClick={onDuplicateRun}
+              disabled={job.status !== 'ready'}
+              className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/70 transition-colors px-2 py-0.5 rounded disabled:opacity-40 whitespace-nowrap shrink-0"
+              title="Duplicate settings — open new run with this configuration"
+            >
+              Duplicate
+            </button>
+          )}
+        </div>
       </div>
 
       <RunNotesEditor
@@ -2610,11 +2623,9 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated }) {
 
 // ── Runs panel (list) ──────────────────────────────────────────────────────
 
-function RunsPanel({ job, onSelectRun, onRunUpdated }) {
+function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplicateRun }) {
   const jobId = job.id
   const queryClient = useQueryClient()
-  const [showNewRun, setShowNewRun] = useState(false)
-  const [duplicateSourceRun, setDuplicateSourceRun] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
 
   const { data: runs = [], isLoading, refetch } = useQuery({
@@ -2626,25 +2637,6 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
       return list.some(r => r.status === 'pending' || r.status === 'running') ? 3000 : false
     },
   })
-
-  const handleCreateRun = async (data) => {
-    try {
-      const run = await createRun(jobId, data)
-      await refetch()
-      queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
-      setShowNewRun(false)
-      setDuplicateSourceRun(null)
-      onSelectRun(run)
-      return run
-    } catch (e) {
-      throw e
-    }
-  }
-
-  const closeNewRunModal = () => {
-    setShowNewRun(false)
-    setDuplicateSourceRun(null)
-  }
 
   const handleDelete = async (runId, e) => {
     e.stopPropagation()
@@ -2682,10 +2674,7 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
         </div>
         <button
           type="button"
-          onClick={() => {
-            setDuplicateSourceRun(null)
-            setShowNewRun(true)
-          }}
+          onClick={onOpenNewRun}
           disabled={job.status !== 'ready'}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors disabled:opacity-40"
         >
@@ -2701,10 +2690,7 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           <p className="text-sm text-gray-400 mt-1">Create a run to start matching.</p>
           <button
             type="button"
-            onClick={() => {
-              setDuplicateSourceRun(null)
-              setShowNewRun(true)
-            }}
+            onClick={onOpenNewRun}
             className="mt-4 bg-blue-600 text-white px-5 py-2 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors"
           >
             + New Run
@@ -2780,8 +2766,7 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
-                      setDuplicateSourceRun(run)
-                      setShowNewRun(true)
+                      onOpenDuplicateRun(run)
                     }}
                     disabled={job.status !== 'ready' || deletingId === run.id}
                     className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/70 transition-colors px-2 py-0.5 rounded disabled:opacity-40 whitespace-nowrap shrink-0"
@@ -2830,16 +2815,6 @@ function RunsPanel({ job, onSelectRun, onRunUpdated }) {
           )
         })}
       </div>
-
-      {showNewRun && (
-        <NewRunModal
-          key={duplicateSourceRun ? `dup-${duplicateSourceRun.id}` : 'new-run'}
-          job={job}
-          initialRun={duplicateSourceRun}
-          onClose={closeNewRunModal}
-          onCreated={handleCreateRun}
-        />
-      )}
     </div>
   )
 }
@@ -2851,6 +2826,8 @@ export default function CompareJob() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('runs')
   const [selectedRun, setSelectedRun] = useState(null)
+  const [showNewRun, setShowNewRun] = useState(false)
+  const [duplicateSourceRun, setDuplicateSourceRun] = useState(null)
 
   const { data: job, isLoading, error } = useQuery({
     queryKey: ['compare-job', jobId],
@@ -2866,6 +2843,24 @@ export default function CompareJob() {
     queryClient.invalidateQueries({ queryKey: ['compare-runs', Number(jobId)] })
     queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
   }, [jobId, queryClient])
+
+  const closeNewRunModal = useCallback(() => {
+    setShowNewRun(false)
+    setDuplicateSourceRun(null)
+  }, [])
+
+  const handleCreateRun = useCallback(
+    async (data) => {
+      const newRun = await createRun(Number(jobId), data)
+      await queryClient.invalidateQueries({ queryKey: ['compare-runs', Number(jobId)] })
+      await queryClient.invalidateQueries({ queryKey: ['compare-runs', jobId] })
+      setShowNewRun(false)
+      setDuplicateSourceRun(null)
+      setSelectedRun(newRun)
+      return newRun
+    },
+    [jobId, queryClient],
+  )
 
   if (isLoading) {
     return (
@@ -2925,7 +2920,14 @@ export default function CompareJob() {
               ].map(tab => (
                 <button
                   key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); if (tab.id !== 'runs') setSelectedRun(null) }}
+                  onClick={() => {
+                    setActiveTab(tab.id)
+                    if (tab.id !== 'runs') {
+                      setSelectedRun(null)
+                      setShowNewRun(false)
+                      setDuplicateSourceRun(null)
+                    }
+                  }}
                   disabled={job.status !== 'ready'}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-40
                     ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
@@ -2956,18 +2958,40 @@ export default function CompareJob() {
               onBack={() => setSelectedRun(null)}
               onRunComplete={handleRunComplete}
               onRunUpdated={setSelectedRun}
+              onDuplicateRun={() => {
+                setDuplicateSourceRun(selectedRun)
+                setShowNewRun(true)
+              }}
             />
           ) : (
             <RunsPanel
               job={job}
               onSelectRun={setSelectedRun}
               onRunUpdated={(r) => setSelectedRun((prev) => (prev?.id === r.id ? r : prev))}
+              onOpenNewRun={() => {
+                setDuplicateSourceRun(null)
+                setShowNewRun(true)
+              }}
+              onOpenDuplicateRun={(run) => {
+                setDuplicateSourceRun(run)
+                setShowNewRun(true)
+              }}
             />
           )
         ) : activeTab === 'browse' ? (
           <BrowseTab job={job} />
         ) : (
           <ConfigStatsTab job={job} />
+        )}
+
+        {job.status === 'ready' && activeTab === 'runs' && showNewRun && (
+          <NewRunModal
+            key={duplicateSourceRun ? `dup-${duplicateSourceRun.id}` : 'new-run'}
+            job={job}
+            initialRun={duplicateSourceRun}
+            onClose={closeNewRunModal}
+            onCreated={handleCreateRun}
+          />
         )}
       </div>
     </div>
