@@ -1884,7 +1884,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                   <details open className="border border-purple-100 rounded-lg bg-purple-50/30 overflow-hidden">
                     <summary className="cursor-pointer text-xs font-semibold text-purple-900 px-3 py-2 hover:bg-purple-50 list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
                       <span className="text-gray-500 select-none" aria-hidden>▼</span>
-                      Server default system prompt
+                      Server default system prompt (when domain guidance is empty)
                     </summary>
                     <div className="px-3 pb-3 space-y-2 border-t border-purple-100 bg-white/70">
                       {llmJudgeDefaultsErr && (
@@ -1908,26 +1908,15 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                       )}
                     </div>
                   </details>
-                  {llmJudgeDefaults?.fixed_suffix && (
-                    <details className="mt-2 border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
-                      <summary className="cursor-pointer text-xs font-semibold text-gray-700 px-3 py-2 hover:bg-gray-100 list-none flex items-center gap-2 [&::-webkit-details-marker]:hidden">
-                        <span className="text-gray-500 select-none" aria-hidden>▶</span>
-                        Parser contract (always applied — do not duplicate in your text)
-                      </summary>
-                      <div className="px-3 pb-3 border-t border-gray-100">
-                        <pre className="text-[11px] text-gray-700 whitespace-pre-wrap max-h-36 overflow-y-auto font-mono mt-2 p-2 rounded border border-gray-100 bg-white">
-                          {llmJudgeDefaults.fixed_suffix}
-                        </pre>
-                      </div>
-                    </details>
-                  )}
                   <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">
-                    Domain-specific judge guidance{' '}
+                    Judge system prompt{' '}
                     <span className="text-gray-400 font-normal">(optional)</span>
                   </label>
                   <p className="text-[11px] text-gray-500 mb-1.5 leading-relaxed">
-                    Describe only <strong className="text-gray-700">your domain</strong> (what rows mean, what to weight). Scoring bands, input-shape rules, and JSON output are{' '}
-                    <strong className="text-gray-700">fixed server-side</strong> for the parser — do not paste them here.
+                    Leave empty to use the server default above (telecom rubric + JSON contract). If you enter text
+                    here, it becomes the <strong className="text-gray-700">entire</strong> system prompt — include task,
+                    Reference/Candidate semantics, scoring rubric, and output shape your model should return (the backend
+                    accepts several JSON layouts for scores and optional metadata).
                   </p>
                   <div className="flex flex-wrap items-end gap-2 mb-2">
                     <div className="flex-1 min-w-[160px]">
@@ -2004,7 +1993,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                     value={llmPrompt}
                     onChange={e => setLlmPrompt(e.target.value)}
                     rows={3}
-                    placeholder="e.g. IT asset catalog: prioritize model/SKU alignment; treat status field as weak signal…"
+                    placeholder="Leave blank for server default. Or full custom system prompt (task, domain, output format)…"
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
                   <div className="mt-3">

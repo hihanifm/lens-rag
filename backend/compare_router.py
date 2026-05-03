@@ -12,7 +12,7 @@ Job-level routes:
   POST /compare/preview-row-stats     row counts after sheet + filters
   POST /compare/preview-column-values distinct values for a column (filter picker)
   POST /compare/preview-column-samples   first N row(s) per column (column picker; default 1)
-  GET  /compare/llm-judge-defaults      built-in judge prompt + fixed_suffix + token settings
+  GET  /compare/llm-judge-defaults      built-in default judge prompt + suffix snippet + token settings
   GET  /compare/prompt-templates       list LLM judge preset names (id + name)
   GET  /compare/prompt-templates/{id}  full preset body
   POST /compare/prompt-templates       create preset
@@ -517,7 +517,11 @@ def list_compare_jobs():
 
 @router.get("/llm-judge-defaults", response_model=CompareLlmJudgeDefaultsResponse)
 def get_llm_judge_defaults():
-    """Expose the server default system prompt so the run wizard can show it read-only."""
+    """
+    Expose the built-in judge prompt used when `llm_judge_prompt` is empty, plus the suffix
+    snippet for UI reference (that suffix is part of the default blob only — custom run prompts
+    replace the entire system message).
+    """
     return CompareLlmJudgeDefaultsResponse(
         default_system_prompt=DEFAULT_LLM_JUDGE_PROMPT,
         fixed_suffix=LLM_JUDGE_PROMPT_SUFFIX,
