@@ -137,6 +137,48 @@ def _log_llm_judge_outbound_payload(
         logger.debug("LLM judge USER (last %d chars):\n%s", ex, user_content[-ex:])
 
 
+def _log_llm_judge_inbound_response(
+    *,
+    left_id: int,
+    batch_num: int,
+    total_batches: int,
+    text: str,
+    finish_reason: str | None,
+) -> None:
+    """
+    Log assistant message content after SDK parse. HTTP responses may use chunked encoding;
+    httpx/OpenAI client reads the full body before returning — chunk framing is not exposed here.
+    """
+    n = len(text or "")
+    nb = len((text or "").encode("utf-8"))
+    logger.info(
+        "LLM judge ← assistant response body (reassembled by HTTP client; chunked transport if "
+        "present does not affect this string): left_id=%s batch %s/%s finish_reason=%s "
+        "%s chars %s UTF-8 bytes",
+        left_id,
+        batch_num,
+        total_batches,
+        finish_reason,
+        n,
+        nb,
+    )
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    ex = LLM_JUDGE_LOG_EXCERPT_CHARS
+    if n == 0:
+        logger.debug("LLM judge assistant content: (empty)")
+        return
+    if n <= ex:
+        logger.debug("LLM judge assistant content (full %d chars):\n%s", n, text)
+        return
+    logger.debug(
+        "LLM judge assistant content (first %d of %d chars):\n%s\n…[truncated for DEBUG log]",
+        ex,
+        n,
+        text[:ex],
+    )
+
+
 def _job_row_filters(job: dict, key: str) -> list[dict]:
     raw = job.get(key)
     if raw is None:
@@ -968,6 +1010,13 @@ def iter_run_llm_judge(
             detail["http_status"] = _openai_completion_http_status(resp)
             choice0 = resp.choices[0]
             text = (choice0.message.content or "").strip()
+            _log_llm_judge_inbound_response(
+                left_id=left_id,
+                batch_num=bi + 1,
+                total_batches=total_batches,
+                text=text,
+                finish_reason=getattr(choice0, "finish_reason", None),
+            )
             if not text:
                 msg_dump = None
                 try:
