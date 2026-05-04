@@ -245,6 +245,8 @@ class CompareJobCreate(BaseModel):
     embed_url: Optional[str] = None
     embed_api_key: Optional[str] = None
     embed_model: Optional[str] = None
+    all_columns_left:  List[str] = Field(default_factory=list)
+    all_columns_right: List[str] = Field(default_factory=list)
 
 
 class CompareJobResponse(BaseModel):
@@ -265,6 +267,8 @@ class CompareJobResponse(BaseModel):
     embed_url: Optional[str] = None
     embed_model: Optional[str] = None
     embed_dims: Optional[int] = None
+    all_columns_left:  List[str] = Field(default_factory=list)
+    all_columns_right: List[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -286,6 +290,8 @@ class CompareRunCreate(BaseModel):
     # None = use server env LLM_JUDGE_MAX_REQUESTS_PER_MINUTE; 0 = unlimited; N > 0 = max N calls/min
     llm_judge_max_requests_per_minute: Optional[int] = Field(default=None, ge=0, le=360)
     notes: Optional[str] = None
+    llm_judge_left_columns:  Optional[List[str]] = None
+    llm_judge_right_columns: Optional[List[str]] = None
 
 
 class CompareRunUpdate(BaseModel):
@@ -314,6 +320,8 @@ class CompareRunResponse(BaseModel):
     llm_judge_prompt: Optional[str] = None
     llm_judge_prompt_preset_tag: Optional[str] = None
     llm_judge_max_requests_per_minute: Optional[int] = None
+    llm_judge_left_columns:  Optional[List[str]] = None
+    llm_judge_right_columns: Optional[List[str]] = None
     row_count_left: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime] = None

@@ -163,6 +163,12 @@ def init_db():
         cur.execute(
             "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS row_filters_right TEXT DEFAULT '[]';"
         )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS all_columns_left TEXT[] DEFAULT '{}';"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS all_columns_right TEXT[] DEFAULT '{}';"
+        )
 
         # ── Compare runs table ─────────────────────────────────────────────
         cur.execute("""
@@ -197,6 +203,12 @@ def init_db():
         )
         cur.execute(
             "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_prompt_preset_tag TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_left_columns TEXT[];"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_right_columns TEXT[];"
         )
 
         # Global LLM judge domain-overlay presets (Compare runs — reusable named prompts).

@@ -83,6 +83,9 @@ LLM_COMPARE_MAX_RIGHTS_CAP = int(os.getenv("LLM_COMPARE_MAX_RIGHTS_CAP", "500"))
 # Compare run pipeline: optional ?max_left_rows= on execute — cap (sanity upper bound).
 COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP = int(os.getenv("COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP", "50000"))
 
+# Compare job uploads: original Excel files persisted after ingest for per-run LLM judge column selection.
+COMPARE_UPLOADS_DIR = os.environ.get("COMPARE_UPLOADS_DIR", "/app/uploads/compare")
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")

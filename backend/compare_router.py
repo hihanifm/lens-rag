@@ -46,7 +46,9 @@ import io
 import json
 import logging
 import os
+import pathlib
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -66,6 +68,7 @@ from comparator import (
 )
 from config import (
     COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
+    COMPARE_UPLOADS_DIR,
     EMBEDDING_DIMS,
     LLM_JUDGE_MAX_REQUESTS_PER_MINUTE,
     LLM_JUDGE_MAX_TOKENS,
@@ -507,7 +510,8 @@ async def create_compare_job(data: CompareJobCreate):
                 row_filters_left, row_filters_right,
                 source_filename_left, source_filename_right,
                 tmp_path_left, tmp_path_right,
-                embed_dims, embed_url, embed_api_key, embed_model
+                embed_dims, embed_url, embed_api_key, embed_model,
+                all_columns_left, all_columns_right
             ) VALUES (
                 %s, %s, %s, 'compare_placeholder',
                 %s, %s, %s,
@@ -516,7 +520,8 @@ async def create_compare_job(data: CompareJobCreate):
                 %s, %s,
                 %s, %s,
                 %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s, %s,
+                %s, %s
             ) RETURNING id, created_at
             """,
             [
@@ -530,6 +535,7 @@ async def create_compare_job(data: CompareJobCreate):
                 data.source_filename_left, data.source_filename_right,
                 data.tmp_path_left, data.tmp_path_right,
                 resolved_dims, data.embed_url or None, data.embed_api_key or None, data.embed_model or None,
+                data.all_columns_left or [], data.all_columns_right or [],
             ],
         )
         row = cur.fetchone()
@@ -543,6 +549,29 @@ async def create_compare_job(data: CompareJobCreate):
 
     # Create per-job schema with the resolved (possibly custom) dims
     create_compare_schema(job_id, resolved_dims)
+
+    # Persist the original Excel files so per-run LLM judge column selection can re-read them.
+    # Derive extensions from original filenames to preserve pandas engine detection.
+    left_ext  = pathlib.Path(data.source_filename_left  or "").suffix or ".xlsx"
+    right_ext = pathlib.Path(data.source_filename_right or "").suffix or ".xlsx"
+    job_dir   = os.path.join(COMPARE_UPLOADS_DIR, str(job_id))
+    try:
+        os.makedirs(job_dir, exist_ok=True)
+        perm_left  = os.path.join(job_dir, f"left{left_ext}")
+        perm_right = os.path.join(job_dir, f"right{right_ext}")
+        shutil.move(data.tmp_path_left,  perm_left)
+        shutil.move(data.tmp_path_right, perm_right)
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                "UPDATE public.compare_jobs SET tmp_path_left=%s, tmp_path_right=%s WHERE id=%s",
+                [perm_left, perm_right, job_id],
+            )
+    except Exception as e:
+        logger.error("compare create: failed to persist upload files for job_id=%d — %s", job_id, e)
+        shutil.rmtree(job_dir, ignore_errors=True)
+        from db import drop_compare_schema as _drop
+        _drop(job_id)
+        raise HTTPException(status_code=500, detail=f"Failed to persist upload files: {e}")
 
     return _job_response(job_id)
 
@@ -758,6 +787,7 @@ def update_compare_job(job_id: int, data: CompareJobUpdate):
 def delete_compare_job(job_id: int):
     _job_or_404(job_id)
     drop_compare_schema(job_id)
+    shutil.rmtree(os.path.join(COMPARE_UPLOADS_DIR, str(job_id)), ignore_errors=True)
     return {"ok": True}
 
 
@@ -798,13 +828,6 @@ def ingest_compare(job_id: int):
         except Exception as e:
             logger.exception("Ingest job failed job_id=%d", job_id)
             _job_ingest_progress[job_id] = {"type": "error", "message": str(e)}
-        finally:
-            for path in [tmp_path_left, tmp_path_right]:
-                if path and os.path.exists(path):
-                    try:
-                        os.unlink(path)
-                    except Exception:
-                        pass
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -848,6 +871,8 @@ def create_run(job_id: int, data: CompareRunCreate):
 
     with get_cursor() as (cur, _conn):
         notes_val = (data.notes or "").strip() or None
+        llm_left_cols  = (data.llm_judge_left_columns  or []) if data.llm_judge_enabled else None
+        llm_right_cols = (data.llm_judge_right_columns or []) if data.llm_judge_enabled else None
         cur.execute("""
             INSERT INTO public.compare_runs
                 (job_id, name, status, top_k, vector_enabled,
@@ -855,8 +880,9 @@ def create_run(job_id: int, data: CompareRunCreate):
                  reranker_enabled, reranker_model, reranker_url,
                  llm_judge_enabled, llm_judge_url, llm_judge_model, llm_judge_prompt,
                  llm_judge_prompt_preset_tag,
-                 llm_judge_max_requests_per_minute, notes)
-            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 llm_judge_max_requests_per_minute, notes,
+                 llm_judge_left_columns, llm_judge_right_columns)
+            VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, [
             job_id,
@@ -874,6 +900,8 @@ def create_run(job_id: int, data: CompareRunCreate):
             preset_tag,
             data.llm_judge_max_requests_per_minute if data.llm_judge_enabled else None,
             notes_val,
+            llm_left_cols or None,
+            llm_right_cols or None,
         ])
         run_id = cur.fetchone()["id"]
 
@@ -1704,6 +1732,8 @@ def _serialize_job(row: dict) -> dict:
         "embed_url": row.get("embed_url"),
         "embed_model": row.get("embed_model"),
         "embed_dims": row.get("embed_dims"),
+        "all_columns_left":  row.get("all_columns_left")  or [],
+        "all_columns_right": row.get("all_columns_right") or [],
         "created_at": row["created_at"],
     }
 
@@ -1728,6 +1758,8 @@ def _serialize_run(row: dict) -> dict:
         "llm_judge_prompt": row.get("llm_judge_prompt"),
         "llm_judge_prompt_preset_tag": row.get("llm_judge_prompt_preset_tag"),
         "llm_judge_max_requests_per_minute": row.get("llm_judge_max_requests_per_minute"),
+        "llm_judge_left_columns":  row.get("llm_judge_left_columns"),
+        "llm_judge_right_columns": row.get("llm_judge_right_columns"),
         "row_count_left": row.get("row_count_left"),
         "created_at": row["created_at"],
         "completed_at": row.get("completed_at"),

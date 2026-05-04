@@ -13,6 +13,7 @@ Pipeline is split into two phases:
 import json
 import json_repair
 import logging
+import os
 import re
 import time
 from collections import defaultdict
@@ -194,6 +195,80 @@ def _job_row_filters(job: dict, key: str) -> list[dict]:
         except json.JSONDecodeError:
             return []
     return []
+
+
+def _build_excel_content_map(
+    tmp_path: str,
+    sheet_name: str | None,
+    row_filters: list[dict],
+    llm_columns: list[str],
+) -> dict[int, str]:
+    """Returns {original_row_idx: llm_content_string}. Empty dict on any failure — caller falls back to contextual_content."""
+    if not tmp_path or not os.path.exists(tmp_path):
+        return {}
+    try:
+        df = read_compare_dataframe(tmp_path, sheet_name)
+        df = apply_compare_row_filters(df, row_filters)
+        result: dict[int, str] = {}
+        for i, (_, row) in enumerate(df.iterrows()):
+            sheet = row.get("sheet_name", "")
+            result[i] = build_contextual_content(row, llm_columns, None, sheet)
+        return result
+    except Exception:
+        logger.warning("_build_excel_content_map() failed for %s — falling back to contextual_content", tmp_path)
+        return {}
+
+
+def _build_llm_content_map(
+    schema_name: str,
+    all_ids: list[int],
+    job: dict,
+    llm_left_columns: list[str] | None,
+    llm_right_columns: list[str] | None,
+) -> dict[int, str]:
+    """
+    Build a record-id → text map for LLM judge input.
+
+    When custom columns are set, re-reads the stored Excel and builds content from those columns.
+    Falls back to contextual_content from the DB for any record whose side has no custom columns,
+    or when the Excel file cannot be read.
+    """
+    with get_cursor() as (cur, _conn):
+        cur.execute(
+            f"SELECT id, side, original_row, contextual_content FROM {schema_name}.records WHERE id = ANY(%s)",
+            [all_ids],
+        )
+        records = {row["id"]: dict(row) for row in cur.fetchall()}
+
+    left_excel: dict[int, str] = {}
+    right_excel: dict[int, str] = {}
+    if llm_left_columns:
+        left_excel = _build_excel_content_map(
+            job.get("tmp_path_left", ""),
+            job.get("sheet_name_left"),
+            _job_row_filters(job, "row_filters_left"),
+            llm_left_columns,
+        )
+    if llm_right_columns:
+        right_excel = _build_excel_content_map(
+            job.get("tmp_path_right", ""),
+            job.get("sheet_name_right"),
+            _job_row_filters(job, "row_filters_right"),
+            llm_right_columns,
+        )
+
+    content_map: dict[int, str] = {}
+    for rid, rec in records.items():
+        side = rec["side"]
+        orig = rec.get("original_row")
+        ctx  = rec.get("contextual_content") or ""
+        if side == "left"  and llm_left_columns  and orig is not None and orig in left_excel:
+            content_map[rid] = left_excel[orig]
+        elif side == "right" and llm_right_columns and orig is not None and orig in right_excel:
+            content_map[rid] = right_excel[orig]
+        else:
+            content_map[rid] = ctx
+    return content_map
 
 
 # ── Ingestion ──────────────────────────────────────────────────────────────
@@ -943,6 +1018,7 @@ def iter_run_llm_judge(
     results_out: list,
     prompt: str | None = None,
     max_requests_per_minute: int = 0,
+    content_map_override: dict[int, str] | None = None,
 ) -> Generator[dict, None, None]:
     """
     Score (left_id, right_id, cosine, rerank_score) tuples using an LLM judge.
@@ -954,19 +1030,23 @@ def iter_run_llm_judge(
     max_requests_per_minute: > 0 enforces minimum spacing between chat call starts.
 
     prompt: compare_runs.llm_judge_prompt; empty → built-in default, non-empty → full system prompt.
+    content_map_override: pre-built record_id → text map (skips the DB query when provided).
     """
     system_prompt = effective_llm_judge_system_prompt(prompt)
     client = OpenAI(base_url=url, api_key="ollama")
 
     all_ids = list({row[0] for row in candidates} | {row[1] for row in candidates})
-    content_map: dict[int, str] = {}
-    with get_cursor() as (cur, _conn):
-        cur.execute(
-            f"SELECT id, contextual_content FROM {schema_name}.records WHERE id = ANY(%s)",
-            [all_ids],
-        )
-        for row in cur.fetchall():
-            content_map[row["id"]] = row["contextual_content"] or ""
+    if content_map_override is not None:
+        content_map = content_map_override
+    else:
+        content_map: dict[int, str] = {}
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                f"SELECT id, contextual_content FROM {schema_name}.records WHERE id = ANY(%s)",
+                [all_ids],
+            )
+            for row in cur.fetchall():
+                content_map[row["id"]] = row["contextual_content"] or ""
 
     total_pairs = len(candidates)
     if total_pairs == 0:
@@ -1138,6 +1218,7 @@ def run_llm_judge(
     model: str,
     prompt: str | None = None,
     max_requests_per_minute: int = 0,
+    content_map_override: dict[int, str] | None = None,
 ) -> list:
     """Non-streaming wrapper."""
     out = []
@@ -1149,6 +1230,7 @@ def run_llm_judge(
         results_out=out,
         prompt=prompt,
         max_requests_per_minute=max_requests_per_minute,
+        content_map_override=content_map_override,
     ):
         pass
     return out
@@ -1225,6 +1307,14 @@ def rerun_llm_judge_for_left(job_id: int, run_id: int, left_id: int) -> dict:
         )
 
     rpm = effective_llm_judge_max_rpm(run)
+    llm_left_cols  = run.get("llm_judge_left_columns")  or []
+    llm_right_cols = run.get("llm_judge_right_columns") or []
+    content_map_override = None
+    if llm_left_cols or llm_right_cols:
+        all_pair_ids = list({p[0] for p in pairs} | {p[1] for p in pairs})
+        content_map_override = _build_llm_content_map(
+            schema_name, all_pair_ids, job, llm_left_cols or None, llm_right_cols or None
+        )
     judged = run_llm_judge(
         schema_name,
         pairs,
@@ -1232,6 +1322,7 @@ def rerun_llm_judge_for_left(job_id: int, run_id: int, left_id: int) -> dict:
         model=model,
         prompt=run.get("llm_judge_prompt") or None,
         max_requests_per_minute=rpm,
+        content_map_override=content_map_override,
     )
 
     scored_tuples = [
@@ -1523,6 +1614,14 @@ def run_pipeline(
             rpm_eff = effective_llm_judge_max_rpm(run)
             t_llm0 = time.monotonic()
             judged: list[tuple] = []
+            llm_left_cols  = run.get("llm_judge_left_columns")  or []
+            llm_right_cols = run.get("llm_judge_right_columns") or []
+            llm_content_override = None
+            if llm_left_cols or llm_right_cols:
+                all_pair_ids = list({p[0] for p in pairs_with_rerank} | {p[1] for p in pairs_with_rerank})
+                llm_content_override = _build_llm_content_map(
+                    schema_name, all_pair_ids, job, llm_left_cols or None, llm_right_cols or None
+                )
             for prog in iter_run_llm_judge(
                 schema_name,
                 pairs_with_rerank,
@@ -1531,6 +1630,7 @@ def run_pipeline(
                 results_out=judged,
                 prompt=run.get("llm_judge_prompt") or None,
                 max_requests_per_minute=rpm_eff,
+                content_map_override=llm_content_override,
             ):
                 yield prog
             metrics["llm_judge_ms"] = int((time.monotonic() - t_llm0) * 1000)

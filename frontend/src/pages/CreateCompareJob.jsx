@@ -1356,6 +1356,8 @@ export default function CreateCompareJob() {
         embed_url: url || null,
         embed_api_key: url ? (embedApiKey.trim() || null) : null,
         embed_model: url ? (embedModel.trim() || null) : null,
+        all_columns_left:  state.columnsLeft  || [],
+        all_columns_right: state.columnsRight || [],
       })
       setCreatedJobId(job.id)
     } catch (e) {

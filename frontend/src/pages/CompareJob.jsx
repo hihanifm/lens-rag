@@ -1531,6 +1531,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [llmJudgeDefaultsErr, setLlmJudgeDefaultsErr] = useState('')
   const [llmMaxRpm, setLlmMaxRpm] = useState('')
   const [runNotes, setRunNotes] = useState('')
+  const [llmLeftColumns,  setLlmLeftColumns]  = useState([])
+  const [llmRightColumns, setLlmRightColumns] = useState([])
   /** When set, run submit can attach llm_judge_prompt_preset_tag if textarea still matches body. */
   const [loadedPresetRef, setLoadedPresetRef] = useState(null)
 
@@ -1694,6 +1696,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
         llm_judge_prompt: promptText,
         llm_judge_prompt_preset_tag: presetTag,
         llm_judge_max_requests_per_minute: llmEnabled ? llmRpmPayload : null,
+        llm_judge_left_columns:  llmEnabled && llmLeftColumns.length  ? llmLeftColumns  : null,
+        llm_judge_right_columns: llmEnabled && llmRightColumns.length ? llmRightColumns : null,
       }
       const run = await onCreated(data)
       if (!run) return
@@ -1864,7 +1868,13 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
               <input
                 type="checkbox"
                 checked={llmEnabled}
-                onChange={e => setLlmEnabled(e.target.checked)}
+                onChange={e => {
+                  setLlmEnabled(e.target.checked)
+                  if (!e.target.checked) {
+                    setLlmLeftColumns([])
+                    setLlmRightColumns([])
+                  }
+                }}
                 disabled={!vectorEnabled}
                 className="rounded border-gray-300 text-purple-600"
               />
@@ -2119,6 +2129,66 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                       Enforces a minimum gap of 60 ÷ N seconds between judge calls so sustained traffic stays under N requests per minute.
                     </p>
                   </div>
+
+                  {/* LLM judge column overrides — optional, per side */}
+                  {(job?.all_columns_left?.length > 0 || job?.all_columns_right?.length > 0) && (
+                    <div className="mt-4 border-t border-purple-100 pt-3 space-y-3">
+                      <p className="text-xs font-medium text-gray-600">
+                        LLM judge columns{' '}
+                        <span className="text-gray-400 font-normal">(leave empty to use the same columns as embedding)</span>
+                      </p>
+                      {job?.all_columns_left?.length > 0 && (
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">{job.label_left || 'Left'}</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {job.all_columns_left.map(col => (
+                              <button
+                                key={col}
+                                type="button"
+                                onClick={() =>
+                                  setLlmLeftColumns(prev =>
+                                    prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+                                  )
+                                }
+                                className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                                  llmLeftColumns.includes(col)
+                                    ? 'bg-purple-600 text-white border-purple-600'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                                }`}
+                              >
+                                {col}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {job?.all_columns_right?.length > 0 && (
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">{job.label_right || 'Right'}</label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {job.all_columns_right.map(col => (
+                              <button
+                                key={col}
+                                type="button"
+                                onClick={() =>
+                                  setLlmRightColumns(prev =>
+                                    prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+                                  )
+                                }
+                                className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                                  llmRightColumns.includes(col)
+                                    ? 'bg-purple-600 text-white border-purple-600'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                                }`}
+                              >
+                                {col}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

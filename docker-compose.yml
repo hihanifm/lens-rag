@@ -70,6 +70,7 @@ services:
       RERANKER_MODEL: ${RERANKER_MODEL:-bbjson/bge-reranker-base:latest}
     volumes:
       - lens-rag-uploads:/data/projects
+      - lens-rag-compare-uploads:/app/uploads/compare
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
 
@@ -134,6 +135,7 @@ services:
       FRONTEND_DIST_DIR: /app/frontend/dist
     volumes:
       - lens-rag-uploads-prod:/data/projects
+      - lens-rag-compare-uploads-prod:/app/uploads/compare
       - ./frontend/dist:/app/frontend/dist:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"  # reach Ollama on host
@@ -143,3 +145,5 @@ volumes:
   lens-rag-postgres-prod-data:
   lens-rag-uploads:
   lens-rag-uploads-prod:
+  lens-rag-compare-uploads:
+  lens-rag-compare-uploads-prod:
