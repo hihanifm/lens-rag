@@ -69,7 +69,7 @@ from evaluate import stream_ragas_export
 from clustering import cluster as do_cluster, stream_cluster
 from compare_router import router as compare_router
 
-app = FastAPI(title="LENS API", version="1.7.0", root_path=ROOT_PATH)
+app = FastAPI(title="LENS API", version="1.7.1", root_path=ROOT_PATH)
 _STARTED_AT = time.time()
 
 app.add_middleware(
