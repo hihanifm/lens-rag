@@ -246,9 +246,21 @@ CREATE TABLE compare_{id}.run_{run_id}_matches (
 CREATE INDEX ON compare_{id}.run_{run_id}_matches (left_id, rank);
 
 CREATE TABLE compare_{id}.run_{run_id}_decisions (
-  left_id           INTEGER PRIMARY KEY,
-  matched_right_id  INTEGER,
-  decided_at        TIMESTAMP DEFAULT NOW()
+  left_id            INTEGER PRIMARY KEY,
+  matched_right_id   INTEGER,          -- legacy single-id (still readable)
+  matched_right_ids  INTEGER[],        -- authoritative multi-select ([] = explicit no-match)
+  review_comment     TEXT,
+  review_outcome     TEXT,             -- no_match | partial | fail | system_fail
+  decided_at         TIMESTAMP DEFAULT NOW()
+);
+
+-- Shared across all jobs: LLM judge prompt presets
+CREATE TABLE public.compare_llm_prompt_templates (
+  id      SERIAL PRIMARY KEY,
+  name    TEXT NOT NULL,               -- unique
+  body    TEXT NOT NULL,               -- domain-only overlay (suffix appended by code)
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
@@ -381,26 +393,38 @@ See module docstring in `compare_router.py` for the full list. Summary:
 
 | Method | Path                                               | Description                                                                                                                              |
 | ------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/compare/preview-left` / `preview-right`          | Multipart upload → columns, sheet_names, row_count, tmp_path                                                                             |
-| POST   | `/compare/preview-context`                         | `{ tmp_path, match_columns, n }` → sample merged strings (server splits match_columns into context vs content heuristically for preview) |
-| POST   | `/compare/`                                        | Create job + schema (embed settings only; no pipeline yet)                                                                               |
-| GET    | `/compare/`                                        | List jobs                                                                                                                                |
-| GET    | `/compare/{job_id}`                                | Job detail (secrets / tmp paths stripped)                                                                                                |
-| PATCH  | `/compare/{job_id}`                                | Update `name` / `notes`                                                                                                                  |
-| DELETE | `/compare/{job_id}`                                | Drop job schema + job + all runs                                                                                                         |
-| GET    | `/compare/{job_id}/ingest`                         | SSE Phase 1 — embed left + right into `records`                                                                                          |
-| POST   | `/compare/{job_id}/runs`                           | Create run (`top_k`, vector / reranker / llm_judge flags + URLs/models)                                                                  |
-| GET    | `/compare/{job_id}/runs`                           | List runs                                                                                                                                |
-| GET    | `/compare/{job_id}/runs/{run_id}`                  | Run detail                                                                                                                               |
-| DELETE | `/compare/{job_id}/runs/{run_id}`                  | Drop run tables + row                                                                                                                    |
-| GET    | `/compare/{job_id}/runs/{run_id}/execute`          | SSE Phase 2 — populate `run_{run_id}_matches`                                                                                            |
-| GET    | `/compare/{job_id}/runs/{run_id}/review`           | `{ total_left, reviewed, pending, no_match, matched }`                                                                                   |
-| GET    | `/compare/{job_id}/runs/{run_id}/review/next`      | Next `ReviewItem` (same query params as before; **run-scoped**)                                                                          |
-| POST   | `/compare/{job_id}/runs/{run_id}/review/{left_id}` | Upsert decision (204); body `matched_right_id`, optional `review_comment`, optional `review_outcome` (`no_match`, `partial`, `fail`, `system_fail`) |
-| GET    | `/compare/{job_id}/runs/{run_id}/export`           | Excel download; `type=raw` or `type=confirmed` (per run)                                                                                 |
-| GET    | `/compare/{job_id}/browse`                         | Paginated raw `records` (optional `side=left|right`)                                                                                     |
-| GET    | `/compare/{job_id}/runs/{run_id}/browse-raw`       | Slice of match pairs + scores for UI                                                                                                     |
-| GET    | `/compare/{job_id}/config-stats`                   | Job config + stats blob for UI / debugging                                                                                               |
+| POST   | `/compare/preview-left` / `preview-right`                   | Multipart upload → columns, sheet_names, row_count, tmp_path                                                                             |
+| POST   | `/compare/preview-context`                                  | `{ tmp_path, match_columns, n }` → sample merged strings (server splits match_columns into context vs content heuristically for preview) |
+| POST   | `/compare/preview-row-stats`                                | Row counts after sheet + column filters                                                                                                  |
+| POST   | `/compare/preview-column-values`                            | Distinct values for a column (filter picker)                                                                                             |
+| POST   | `/compare/preview-column-samples`                           | First N row(s) per column (column picker; default 1)                                                                                     |
+| GET    | `/compare/llm-judge-defaults`                               | Built-in default judge prompt + suffix snippet + token settings                                                                          |
+| GET    | `/compare/prompt-templates`                                 | List LLM judge preset names (id + name)                                                                                                  |
+| GET    | `/compare/prompt-templates/{id}`                            | Full preset body                                                                                                                         |
+| POST   | `/compare/prompt-templates`                                 | Create preset                                                                                                                            |
+| PATCH  | `/compare/prompt-templates/{id}`                            | Update preset                                                                                                                            |
+| DELETE | `/compare/prompt-templates/{id}`                            | Delete preset                                                                                                                            |
+| POST   | `/compare/`                                                 | Create job + schema (embed settings only; no pipeline yet)                                                                               |
+| GET    | `/compare/`                                                 | List jobs                                                                                                                                |
+| GET    | `/compare/{job_id}`                                         | Job detail (secrets / tmp paths stripped)                                                                                                |
+| PATCH  | `/compare/{job_id}`                                         | Update `name` / `notes`                                                                                                                  |
+| DELETE | `/compare/{job_id}`                                         | Drop job schema + job + all runs                                                                                                         |
+| GET    | `/compare/{job_id}/ingest`                                  | SSE Phase 1 — embed left + right into `records`                                                                                          |
+| POST   | `/compare/{job_id}/runs`                                    | Create run (`top_k`, vector / reranker / llm_judge flags + URLs/models)                                                                  |
+| GET    | `/compare/{job_id}/runs`                                    | List runs                                                                                                                                |
+| GET    | `/compare/{job_id}/runs/{run_id}`                           | Run detail                                                                                                                               |
+| PATCH  | `/compare/{job_id}/runs/{run_id}`                           | Rename run                                                                                                                               |
+| DELETE | `/compare/{job_id}/runs/{run_id}`                           | Drop run tables + row                                                                                                                    |
+| GET    | `/compare/{job_id}/runs/{run_id}/execute`                   | SSE Phase 2 — populate `run_{run_id}_matches`; optional `?max_left_rows=N`                                                               |
+| GET    | `/compare/{job_id}/runs/{run_id}/review`                    | `{ total_left, reviewed, pending, no_match, matched }`                                                                                   |
+| GET    | `/compare/{job_id}/runs/{run_id}/review/next`               | Next `ReviewItem` (optional `?text_contains=`; **run-scoped**)                                                                           |
+| POST   | `/compare/{job_id}/runs/{run_id}/review/{left_id}`          | Upsert decision (204); body `matched_right_ids` (authoritative array), optional `review_comment`, optional `review_outcome` (`no_match`, `partial`, `fail`, `system_fail`) |
+| DELETE | `/compare/{job_id}/runs/{run_id}/review/{left_id}`          | Clear decision (back to pending)                                                                                                         |
+| POST   | `/compare/{job_id}/runs/{run_id}/retry-llm-judge/{left_id}` | Re-run LLM judge for one left row (uses stored candidates)                                                                               |
+| GET    | `/compare/{job_id}/runs/{run_id}/export`                    | Excel download; `type=raw` or `type=confirmed` (per run)                                                                                 |
+| GET    | `/compare/{job_id}/browse`                                  | Paginated raw `records` (optional `side=left|right`)                                                                                     |
+| GET    | `/compare/{job_id}/runs/{run_id}/browse-raw`                | Slice of match pairs + scores for UI                                                                                                     |
+| GET    | `/compare/{job_id}/config-stats`                            | Job config + stats blob for UI / debugging                                                                                               |
 
 
 **Export details** (`export?type=` on a **run**):
@@ -534,6 +558,10 @@ Read-only ingestion config + editable name / default K / display columns; rerank
 
 Job-level: ingest status, optional **Browse** embedded rows, **Config / stats** panel (`GET /compare/{job_id}/config-stats`), **Runs** list (create / delete / select). Each run: **Execute** pipeline (SSE), then **Review** (same card UX as before; primary score prefers `final_score`, then normalized rerank, else cosine). Candidate badges can show **C / R / LLM** when scores exist. **Export** raw vs confirmed is **per run**. Top-k and pipeline toggles are chosen when creating the run, not at job create time.
 
+### Prompt Presets (`/prompts`)
+
+CRUD page for `public.compare_llm_prompt_templates`. Lists saved presets; create / edit / delete via `prompt-templates` API. Presets are domain-only overlays — the fixed suffix (scoring rubric, JSON contract) is appended by `comparator.effective_llm_judge_system_prompt()`, not stored here.
+
 ### History (`/history`), System (`/system`)
 
 History: localStorage-backed table with type filter, expand-to-results, re-run button, CSV export.
@@ -557,6 +585,7 @@ backend/
   comparator.py      ← run_ingest_job(), run_pipeline(), vector/rerank/LLM stages;
                        reuses embedder + ingestion
   compare_router.py  ← /compare/*; _job_ingest_progress, _run_progress
+  prompt_seeds.py    ← starter rows for compare_llm_prompt_templates (seeded at init)
   search.py          ← vector + BM25 + RRF + reranker (streaming SSE)
   clustering.py      ← KMeans/DBSCAN over stored embeddings
   projects.py        ← project CRUD helpers
@@ -577,6 +606,7 @@ frontend/
       Settings.jsx
       System.jsx
       History.jsx
+      PromptPresets.jsx    ← LLM judge prompt template CRUD (/prompts)
     components/
       ResultsTable.jsx
       StatsPanel.jsx
@@ -584,6 +614,7 @@ frontend/
       Layout.jsx
       PinGate.jsx
       RerankConfigModal.jsx
+      FileDropZone.jsx
     contexts/
       ProjectStateContext.jsx
     hooks/
