@@ -269,6 +269,10 @@ class CompareJobResponse(BaseModel):
     embed_dims: Optional[int] = None
     all_columns_left:  List[str] = Field(default_factory=list)
     all_columns_right: List[str] = Field(default_factory=list)
+    context_columns_left: List[str] = Field(default_factory=list)
+    content_column_left: Optional[str] = None
+    context_columns_right: List[str] = Field(default_factory=list)
+    content_column_right: Optional[str] = None
     created_at: datetime
 
 

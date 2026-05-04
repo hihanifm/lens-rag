@@ -1584,7 +1584,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
                             WHEN 'partial' THEN 'partial'
                             WHEN 'fail' THEN 'fail'
                             WHEN 'system_fail' THEN 'system failure'
-                            ELSE ''
+                            ELSE 'matched'
                         END AS review_outcome_display,
                         COALESCE(d.review_comment, '') AS review_comment,
                         d.decided_at
