@@ -1734,6 +1734,10 @@ def _serialize_job(row: dict) -> dict:
         "embed_dims": row.get("embed_dims"),
         "all_columns_left":  row.get("all_columns_left")  or [],
         "all_columns_right": row.get("all_columns_right") or [],
+        "context_columns_left":  row.get("context_columns_left") or [],
+        "content_column_left":   row.get("content_column_left"),
+        "context_columns_right": row.get("context_columns_right") or [],
+        "content_column_right":  row.get("content_column_right"),
         "created_at": row["created_at"],
     }
 

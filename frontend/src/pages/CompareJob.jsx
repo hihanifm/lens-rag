@@ -95,6 +95,70 @@ function formatPipelineDurationMs(ms) {
   return `${Math.floor(sec / 60)}m ${sec % 60}s`
 }
 
+function uniqOrderedColumnNames(values) {
+  if (!Array.isArray(values)) return []
+  const seen = new Set()
+  const out = []
+  for (const x of values) {
+    if (x == null) continue
+    const s = String(x).trim()
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+  return out
+}
+
+function effectiveEmbeddingColumns(job, side) {
+  if (!job) return []
+  if (side === 'left') {
+    const ctx = job.context_columns_left
+    const parts = [...(Array.isArray(ctx) ? ctx : []), job.content_column_left].filter(Boolean)
+    return uniqOrderedColumnNames(parts)
+  }
+  const ctx = job.context_columns_right
+  const parts = [...(Array.isArray(ctx) ? ctx : []), job.content_column_right].filter(Boolean)
+  return uniqOrderedColumnNames(parts)
+}
+
+function effectiveJudgeColumns(job, run, side) {
+  const emb = effectiveEmbeddingColumns(job, side)
+  if (side === 'left') {
+    const ov = run?.llm_judge_left_columns
+    if (Array.isArray(ov) && ov.length > 0) return uniqOrderedColumnNames(ov)
+    return emb
+  }
+  const ov = run?.llm_judge_right_columns
+  if (Array.isArray(ov) && ov.length > 0) return uniqOrderedColumnNames(ov)
+  return emb
+}
+
+function sameStringSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  const as = new Set(a)
+  const bs = new Set(b)
+  if (as.size !== bs.size) return false
+  for (const x of as) if (!bs.has(x)) return false
+  return true
+}
+
+function judgeColumnsDifferFromEmbedding(job, run) {
+  if (!run?.llm_judge_enabled) return false
+  const el = effectiveEmbeddingColumns(job, 'left')
+  const er = effectiveEmbeddingColumns(job, 'right')
+  const jl = effectiveJudgeColumns(job, run, 'left')
+  const jr = effectiveJudgeColumns(job, run, 'right')
+  return !sameStringSet(el, jl) || !sameStringSet(er, jr)
+}
+
+function judgeEmbeddingDivergenceTooltip(job, run) {
+  const el = effectiveEmbeddingColumns(job, 'left')
+  const er = effectiveEmbeddingColumns(job, 'right')
+  const jl = effectiveJudgeColumns(job, run, 'left')
+  const jr = effectiveJudgeColumns(job, run, 'right')
+  return `Embedding L: ${el.join(', ') || '—'} · R: ${er.join(', ') || '—'} — Judge L: ${jl.join(', ') || '—'} · R: ${jr.join(', ') || '—'}`
+}
+
 function RunStatsPane({ job, run }) {
   const [expanded, setExpanded] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -184,6 +248,19 @@ function RunStatsPane({ job, run }) {
       ['Avg ms / pair (amortized)', metrics.llm_judge_avg_ms_per_pair != null ? `${metrics.llm_judge_avg_ms_per_pair} ms` : '—'],
       ['Response shape', '{ "scores": [number, …] } per left row (one score per candidate); K=1 may use { "score": number }'],
     )
+  }
+  if (run.llm_judge_enabled && judgeColumnsDifferFromEmbedding(job, run)) {
+    const jl = effectiveJudgeColumns(job, run, 'left')
+    const jr = effectiveJudgeColumns(job, run, 'right')
+    llmParamRows.push([
+      'LLM judge columns',
+      <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+        <span>
+          {(jl.join(', ') || '—')} · {jr.join(', ') || '—'}
+        </span>
+        <span className="text-amber-700 font-semibold shrink-0 whitespace-nowrap">Differs from embedding</span>
+      </span>,
+    ])
   }
 
   const embedRows = [
@@ -2621,6 +2698,14 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated, onDupli
         {pipelineBadges.map(b => (
           <span key={b} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{b}</span>
         ))}
+        {run.llm_judge_enabled && judgeColumnsDifferFromEmbedding(job, run) && (
+          <span
+            className="text-xs bg-amber-100 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-full shrink-0"
+            title={judgeEmbeddingDivergenceTooltip(job, run)}
+          >
+            Judge cols differ
+          </span>
+        )}
         <div className="flex items-center gap-2 ml-auto shrink-0 flex-wrap justify-end">
           <span className="text-xs text-gray-400 whitespace-nowrap">K={run.top_k}</span>
           {onDuplicateRun && (
@@ -2873,6 +2958,14 @@ function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplica
                       title={run.llm_judge_model ? `LLM judge: ${run.llm_judge_model}` : 'LLM judge'}
                     >
                       {run.llm_judge_model ? `LLM: ${run.llm_judge_model}` : 'LLM judge'}
+                    </span>
+                  )}
+                  {run.llm_judge_enabled && judgeColumnsDifferFromEmbedding(job, run) && (
+                    <span
+                      className="text-xs bg-amber-100 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0"
+                      title={judgeEmbeddingDivergenceTooltip(job, run)}
+                    >
+                      Judge cols differ
                     </span>
                   )}
                   <span className="text-xs text-gray-400 whitespace-nowrap">K={run.top_k}</span>
