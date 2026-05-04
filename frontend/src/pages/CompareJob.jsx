@@ -474,6 +474,10 @@ const REVIEW_OUTCOME_CHIPS = [
   { value: 'system_fail', label: 'System failure' },
 ]
 
+function nullOutcomeChipLabel(hasMatchSelection) {
+  return hasMatchSelection ? 'Matched' : 'None'
+}
+
 const FAIL_OUTCOME_CONFIRM_SKIP_KEY = 'lens_compare_review_fail_confirm_skip'
 
 function readFailOutcomeConfirmSkip() {
@@ -987,9 +991,11 @@ function ReviewTab({ job, run }) {
                     {REVIEW_OUTCOME_CHIPS.map(({ value, label }) => {
                       const curOc = outcomeByLeft.get(it.left_id) ?? null
                       const active = value === null ? curOc == null : curOc === value
+                      const displayLabel =
+                        value === null ? nullOutcomeChipLabel(effectiveIds.length > 0) : label
                       return (
                         <button
-                          key={label}
+                          key={value ?? 'default'}
                           type="button"
                           disabled={
                             isSaving || savingLeftId != null
@@ -1006,7 +1012,7 @@ function ReviewTab({ job, run }) {
                               : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                           } disabled:opacity-40`}
                         >
-                          {label}
+                          {displayLabel}
                         </button>
                       )
                     })}
