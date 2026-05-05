@@ -36,7 +36,6 @@ services:
 
   lens-rag-api:
     profiles: ["dev"]
-    platform: linux/amd64
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -101,7 +100,6 @@ services:
 
   lens-rag-api-prod:
     profiles: ["prod"]
-    platform: linux/amd64
     build:
       context: .
       dockerfile: backend/Dockerfile

@@ -129,13 +129,22 @@ clean:
 	docker image prune -a -f
 	@echo "Done. lens-rag-postgres-data and lens-rag-uploads are untouched."
 
-# Run this once on the Linux server (where pip works) before make build.
-# Downloads Linux/Python 3.11 compatible wheels so Docker installs offline.
+# Downloads Linux wheels for both amd64 (lab) and arm64 (Mac) into pip-cache/.
+# Run once after changing requirements.txt, from any machine with internet access.
 pip-cache:
 	pip download \
-	  --platform manylinux2014_x86_64 \
 	  --platform manylinux_2_17_x86_64 \
+	  --platform manylinux2014_x86_64 \
 	  --platform linux_x86_64 \
+	  --python-version 3.11 \
+	  --implementation cp \
+	  --abi cp311 \
+	  --only-binary=:all: \
+	  -r backend/requirements.txt \
+	  -d pip-cache/
+	pip download \
+	  --platform manylinux_2_17_aarch64 \
+	  --platform linux_aarch64 \
 	  --python-version 3.11 \
 	  --implementation cp \
 	  --abi cp311 \
