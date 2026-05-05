@@ -70,7 +70,7 @@ Stack-specific detail (React, FastAPI, Git, workflow): [BEST_PRACTICES.md](BEST_
 ## Hard Constraints
 
 - **NO external API calls** — no OpenAI, no Anthropic, no cloud services, nothing outside the network
-- **Embedding**: bge-m3 via Ollama running on host GPU server (A4000, 16GB VRAM)
+- **Embedding**: qwen3-embedding:0.6b (preferred) or bge-m3:latest via Ollama on host GPU server (A4000, 16GB VRAM); resolved at startup from `EMBED_MODEL_PREFERENCES` in `config.py`
 - **Reranker**: bge-reranker-base via Ollama (same host)
 - **All config in config.py** — never hardcode URLs or model names in logic files
 - **Ollama runs on HOST** — not inside Docker (needs direct GPU access)
@@ -116,7 +116,9 @@ EMBEDDING_PROVIDER=ollama
 
 # Ollama settings (used when EMBEDDING_PROVIDER=ollama)
 OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
-OLLAMA_EMBED_MODEL=bge-m3
+# Startup probes Ollama and selects from EMBED_MODEL_PREFERENCES (qwen3-embedding:0.6b → bge-m3:latest).
+# Set here only to pin a specific model.
+OLLAMA_EMBED_MODEL=qwen3-embedding:0.6b
 EMBEDDING_DIMS=1024
 
 # OpenAI settings (used when EMBEDDING_PROVIDER=openai)
@@ -321,7 +323,7 @@ LIMIT k
 **Mode 2 — Topic / Keyword Search**
 
 ```
-Step 1: embed query → bge-m3
+Step 1: embed query → resolved embed model (default: qwen3-embedding:0.6b)
 Step 2: vector search → top 50 candidates (pgvector HNSW)
 Step 3: BM25 search  → top 50 candidates (tsvector GIN)
 Step 4: RRF merge    → top ~80 unique candidates
@@ -345,7 +347,8 @@ def rrf_merge(vector_results, bm25_results, k=60):
 **Phase 1 — job embedding** (`comparator.run_ingest_job`, driven by `GET /compare/{job_id}/ingest`):
 
 1. Ingest left and right rows into `compare_{job_id}.records` (shared embedder + `ingestion.read_excel` / `build_contextual_content`).
-2. Does **not** delete uploaded files — they are kept at `{COMPARE_UPLOADS_DIR}/{job_id}/` for use by Phase 2. Job status ends in `ready` (or `error`).
+2. Applies **asymmetric embedding prefixes**: left rows embedded with `embed_query_prefix` (instruction-aware query side), right rows with `embed_doc_prefix` (document side). Per-job values stored on `compare_jobs`; fall back to system defaults in `config.py` (`EMBED_QUERY_PREFIX` / `EMBED_DOC_PREFIX`). Empty string disables prefixing.
+3. Does **not** delete uploaded files — they are kept at `{COMPARE_UPLOADS_DIR}/{job_id}/` for use by Phase 2. Job status ends in `ready` (or `error`).
 
 **Phase 2 — run pipeline** (`comparator.run_pipeline`, driven by `GET /compare/{job_id}/runs/{run_id}/execute`):
 
@@ -597,6 +600,8 @@ backend/
   models.py          ← Pydantic models (Search + Compare)
   evaluate.py        ← RAGAS export builder + SSE streamer
   samples/           ← small Excel files for e2e + UI sample loaders
+  scripts/
+    batch_compare.py ← CLI: walk a folder tree, run full Compare pipeline per subfolder (requires compare.yml)
 frontend/
   src/
     pages/
@@ -647,9 +652,11 @@ BEST_PRACTICES.md
 1. Docker + Docker Compose installed
 2. Ollama running on the host with GPU access:
   ```bash
-  ollama pull bge-m3
+  ollama pull qwen3-embedding:0.6b   # preferred embed model; bge-m3:latest as fallback
   ollama pull bbjson/bge-reranker-base:latest
+  ollama pull gemma4:e4b             # preferred LLM judge; llama3.1:8b as fallback
   ```
+3. Copy `.env.example` to `.env` (or leave as-is — lab defaults work out of the box).
 
 ### Running the stack
 
@@ -757,6 +764,7 @@ Sample Excel files used by tests live in `backend/samples/`.
 - Hybrid BM25 + vector + RRF + reranker pipeline for Search (plus optional legacy single-shot mode)
 - Compare embeddings live once per job (`records`); **runs** recompute candidate sets and scores into `run_{id}_matches` so operators can A/B pipelines (`top_k`, reranker, LLM judge) without re-embedding
 - Compare vector stage is left→right nearest-neighbor over the shared `records` table (`side` filter)
-- `records` in compare job schemas holds both sides with a `side` column — single HNSW index per job
-- On-premise default: bge-m3 + bge-reranker-base via Ollama on host GPU; OpenAI embedding path is opt-in for development only
+- `records` in compare job schemas holds both sides with a `side` column; HNSW index is **partial** (`WHERE side = 'right'`) — left embeddings are query vectors, not search targets
+- Startup probes Ollama `/api/tags` and resolves embedding + LLM judge models from preference lists in `config.py` (`EMBED_MODEL_PREFERENCES`, `LLM_JUDGE_MODEL_PREFERENCES`); `embedder.effective_embed_model()` / `effective_llm_judge_model()` return the resolved values at call time
+- On-premise default: qwen3-embedding:0.6b + bge-reranker-base via Ollama on host GPU; OpenAI embedding path is opt-in for development only
 
