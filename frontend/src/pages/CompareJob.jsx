@@ -1668,19 +1668,12 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    getSystemConfig()
-      .then((cfg) => {
-        if (cancelled || !cfg?.embedding_url) return
-        if (cfg.embedding_provider === 'ollama') {
-          setLlmUrl((u) => (u.trim() ? u : cfg.embedding_url))
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
+    if (!llmJudgeDefaults) return
+    if (!initialRun) {
+      setLlmUrl((u) => (u.trim() ? u : llmJudgeDefaults.default_llm_judge_url || ''))
+      setLlmModel((m) => (m.trim() ? m : llmJudgeDefaults.default_llm_judge_model || ''))
     }
-  }, [])
+  }, [llmJudgeDefaults])
 
   useEffect(() => {
     if (!llmModelOptions.length) return

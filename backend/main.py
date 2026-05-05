@@ -23,6 +23,8 @@ from config import (
     RERANKER_MODEL,
     EMBED_QUERY_PREFIX,
     EMBED_DOC_PREFIX,
+    EMBED_MODEL_PREFERENCES,
+    LLM_JUDGE_MODEL_PREFERENCES,
 )
 
 logging.basicConfig(
@@ -64,7 +66,8 @@ from projects import (
     update_project_status,
     verify_project_pin,
 )
-from embedder import embed, list_models as list_embed_models, peek_rerank_strategy, verify_rerank_model
+import embedder as _embedder_module
+from embedder import embed, list_models as list_embed_models, peek_rerank_strategy, verify_rerank_model, resolve_model_from_ollama
 from ingestion import read_excel, ingest
 from search import search as do_search, topic_search_stream
 from evaluate import stream_ragas_export
@@ -99,6 +102,16 @@ def startup():
     migrate_compare_decisions_matched_right_ids()
     migrate_compare_matches_llm_judge_meta()
     logger.info("DB initialised")
+    if EMBEDDING_PROVIDER != "openai":
+        resolved_embed = resolve_model_from_ollama(EMBED_MODEL_PREFERENCES)
+        if resolved_embed:
+            _embedder_module._resolved_embed_model = resolved_embed
+            logger.info("Embedding model resolved: %s", resolved_embed)
+    resolved_llm = resolve_model_from_ollama(LLM_JUDGE_MODEL_PREFERENCES)
+    if resolved_llm:
+        _embedder_module._resolved_llm_judge_model = resolved_llm
+        logger.info("LLM judge model resolved: %s", resolved_llm)
+    _embedder_module._probe_ollama()
 
 _SAMPLES_DIR = os.environ.get(
     "SAMPLES_DIR",
@@ -391,7 +404,7 @@ def _get_system_config_response(request: Request | None, project_id: int | None)
     return SystemConfigResponse(
         embedding_provider=EMBEDDING_PROVIDER,
         embedding_url=embedding_url,
-        embedding_model=EMBEDDING_MODEL,
+        embedding_model=_embedder_module.effective_embed_model(),
         embedding_dims=EMBEDDING_DIMS,
         reranker_enabled=RERANKER_ENABLED,
         reranker_model=RERANKER_MODEL,

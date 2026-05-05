@@ -7,7 +7,14 @@ EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "ollama")
 
 # Ollama settings (used when EMBEDDING_PROVIDER=ollama)
 OLLAMA_BASE_URL    = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1")
-OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
+OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "qwen3-embedding:0.6b")
+
+# Ordered preference lists for startup model resolution.
+# At startup, Ollama /api/tags is probed; the first preference found in the
+# available model list is selected. If none match, the first available model
+# is used. If Ollama is unreachable, the configured OLLAMA_EMBED_MODEL is kept.
+EMBED_MODEL_PREFERENCES      = ["qwen3-embedding:0.6b", "bge-m3:latest"]
+LLM_JUDGE_MODEL_PREFERENCES  = ["gemma4:e4b", "llama3.1:8b"]
 
 # Base URL for native Ollama HTTP APIs (/api/...), derived from OpenAI-compatible .../v1 base
 _oba = (OLLAMA_BASE_URL or "").rstrip("/")

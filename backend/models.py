@@ -412,6 +412,8 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     max_tokens: int
     temperature: float
     default_max_requests_per_minute: int
+    default_llm_judge_url: str = ""
+    default_llm_judge_model: str = ""
 
 
 class ComparePromptTemplateSummary(BaseModel):

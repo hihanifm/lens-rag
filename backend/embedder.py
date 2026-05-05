@@ -15,6 +15,46 @@ from config import (
     RERANKER_MODEL,
 )
 
+# Resolved at startup by main.py after probing Ollama /api/tags.
+# None until startup runs (embed() falls back to EMBEDDING_MODEL from config).
+_resolved_embed_model: str | None = None
+_resolved_llm_judge_model: str | None = None
+
+
+def effective_embed_model() -> str:
+    return _resolved_embed_model or EMBEDDING_MODEL
+
+
+def effective_llm_judge_model() -> str | None:
+    return _resolved_llm_judge_model
+
+
+def resolve_model_from_ollama(preferences: list[str]) -> str | None:
+    """
+    Query Ollama /api/tags, return the first preference found in available models.
+    If none of the preferences are present, return the first available model.
+    Returns None if Ollama is unreachable or returns an empty list.
+    """
+    try:
+        resp = httpx.get(f"{OLLAMA_NATIVE_ORIGIN}/api/tags", timeout=5.0)
+        resp.raise_for_status()
+        available = [m.get("name", "") for m in resp.json().get("models", [])]
+        if not available:
+            logger.warning("resolve_model_from_ollama: Ollama returned empty model list")
+            return None
+        for pref in preferences:
+            if pref in available:
+                logger.info("resolve_model_from_ollama: selected preference %r", pref)
+                return pref
+        logger.info(
+            "resolve_model_from_ollama: no preference %s found, falling back to first available %r",
+            preferences, available[0],
+        )
+        return available[0]
+    except Exception as e:
+        logger.warning("resolve_model_from_ollama: Ollama unreachable — %s: %s", type(e).__name__, e)
+        return None
+
 logger = logging.getLogger("lens.embedder")
 
 # Embedding client — Ollama or OpenAI depending on provider
@@ -137,10 +177,11 @@ def _ensure_rerank_strategy(model: str) -> str:
 
 def _probe_ollama():
     """Fire a tiny embed request at startup to verify Ollama is reachable and the model is loaded."""
-    logger.info("Probing embed model — url=%s model=%s", OLLAMA_BASE_URL, EMBEDDING_MODEL)
+    model = effective_embed_model()
+    logger.info("Probing embed model — url=%s model=%s", OLLAMA_BASE_URL, model)
     t0 = time.monotonic()
     try:
-        resp = _embed_client.embeddings.create(model=EMBEDDING_MODEL, input="ping")
+        resp = _embed_client.embeddings.create(model=model, input="ping")
         elapsed = int((time.monotonic() - t0) * 1000)
         probe_dims = len(resp.data[0].embedding)
         logger.info("Embed probe OK — dims=%d elapsed_ms=%d", probe_dims, elapsed)
@@ -151,7 +192,7 @@ def _probe_ollama():
         logger.error(
             "Embed probe FAILED — url=%s model=%s — %s: %s\n"
             "  Is Ollama running on the host? Try: curl %s/models",
-            OLLAMA_BASE_URL, EMBEDDING_MODEL, type(e).__name__, e, OLLAMA_BASE_URL,
+            OLLAMA_BASE_URL, model, type(e).__name__, e, OLLAMA_BASE_URL,
             exc_info=True,
         )
 
@@ -164,7 +205,7 @@ def _probe_ollama():
         logger.info("Reranker disabled — skipping")
 
 
-_probe_ollama()
+# _probe_ollama() is called from main.py startup() after model resolution.
 
 
 def _get_embed_client(base_url: str | None, api_key: str | None):
@@ -182,7 +223,7 @@ def embed(
     model: str | None = None,
 ) -> list[float]:
     client = _get_embed_client(base_url, api_key)
-    eff_model = model or EMBEDDING_MODEL
+    eff_model = model or effective_embed_model()
     eff_url = base_url or OLLAMA_BASE_URL
     logger.debug("embed() → %s model=%s text_len=%d preview=%r", eff_url, eff_model, len(text), text[:80])
     t0 = time.monotonic()
@@ -207,7 +248,7 @@ def embed_batch(
     model: str | None = None,
 ) -> list[list[float]]:
     client = _get_embed_client(base_url, api_key)
-    eff_model = model or EMBEDDING_MODEL
+    eff_model = model or effective_embed_model()
     eff_url = base_url or OLLAMA_BASE_URL
     logger.debug("embed_batch() → %s model=%s count=%d", eff_url, eff_model, len(texts))
     t0 = time.monotonic()

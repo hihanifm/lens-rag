@@ -72,6 +72,7 @@ from config import (
     EMBEDDING_DIMS,
     LLM_JUDGE_MAX_REQUESTS_PER_MINUTE,
     LLM_JUDGE_MAX_TOKENS,
+    OLLAMA_BASE_URL,
 )
 from db import (
     create_compare_schema,
@@ -81,7 +82,7 @@ from db import (
     get_cursor,
     validate_pgvector_embedding_dims,
 )
-from embedder import embed as _embed_probe
+from embedder import embed as _embed_probe, effective_llm_judge_model as _effective_llm_judge_model
 from ingestion import (
     apply_compare_row_filters,
     build_contextual_content,
@@ -603,6 +604,8 @@ def get_llm_judge_defaults():
         max_tokens=LLM_JUDGE_MAX_TOKENS,
         temperature=LLM_JUDGE_TEMPERATURE,
         default_max_requests_per_minute=max(0, LLM_JUDGE_MAX_REQUESTS_PER_MINUTE),
+        default_llm_judge_url=OLLAMA_BASE_URL or "",
+        default_llm_judge_model=_effective_llm_judge_model() or "",
     )
 
 
