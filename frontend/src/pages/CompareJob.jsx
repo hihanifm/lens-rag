@@ -587,6 +587,7 @@ function ReviewTab({ job, run }) {
   const [now, setNow] = useState(() => Date.now())
   const [textDraft, setTextDraft] = useState('')
   const [textContains, setTextContains] = useState('')
+  const [outcomeFilter, setOutcomeFilter] = useState('all')
   const [commentByLeft, setCommentByLeft] = useState(() => new Map())
   const [outcomeByLeft, setOutcomeByLeft] = useState(() => new Map())
   const [failConfirm, setFailConfirm] = useState(null)
@@ -611,6 +612,7 @@ function ReviewTab({ job, run }) {
           offset: start + i,
           includeDecided: true,
           textContains,
+          reviewOutcomeFilter: outcomeFilter,
         })
       )
       const results = await Promise.allSettled(reqs)
@@ -653,7 +655,7 @@ function ReviewTab({ job, run }) {
     } finally {
       setLoading(false)
     }
-  }, [jobId, runId, minScore, rowsShown, textContains])
+  }, [jobId, runId, minScore, rowsShown, textContains, outcomeFilter])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -925,6 +927,22 @@ function ReviewTab({ job, run }) {
             ))}
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500 whitespace-nowrap">Outcome</label>
+          <select
+            value={outcomeFilter}
+            onChange={e => setOutcomeFilter(e.target.value)}
+            className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 max-w-[11rem]"
+          >
+            <option value="all">All</option>
+            <option value="pending">Pending</option>
+            <option value="no_match">No match</option>
+            <option value="partial">Partial</option>
+            <option value="fail">Fail</option>
+            <option value="system_fail">System failure</option>
+            <option value="matched_none">Matched (no outcome)</option>
+          </select>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5">
@@ -956,7 +974,7 @@ function ReviewTab({ job, run }) {
           </button>
         )}
         <p className="text-xs text-gray-400 w-full sm:w-auto sm:flex-1 min-w-0">
-          Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s text <span className="text-gray-500">or</span> any candidate right row for this run; works with min score and paging.
+          Press <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">Enter</kbd> to apply. Case-insensitive match on the left row’s text <span className="text-gray-500">or</span> any candidate right row for this run; works with min score, outcome filter, and paging.
           <span className="text-gray-500"> · </span>
           <kbd className="px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-[10px] font-sans">X</kbd> sets outcome <span className="text-gray-500">No match</span> on the active row.
         </p>
@@ -973,11 +991,15 @@ function ReviewTab({ job, run }) {
       ) : noMore ? (
         <div className="text-center py-20">
           <p className="text-gray-500 text-lg font-medium">
-            {stats?.pending === 0
-              ? '🎉 All rows reviewed!'
-              : textContains
-                ? 'No rows match this text on left or among candidates on the right (with your other filters). Try different words, clear the filter, or lower the min score.'
-                : 'No more rows match the current filter. Try lowering the min score.'}
+            {outcomeFilter !== 'all'
+              ? textContains
+                ? 'No rows match this outcome filter and text search. Try different words, another outcome, or clear filters.'
+                : 'No rows match this outcome filter. Pick another outcome or set Outcome to All.'
+              : stats?.pending === 0
+                ? '🎉 All rows reviewed!'
+                : textContains
+                  ? 'No rows match this text on left or among candidates on the right (with your other filters). Try different words, clear the filter, or lower the min score.'
+                  : 'No more rows match the current filter. Try lowering the min score.'}
           </p>
         </div>
       ) : items.length > 0 ? (

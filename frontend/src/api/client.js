@@ -316,7 +316,13 @@ export const getRunReviewStats = (jobId, runId) =>
 export const getNextRunReviewItem = (
   jobId,
   runId,
-  { minScore = 0, offset = 0, includeDecided = false, textContains = '' } = {},
+  {
+    minScore = 0,
+    offset = 0,
+    includeDecided = false,
+    textContains = '',
+    reviewOutcomeFilter = 'all',
+  } = {},
 ) =>
   api.get(`compare/${jobId}/runs/${runId}/review/next`, {
     params: {
@@ -324,6 +330,9 @@ export const getNextRunReviewItem = (
       offset,
       include_decided: includeDecided,
       ...(String(textContains).trim() ? { text_contains: String(textContains).trim() } : {}),
+      ...(reviewOutcomeFilter && reviewOutcomeFilter !== 'all'
+        ? { review_outcome_filter: reviewOutcomeFilter }
+        : {}),
     },
   }).then(r => r.data)
 

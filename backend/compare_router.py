@@ -35,7 +35,7 @@ Run-level routes (under /compare/{job_id}/runs):
   PATCH /compare/{job_id}/runs/{run_id}                rename run
   GET  /compare/{job_id}/runs/{run_id}/execute          SSE: run pipeline (Phase 2); optional ?max_left_rows=N
   GET  /compare/{job_id}/runs/{run_id}/review           stats
-  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains= left or candidate-right text)
+  GET  /compare/{job_id}/runs/{run_id}/review/next      next ReviewItem (?text_contains=, ?review_outcome_filter=all|pending|no_match|partial|fail|system_fail|matched_none)
   POST /compare/{job_id}/runs/{run_id}/review/{left_id} submit decision
   DELETE /compare/{job_id}/runs/{run_id}/review/{left_id} clear decision (back to pending)
   POST /compare/{job_id}/runs/{run_id}/retry-llm-judge/{left_id}  re-run LLM judge for one left row (stored candidates)
@@ -246,6 +246,38 @@ def _review_text_contains_clause(schema: str, match_table: str, raw: str | None)
         ")"
     )
     return fragment, [pat, pat, pat, pat]
+
+
+def _review_outcome_filter_parts(
+    review_outcome_filter: str | None,
+) -> tuple[bool, str, list]:
+    """Returns (use_filtered_query, sql_and_fragment, bind_params). Join decisions as d when use_filtered_query."""
+    if review_outcome_filter is None or not str(review_outcome_filter).strip():
+        return False, "", []
+    key = str(review_outcome_filter).strip().lower()
+    if key == "all":
+        return False, "", []
+    if key == "pending":
+        return True, " AND d.left_id IS NULL", []
+    if key == "matched_none":
+        return (
+            True,
+            (
+                " AND d.left_id IS NOT NULL"
+                " AND (d.review_outcome IS NULL OR TRIM(COALESCE(d.review_outcome, '')) = '')"
+                " AND ("
+                "   (d.matched_right_ids IS NOT NULL AND COALESCE(cardinality(d.matched_right_ids), 0) > 0)"
+                "   OR d.matched_right_id IS NOT NULL"
+                " )"
+            ),
+            [],
+        )
+    if key in _REVIEW_OUTCOME_VALUES:
+        return True, " AND d.review_outcome = %s", [key]
+    raise HTTPException(
+        status_code=422,
+        detail="review_outcome_filter must be all, pending, matched_none, no_match, partial, fail, or system_fail",
+    )
 
 
 def _decode_job_filters(raw) -> list[CompareRowFilter]:
@@ -1468,6 +1500,10 @@ def next_review_item(
         default=None,
         description="Substring match on left contextual/display text or any this-run candidate right row",
     ),
+    review_outcome_filter: str | None = Query(
+        default=None,
+        description="Restrict rows: all (default), pending, matched_none, or a stored review_outcome",
+    ),
 ):
     job = _job_or_404(job_id)
     _run_or_404(run_id, job_id)
@@ -1475,8 +1511,23 @@ def next_review_item(
     match_table = f"run_{run_id}_matches"
     dec_table   = f"run_{run_id}_decisions"
     text_frag, text_params = _review_text_contains_clause(schema, match_table, text_contains)
+    use_oc_filter, oc_frag, oc_params = _review_outcome_filter_parts(review_outcome_filter)
 
-    if include_decided:
+    if use_oc_filter:
+        query = f"""
+            SELECT r.id, r.contextual_content, r.display_value
+            FROM {schema}.records r
+            JOIN {schema}.{match_table} m ON m.left_id = r.id AND m.rank = 1
+            LEFT JOIN {schema}.{dec_table} d ON d.left_id = r.id
+            WHERE r.side = 'left'
+              AND m.final_score >= %s
+              {text_frag}
+              {oc_frag}
+            ORDER BY r.id
+            LIMIT 1 OFFSET %s
+        """
+        q_params = [min_score, *text_params, *oc_params, offset]
+    elif include_decided:
         query = f"""
             SELECT r.id, r.contextual_content, r.display_value
             FROM {schema}.records r
@@ -1487,6 +1538,7 @@ def next_review_item(
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
+        q_params = [min_score, *text_params, offset]
     else:
         query = f"""
             SELECT r.id, r.contextual_content, r.display_value
@@ -1500,8 +1552,7 @@ def next_review_item(
             ORDER BY r.id
             LIMIT 1 OFFSET %s
         """
-
-    q_params = [min_score, *text_params, offset]
+        q_params = [min_score, *text_params, offset]
 
     with get_cursor() as (cur, _conn):
         cur.execute(query, q_params)
