@@ -53,9 +53,11 @@ import tempfile
 import threading
 import time
 
+import yaml
+
 import pandas as pd
 import psycopg2
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from comparator import (
@@ -82,7 +84,11 @@ from db import (
     get_cursor,
     validate_pgvector_embedding_dims,
 )
-from embedder import embed as _embed_probe, effective_llm_judge_model as _effective_llm_judge_model
+from embedder import (
+    embed as _embed_probe,
+    effective_embed_model as _effective_embed_model,
+    effective_llm_judge_model as _effective_llm_judge_model,
+)
 from ingestion import (
     apply_compare_row_filters,
     build_contextual_content,
@@ -763,6 +769,168 @@ def delete_prompt_template(template_id: int):
 @router.get("/{job_id}", response_model=CompareJobResponse)
 def get_compare_job(job_id: int):
     return _job_response(job_id)
+
+
+# ── Config export / import ────────────────────────────────────────────────
+
+def _job_to_yaml_dict(row: dict) -> dict:
+    left_cols = list(row.get("context_columns_left") or [])
+    if row.get("content_column_left") and row["content_column_left"] not in left_cols:
+        left_cols.append(row["content_column_left"])
+    right_cols = list(row.get("context_columns_right") or [])
+    if row.get("content_column_right") and row["content_column_right"] not in right_cols:
+        right_cols.append(row["content_column_right"])
+    return {
+        "name": row["name"],
+        "label_left": row.get("label_left") or "Left",
+        "label_right": row.get("label_right") or "Right",
+        "left_file": row.get("source_filename_left") or "left.xlsx",
+        "right_file": row.get("source_filename_right") or "right.xlsx",
+        "sheet_left": row.get("sheet_name_left"),
+        "sheet_right": row.get("sheet_name_right"),
+        "left_columns": left_cols,
+        "right_columns": right_cols,
+        "display_column_left": row.get("display_column_left"),
+        "display_column_right": row.get("display_column_right"),
+        "embed_url": row.get("embed_url") or OLLAMA_BASE_URL,
+        "embed_model": row.get("embed_model") or _effective_embed_model(),
+        "embed_query_prefix": row.get("embed_query_prefix"),
+        "embed_doc_prefix": row.get("embed_doc_prefix"),
+        # run-level fields — defaults (overwritten by _run_to_yaml_dict on run export)
+        "top_k": 5,
+        "vector_enabled": True,
+        "reranker_enabled": False,
+        "reranker_url": None,
+        "reranker_model": None,
+        "llm_judge_enabled": False,
+        "llm_judge_url": OLLAMA_BASE_URL,
+        "llm_judge_model": _effective_llm_judge_model() or None,
+        "llm_judge_prompt": None,
+        "llm_judge_max_requests_per_minute": None,
+        "llm_left_columns": [],
+        "llm_right_columns": [],
+    }
+
+
+def _run_to_yaml_dict(row: dict) -> dict:
+    return {
+        "top_k": row["top_k"],
+        "vector_enabled": row["vector_enabled"],
+        "reranker_enabled": row["reranker_enabled"],
+        "reranker_url": row.get("reranker_url"),
+        "reranker_model": row.get("reranker_model"),
+        "llm_judge_enabled": row["llm_judge_enabled"],
+        "llm_judge_url": row.get("llm_judge_url") or OLLAMA_BASE_URL,
+        "llm_judge_model": row.get("llm_judge_model") or _effective_llm_judge_model() or None,
+        "llm_judge_prompt": row.get("llm_judge_prompt"),
+        "llm_judge_max_requests_per_minute": row.get("llm_judge_max_requests_per_minute"),
+        "llm_left_columns": row.get("llm_judge_left_columns") or [],
+        "llm_right_columns": row.get("llm_judge_right_columns") or [],
+    }
+
+
+@router.get("/{job_id}/export-config")
+def export_job_config(job_id: int, run_id: int | None = Query(default=None)):
+    """Download compare.yml for a job. Pass ?run_id=N to merge run values into the file."""
+    job = _job_or_404(job_id)
+    d = _job_to_yaml_dict(job)
+    if run_id is not None:
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                "SELECT * FROM public.compare_runs WHERE id = %s AND job_id = %s",
+                [run_id, job_id],
+            )
+            run_row = cur.fetchone()
+        if not run_row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        d.update(_run_to_yaml_dict(dict(run_row)))
+    body = yaml.dump(d, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    return Response(
+        body,
+        media_type="text/yaml",
+        headers={"Content-Disposition": 'attachment; filename="compare.yml"'},
+    )
+
+
+@router.post("/import-config")
+async def import_compare_config(
+    config: UploadFile = File(...),
+    left_file: UploadFile = File(...),
+    right_file: UploadFile = File(...),
+):
+    """Parse + validate compare.yml against the two Excel files. Returns parsed config + tmp paths."""
+    try:
+        cfg = yaml.safe_load(await config.read()) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+
+    # Filename check
+    yaml_left = cfg.get("left_file") or ""
+    yaml_right = cfg.get("right_file") or ""
+    if yaml_left and left_file.filename != yaml_left:
+        raise HTTPException(
+            status_code=400,
+            detail=f"left_file mismatch: config says '{yaml_left}', uploaded '{left_file.filename}'",
+        )
+    if yaml_right and right_file.filename != yaml_right:
+        raise HTTPException(
+            status_code=400,
+            detail=f"right_file mismatch: config says '{yaml_right}', uploaded '{right_file.filename}'",
+        )
+
+    left_bytes = await left_file.read()
+    right_bytes = await right_file.read()
+
+    try:
+        df_left = pd.read_excel(io.BytesIO(left_bytes), nrows=0, dtype=str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read left file: {e}")
+    try:
+        df_right = pd.read_excel(io.BytesIO(right_bytes), nrows=0, dtype=str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read right file: {e}")
+
+    # Column check
+    missing_left = [c for c in (cfg.get("left_columns") or []) if c not in df_left.columns]
+    missing_right = [c for c in (cfg.get("right_columns") or []) if c not in df_right.columns]
+    if missing_left or missing_right:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Column mismatch between config and uploaded files",
+                "missing_left": missing_left,
+                "missing_right": missing_right,
+            },
+        )
+
+    # Write to tmp files (same pattern as _preview_file)
+    left_ext = pathlib.Path(left_file.filename).suffix or ".xlsx"
+    right_ext = pathlib.Path(right_file.filename).suffix or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=left_ext) as tmp:
+        tmp.write(left_bytes)
+        tmp_left = tmp.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix=right_ext) as tmp:
+        tmp.write(right_bytes)
+        tmp_right = tmp.name
+
+    return {
+        "config": cfg,
+        "tmp_path_left": tmp_left,
+        "tmp_path_right": tmp_right,
+        "columns_left": list(df_left.columns),
+        "columns_right": list(df_right.columns),
+    }
+
+
+@router.post("/parse-yaml")
+async def parse_compare_yaml(request: Request):
+    """Parse raw YAML text and return as JSON (for run config pre-fill in the UI)."""
+    body = await request.body()
+    try:
+        cfg = yaml.safe_load(body) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+    return cfg
 
 
 @router.patch("/{job_id}", response_model=CompareJobResponse)

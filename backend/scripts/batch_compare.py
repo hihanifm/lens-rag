@@ -170,6 +170,30 @@ def run_job_folder(folder: pathlib.Path, api_url: str, cli_run_name: str | None,
         _warn("right_columns not specified in compare.yml — skipping")
         return False
 
+    # ── strict: filename must match what is declared in the YAML ─────────────
+    if cfg.get("left_file") and left_path.name != cfg["left_file"]:
+        _warn(f"left_file mismatch: compare.yml says '{cfg['left_file']}', found '{left_path.name}' — fix the filename or update compare.yml")
+        return False
+    if cfg.get("right_file") and right_path.name != cfg["right_file"]:
+        _warn(f"right_file mismatch: compare.yml says '{cfg['right_file']}', found '{right_path.name}' — fix the filename or update compare.yml")
+        return False
+
+    # ── strict: all declared columns must exist in the Excel headers ──────────
+    try:
+        import pandas as _pd
+        for side, path, col_key in [
+            ("left",  left_path,  "left_columns"),
+            ("right", right_path, "right_columns"),
+        ]:
+            df_head = _pd.read_excel(path, nrows=0, dtype=str)
+            missing = [c for c in cfg[col_key] if c not in df_head.columns]
+            if missing:
+                _warn(f"{col_key} not found in {path.name}: {missing} — fix compare.yml or the Excel file")
+                return False
+    except Exception as e:
+        _warn(f"Could not read Excel headers for column validation: {e}")
+        return False
+
     name = cfg.get("name") or folder.name
     run_name = derive_run_name(cfg, cli_run_name)
 

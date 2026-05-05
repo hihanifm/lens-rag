@@ -24,6 +24,8 @@ import {
   listPromptTemplates,
   getPromptTemplate,
   createPromptTemplate,
+  compareConfigExportUrl,
+  parseCompareYaml,
   API_BASE_URL,
 } from '../api/client'
 
@@ -1618,6 +1620,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [llmRightColumns, setLlmRightColumns] = useState([])
   /** When set, run submit can attach llm_judge_prompt_preset_tag if textarea still matches body. */
   const [loadedPresetRef, setLoadedPresetRef] = useState(null)
+  const [yamlImportError, setYamlImportError] = useState('')
+  const [yamlImporting, setYamlImporting] = useState(false)
 
   const { data: promptTemplates = [], isLoading: promptTemplatesLoading } = useQuery({
     queryKey: ['compare-prompt-templates'],
@@ -1783,6 +1787,35 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
     }
   }
 
+  const handleYamlImport = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setYamlImportError('')
+    setYamlImporting(true)
+    try {
+      const text = await file.text()
+      const cfg = await parseCompareYaml(text)
+      if (cfg.top_k != null)            setTopK(Number(cfg.top_k))
+      if (cfg.vector_enabled != null)   setVectorEnabled(!!cfg.vector_enabled)
+      if (cfg.reranker_enabled != null) setRerankerEnabled(!!cfg.reranker_enabled)
+      if (cfg.reranker_url)             setRerankerUrl(cfg.reranker_url)
+      if (cfg.reranker_model)           setRerankerModel(cfg.reranker_model)
+      if (cfg.llm_judge_enabled != null) setLlmEnabled(!!cfg.llm_judge_enabled)
+      if (cfg.llm_judge_url)            setLlmUrl(cfg.llm_judge_url)
+      if (cfg.llm_judge_model)          setLlmModel(cfg.llm_judge_model)
+      if (cfg.llm_judge_prompt)         setLlmPrompt(cfg.llm_judge_prompt)
+      if (cfg.llm_judge_max_requests_per_minute != null)
+        setLlmMaxRpm(String(cfg.llm_judge_max_requests_per_minute))
+      if (Array.isArray(cfg.llm_left_columns))  setLlmLeftColumns(cfg.llm_left_columns)
+      if (Array.isArray(cfg.llm_right_columns)) setLlmRightColumns(cfg.llm_right_columns)
+    } catch (err) {
+      setYamlImportError(err?.response?.data?.detail || err.message || 'Failed to parse YAML')
+    } finally {
+      setYamlImporting(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
@@ -1795,6 +1828,13 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
               {initialRun.name ? ` (${initialRun.name})` : ''}.
             </p>
           )}
+          <div className="flex items-center gap-2 mt-3">
+            <label className="cursor-pointer text-xs text-gray-500 hover:text-blue-600 transition-colors flex items-center gap-1">
+              <input type="file" accept=".yml,.yaml" className="hidden" onChange={handleYamlImport} />
+              {yamlImporting ? 'Importing…' : '↑ Import config'}
+            </label>
+            {yamlImportError && <span className="text-xs text-red-500">{yamlImportError}</span>}
+          </div>
         </div>
 
         <div className="px-6 py-5 space-y-5">
@@ -2987,6 +3027,15 @@ function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplica
                   >
                     Duplicate
                   </button>
+                  <a
+                    href={compareConfigExportUrl(jobId, run.id)}
+                    download="compare.yml"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-xs text-gray-400 hover:text-blue-500 transition-colors px-1.5 py-0.5 rounded"
+                    title="Export run config as compare.yml"
+                  >
+                    ↓ yml
+                  </a>
                   <button
                     type="button"
                     onClick={(e) => handleDelete(run.id, e)}
@@ -3125,7 +3174,16 @@ export default function CompareJob() {
               </p>
             </div>
 
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 shrink-0">
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={compareConfigExportUrl(jobId)}
+                download="compare.yml"
+                className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-900 transition-colors"
+                title="Export job config as compare.yml"
+              >
+                ↓ Config
+              </a>
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
               {[
                 { id: 'runs',   label: '▶ Runs' },
                 { id: 'browse', label: '👀 Browse' },
@@ -3148,6 +3206,7 @@ export default function CompareJob() {
                   {tab.label}
                 </button>
               ))}
+            </div>
             </div>
           </div>
         </div>

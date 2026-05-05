@@ -384,3 +384,27 @@ export const browseRunRaw = (jobId, runId, { limit = 50, leftRow = null } = {}) 
   api.get(`compare/${jobId}/runs/${runId}/browse-raw`, {
     params: { limit, left_row: leftRow ?? undefined },
   }).then(r => r.data)
+
+// ── Config export / import ────────────────────────────────────────────────
+
+/** Returns a direct download URL for a job's compare.yml (pass runId to include run values). */
+export const compareConfigExportUrl = (jobId, runId = null) => {
+  const base = (api.defaults.baseURL || '').replace(/\/$/, '')
+  const path = `compare/${jobId}/export-config`
+  return runId ? `${base}/${path}?run_id=${runId}` : `${base}/${path}`
+}
+
+/** Upload compare.yml + left + right Excel files; returns { config, tmp_path_left, tmp_path_right, columns_left, columns_right } or throws with a detail message. */
+export const importCompareConfig = (configFile, leftFile, rightFile) => {
+  const fd = new FormData()
+  fd.append('config', configFile)
+  fd.append('left_file', leftFile)
+  fd.append('right_file', rightFile)
+  return api.post('compare/import-config', fd).then(r => r.data)
+}
+
+/** Parse raw YAML text server-side; returns parsed object. Used for run config pre-fill. */
+export const parseCompareYaml = (yamlText) =>
+  api.post('compare/parse-yaml', yamlText, {
+    headers: { 'Content-Type': 'text/plain' },
+  }).then(r => r.data)

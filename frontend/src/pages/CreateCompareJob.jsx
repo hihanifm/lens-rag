@@ -10,6 +10,8 @@ import {
   fetchModels,
   getSystemConfig,
   verifyEmbedding,
+  importCompareConfig,
+  parseCompareYaml,
   API_BASE_URL,
 } from '../api/client'
 import { FileDropZone } from '../components/FileDropZone'
@@ -398,7 +400,7 @@ function RowFiltersEditor({ columns, filters, onChange, tmpPath, sheetForApi }) 
 
 // ── Steps ──────────────────────────────────────────────────────────────────
 
-function StepNames({ state, setState, onNext }) {
+function StepNames({ state, setState, onNext, onFolderImport, folderImporting, folderImportError }) {
   return (
     <div className="space-y-4">
       <StepHeader step={0} total={STEPS.length} title="Name your comparison" />
@@ -435,13 +437,29 @@ function StepNames({ state, setState, onNext }) {
           />
         </div>
       </div>
-      <button
-        onClick={onNext}
-        disabled={!state.name.trim() || !state.labelLeft.trim() || !state.labelRight.trim()}
-        className="mt-2 bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-40"
-      >
-        Continue →
-      </button>
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          onClick={onNext}
+          disabled={!state.name.trim() || !state.labelLeft.trim() || !state.labelRight.trim()}
+          className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-40"
+        >
+          Continue →
+        </button>
+        <label className="cursor-pointer text-sm text-gray-400 hover:text-blue-600 transition-colors flex items-center gap-1">
+          <input
+            type="file"
+            // webkitdirectory lets users pick an entire folder
+            webkitdirectory=""
+            multiple
+            className="hidden"
+            onChange={onFolderImport}
+          />
+          {folderImporting ? 'Importing…' : '↑ Import folder'}
+        </label>
+      </div>
+      {folderImportError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{folderImportError}</p>
+      )}
     </div>
   )
 }
@@ -1274,6 +1292,9 @@ export default function CreateCompareJob() {
   const [modelError, setModelError] = useState('')
   const [connectionCheckLoading, setConnectionCheckLoading] = useState(false)
 
+  const [folderImportError, setFolderImportError] = useState('')
+  const [folderImporting, setFolderImporting] = useState(false)
+
   const connectionPrefilled = useRef(false)
   const connectionTouched = useRef(false)
   const embedUrlRef = useRef('')
@@ -1471,6 +1492,72 @@ export default function CreateCompareJob() {
     )
   }
 
+  const handleFolderImport = async (e) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (!files.length) return
+    setFolderImportError('')
+    setFolderImporting(true)
+    try {
+      const yamlFile = files.find(f => f.name === 'compare.yml' || f.name === 'compare.yaml')
+      if (!yamlFile) throw new Error('No compare.yml found in selected folder')
+
+      // Parse YAML server-side first to get declared filenames
+      const previewCfg = await parseCompareYaml(await yamlFile.text())
+      const leftName  = previewCfg.left_file  || 'left.xlsx'
+      const rightName = previewCfg.right_file || 'right.xlsx'
+
+      const leftFile  = files.find(f => f.name === leftName)
+      const rightFile = files.find(f => f.name === rightName)
+      if (!leftFile)  throw new Error(`Left file '${leftName}' not found in selected folder`)
+      if (!rightFile) throw new Error(`Right file '${rightName}' not found in selected folder`)
+
+      if (!leftFile)  throw new Error(`Left file '${leftName || 'left.xlsx'}' not found in selected folder`)
+      if (!rightFile) throw new Error(`Right file '${rightName || 'right.xlsx'}' not found in selected folder`)
+
+      const result = await importCompareConfig(yamlFile, leftFile, rightFile)
+      const cfg = result.config
+
+      // Pre-fill wizard state from parsed config
+      connectionPrefilled.current = true
+      connectionTouched.current = true
+      setState(s => ({
+        ...s,
+        name:               cfg.name    || s.name,
+        labelLeft:          cfg.label_left  || s.labelLeft,
+        labelRight:         cfg.label_right || s.labelRight,
+        tmpPathLeft:        result.tmp_path_left,
+        tmpPathRight:       result.tmp_path_right,
+        filenameLeft:       leftFile.name,
+        filenameRight:      rightFile.name,
+        columnsLeft:        result.columns_left,
+        columnsRight:       result.columns_right,
+        sheetLeft:          cfg.sheet_left  || '',
+        sheetRight:         cfg.sheet_right || '',
+        contextColumnsLeft:  cfg.left_columns  || [],
+        contextColumnsRight: cfg.right_columns || [],
+        displayColumnLeft:   cfg.display_column_left  || null,
+        displayColumnRight:  cfg.display_column_right || null,
+      }))
+      if (cfg.embed_url)          { setEmbedUrl(cfg.embed_url); embedUrlRef.current = cfg.embed_url }
+      if (cfg.embed_model)        setEmbedModel(cfg.embed_model)
+      if (cfg.embed_query_prefix != null) setEmbedQueryPrefix(cfg.embed_query_prefix)
+      if (cfg.embed_doc_prefix   != null) setEmbedDocPrefix(cfg.embed_doc_prefix)
+
+      // Jump to Review step (step 6) — all data is loaded
+      setStep(6)
+    } catch (err) {
+      const detail = err?.response?.data?.detail
+      setFolderImportError(
+        typeof detail === 'object'
+          ? `Column mismatch — missing left: [${detail.missing_left?.join(', ')}] right: [${detail.missing_right?.join(', ')}]`
+          : detail || err.message || 'Import failed'
+      )
+    } finally {
+      setFolderImporting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="w-[90%] mx-auto py-12">
@@ -1489,7 +1576,12 @@ export default function CreateCompareJob() {
           </div>
 
           {step === 0 && (
-            <StepNames state={state} setState={setState} onNext={() => setStep(1)} />
+            <StepNames
+              state={state} setState={setState} onNext={() => setStep(1)}
+              onFolderImport={handleFolderImport}
+              folderImporting={folderImporting}
+              folderImportError={folderImportError}
+            />
           )}
           {step === 1 && (
             <StepUpload side="left" label={state.labelLeft} state={state} setState={setState} onNext={() => setStep(2)} />
