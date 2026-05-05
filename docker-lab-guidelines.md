@@ -1,6 +1,6 @@
 # Docker Lab Guide (Agent Reference)
 
-Generic reference for building a predictable Docker Compose setup for a typical web app (frontend + backend API + database) in lab environments with proxies or restricted egress.
+Generic reference for building a predictable Docker Compose + Makefile setup for a typical web app (frontend + backend API + database) in lab environments with proxies or restricted egress.
 
 ---
 
@@ -12,10 +12,13 @@ Generic reference for building a predictable Docker Compose setup for a typical 
 - **Always pass proxy vars into Docker builds** — `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`.
 - **Never rely on `restart` to pick up code changes** — if code is baked into the image, rebuild.
 - **Do not hardcode `platform:` in `docker-compose.yml`** — let Docker build natively for the host arch.
+- **`make` (no args) prints help** — `help` is the first target in the Makefile and is the default.
+- **Unprefixed commands are dev** — `make up`, `make build`, `make logs` always target the dev stack.
+- **Prod is always explicit** — `make prod-up`, `make prod-down`, `make prod-logs`; no accidents.
 
 ---
 
-## Port convention (dev + prod can run simultaneously)
+## Port convention (dev + prod run simultaneously)
 
 Pick a `BASE_PORT` per project:
 
@@ -28,7 +31,7 @@ Pick a `BASE_PORT` per project:
 Example: `BASE_PORT=37000` → prod `37000`, dev UI `37001`, dev API `37002`.
 
 - Keep DB ports **unpublished** (best) or pick a separate range.
-- Different projects on the same machine → different `BASE_PORT`.
+- Different projects on the same host → different `BASE_PORT`.
 - When running dev + prod together: container names must not collide; optionally set `COMPOSE_PROJECT_NAME`.
 
 ---
@@ -37,7 +40,7 @@ Example: `BASE_PORT=37000` → prod `37000`, dev UI `37001`, dev API `37002`.
 
 ```yaml
 services:
-  # dev profile: db + api + frontend dev server
+  # ── dev profile ───────────────────────────────────────────────
   api:
     profiles: ["dev"]
     build:
@@ -55,7 +58,7 @@ services:
     environment:
       - VITE_API_PROXY_TARGET=http://api:8000
 
-  # prod profile: db + api-prod (serves static frontend)
+  # ── prod profile ──────────────────────────────────────────────
   api-prod:
     profiles: ["prod"]
     ports:
@@ -81,6 +84,24 @@ build:
 ```
 
 `NO_PROXY` should include `localhost,127.0.0.1` plus any internal hostnames.
+
+### Base images — prefer registry mirrors in labs
+
+Docker Hub is often blocked in lab environments. Use a mirror as the default, overridable via `.env`:
+
+```dockerfile
+ARG PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
+```
+
+```yaml
+# docker-compose.yml
+build:
+  args:
+    PYTHON_IMAGE: ${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.11-slim}
+```
+
+AWS Public ECR (`public.ecr.aws/docker/library/`) mirrors the Docker Official Images library — no auth required and usually reachable when Docker Hub is blocked.
 
 ### pip-cache pattern (Python) — offline wheel install
 
@@ -132,67 +153,55 @@ pip config set global.trusted-host "<your-mirror-host>"
 
 ---
 
-## Daily commands
-
-### Start / stop dev stack
-
-```bash
-docker compose --profile dev up -d
-docker compose --profile dev down --remove-orphans
-```
-
-Verify (non-interactive):
-
-```bash
-docker compose --profile dev ps
-docker compose --profile dev logs --no-color --tail=200
-```
-
-### Rebuild after backend/containerized code changes
-
-```bash
-docker compose --profile dev build
-docker compose --profile dev up -d
-```
-
-### Logs
-
-```bash
-docker compose --profile dev logs -f              # all services
-docker compose --profile dev logs -f <service>    # focused (preferred for agents)
-```
-
-With tmux (optional, nice for humans):
-
-```bash
-tmux new-session -d -s app-logs "docker compose --profile dev logs -f api" \; \
-  split-window -h "docker compose --profile dev logs -f frontend" \; \
-  split-window -v "docker compose --profile dev logs -f db" \; \
-  select-pane -t 0 \; \
-  attach -t app-logs
-```
-
----
-
-## Day-2 gotchas checklist
-
-- **Changes not picked up** → rebuild images (`build` + `up`), not just `restart`.
-- **Browser hits CORS** → ensure browser talks to FE dev server only; FE proxies to API.
-- **Offline build fails** → verify `pip-cache/` is populated and matches current `requirements.txt`; re-run `make pip-cache`.
-- **Wrong arch wheels** → `pip-cache` was built on a different machine type; re-run `make pip-cache` on the correct host.
-- **Calling host-only services** (e.g. GPU inference) → use `host.docker.internal` + `extra_hosts: ["host.docker.internal:host-gateway"]`.
-- **Port collision across projects** → allocate a different `BASE_PORT` per project.
-
----
-
 ## Makefile template
 
+`help` is the first target — `make` alone prints the cheat sheet. Unprefixed targets are dev; prod is always explicit.
+
 ```makefile
+# Quick-reference comment block at the top (visible in editors, not in make help output):
+#   make build && make up     — pick up Dockerfile / dependency changes (required after backend edits)
+#   make rebuild              — full --no-cache rebuild + up (after git pull if containers act stale)
+#   make rebuild-api          — API image only (faster when only backend/ changed)
+.PHONY: help up down build rebuild rebuild-api logs logs-api logs-split restart ps \
+        prod-up prod-down prod-logs prod-logs-api pip-cache clean
+
+help:
+	@echo "Dev (default):"
+	@echo "  make build && make up   Build images + start dev stack"
+	@echo "  make rebuild            Full --no-cache rebuild + up"
+	@echo "  make rebuild-api        Rebuild API image only (faster)"
+	@echo "  make restart            down + up without rebuild"
+	@echo "  make logs               Tail all dev logs"
+	@echo "  make logs-api           Tail API logs only"
+	@echo "  make ps                 Container status"
+	@echo ""
+	@echo "Prod (explicit):"
+	@echo "  make prod-up            Build frontend + start prod stack"
+	@echo "  make prod-down          Stop prod stack"
+	@echo "  make prod-logs          Tail prod logs"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  make pip-cache          Re-download wheels for offline builds (run after requirements.txt changes)"
+	@echo "  make clean              Remove old containers/volumes; prune images"
+
+# ── Dev ──────────────────────────────────────────────────────────────────────
+
 up:
 	docker compose --profile dev up -d
 
+down:
+	docker compose --profile dev down --remove-orphans
+
 build:
 	docker compose --profile dev build
+
+rebuild:
+	docker compose --profile dev build --no-cache
+	docker compose --profile dev up -d
+
+rebuild-api:
+	docker compose --profile dev build --no-cache api
+	docker compose --profile dev up -d api
 
 restart:
 	docker compose --profile dev down --remove-orphans
@@ -204,9 +213,32 @@ logs:
 logs-api:
 	docker compose --profile dev logs -f api
 
+logs-split:
+	tmux new-session -d -s app-logs "docker compose --profile dev logs -f api" \; \
+	  split-window -h "docker compose --profile dev logs -f frontend" \; \
+	  split-window -v "docker compose --profile dev logs -f db" \; \
+	  select-pane -t 0 \; \
+	  attach -t app-logs
+
+ps:
+	docker compose ps
+
+# ── Prod ─────────────────────────────────────────────────────────────────────
+
 prod-up: build-frontend
 	docker compose --profile dev down --remove-orphans
 	docker compose --profile prod up -d --build
+
+prod-down:
+	docker compose --profile prod down --remove-orphans
+
+prod-logs:
+	docker compose --profile prod logs -f
+
+prod-logs-api:
+	docker compose --profile prod logs -f api-prod
+
+# ── Maintenance ───────────────────────────────────────────────────────────────
 
 pip-cache:
 	@ARCH=$$(uname -m); \
@@ -221,3 +253,18 @@ pip-cache:
 	  -r backend/requirements.txt \
 	  -d pip-cache/
 ```
+
+---
+
+## Day-2 gotchas checklist
+
+- **Changes not picked up** → rebuild images (`make build && make up`), not just `make restart`. `restart` skips the build step.
+- **Containers act stale after `git pull`** → `make rebuild` (full `--no-cache`); avoids Docker layer cache serving old code.
+- **Only backend changed** → `make rebuild-api` is faster than rebuilding everything.
+- **Browser hits CORS** → ensure browser talks to FE dev server only; FE proxies to API over the internal Docker network.
+- **Offline build fails** → `pip-cache/` is stale or missing; re-run `make pip-cache` on the correct host.
+- **Wrong arch wheels** → `pip-cache` was built on a different machine type (e.g. pushed from Linux, pulled on Mac); re-run `make pip-cache` locally.
+- **Docker Hub blocked** → set `PYTHON_IMAGE` / `NODE_IMAGE` in `.env` to use the AWS Public ECR mirror.
+- **Calling host-only services** (e.g. GPU inference server) → use `host.docker.internal` + `extra_hosts: ["host.docker.internal:host-gateway"]` in the service.
+- **Port collision across projects** → allocate a different `BASE_PORT` per project.
+- **Dev + prod collide** → check container names don't overlap; consider `COMPOSE_PROJECT_NAME`.
