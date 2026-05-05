@@ -511,6 +511,7 @@ async def create_compare_job(data: CompareJobCreate):
                 source_filename_left, source_filename_right,
                 tmp_path_left, tmp_path_right,
                 embed_dims, embed_url, embed_api_key, embed_model,
+                embed_query_prefix, embed_doc_prefix,
                 all_columns_left, all_columns_right
             ) VALUES (
                 %s, %s, %s, 'compare_placeholder',
@@ -521,6 +522,7 @@ async def create_compare_job(data: CompareJobCreate):
                 %s, %s,
                 %s, %s,
                 %s, %s, %s, %s,
+                %s, %s,
                 %s, %s
             ) RETURNING id, created_at
             """,
@@ -535,6 +537,8 @@ async def create_compare_job(data: CompareJobCreate):
                 data.source_filename_left, data.source_filename_right,
                 data.tmp_path_left, data.tmp_path_right,
                 resolved_dims, data.embed_url or None, data.embed_api_key or None, data.embed_model or None,
+                data.embed_query_prefix if data.embed_query_prefix is not None else None,
+                data.embed_doc_prefix   if data.embed_doc_prefix   is not None else None,
                 data.all_columns_left or [], data.all_columns_right or [],
             ],
         )
@@ -1732,6 +1736,8 @@ def _serialize_job(row: dict) -> dict:
         "embed_url": row.get("embed_url"),
         "embed_model": row.get("embed_model"),
         "embed_dims": row.get("embed_dims"),
+        "embed_query_prefix": row.get("embed_query_prefix"),
+        "embed_doc_prefix":   row.get("embed_doc_prefix"),
         "all_columns_left":  row.get("all_columns_left")  or [],
         "all_columns_right": row.get("all_columns_right") or [],
         "context_columns_left":  row.get("context_columns_left") or [],

@@ -743,6 +743,8 @@ function StepConnection({
   embedUrl, setEmbedUrl,
   embedApiKey, setEmbedApiKey,
   embedModel, setEmbedModel,
+  embedQueryPrefix, setEmbedQueryPrefix,
+  embedDocPrefix, setEmbedDocPrefix,
   availableModels, modelLoading, modelError,
   connectionCheckLoading,
   onFetchModels, onNext, onBack,
@@ -861,6 +863,37 @@ function StepConnection({
       {!embedUrl.trim() && (
         <p className="text-sm text-gray-400">System default will be used.</p>
       )}
+
+      <div className="border-t border-gray-100 pt-5 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Query prefix <span className="text-gray-400 font-normal">(left side — prepended before embedding)</span>
+          </label>
+          <textarea
+            rows={2}
+            value={embedQueryPrefix}
+            onChange={e => setEmbedQueryPrefix(e.target.value)}
+            placeholder="e.g. Represent this query for retrieval:"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Document prefix <span className="text-gray-400 font-normal">(right side — prepended before embedding)</span>
+          </label>
+          <textarea
+            rows={2}
+            value={embedDocPrefix}
+            onChange={e => setEmbedDocPrefix(e.target.value)}
+            placeholder="e.g. Represent this document for retrieval:"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y"
+          />
+        </div>
+        <p className="text-xs text-gray-400">
+          Instruction-aware models (Qwen3-Embedding, BGE-M3, E5) benefit from asymmetric prefixes.
+          Pre-filled from system defaults — clear to disable.
+        </p>
+      </div>
 
       <div className="flex gap-3 pt-1">
         <button onClick={onBack} className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50">
@@ -1234,6 +1267,8 @@ export default function CreateCompareJob() {
   const [embedUrl, setEmbedUrl] = useState('')
   const [embedApiKey, setEmbedApiKey] = useState('')
   const [embedModel, setEmbedModel] = useState('')
+  const [embedQueryPrefix, setEmbedQueryPrefix] = useState('')
+  const [embedDocPrefix, setEmbedDocPrefix] = useState('')
   const [availableModels, setAvailableModels] = useState([])
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState('')
@@ -1254,6 +1289,8 @@ export default function CreateCompareJob() {
         setEmbedUrl(url)
         embedUrlRef.current = url
       }
+      setEmbedQueryPrefix(cfg.compare_embed_query_prefix || '')
+      setEmbedDocPrefix(cfg.compare_embed_doc_prefix || '')
       if (url) {
         if (cfg.embedding_provider === 'openai') {
           setAvailableModels([])
@@ -1356,6 +1393,8 @@ export default function CreateCompareJob() {
         embed_url: url || null,
         embed_api_key: url ? (embedApiKey.trim() || null) : null,
         embed_model: url ? (embedModel.trim() || null) : null,
+        embed_query_prefix: embedQueryPrefix.trim() || null,
+        embed_doc_prefix:   embedDocPrefix.trim()   || null,
         all_columns_left:  state.columnsLeft  || [],
         all_columns_right: state.columnsRight || [],
       })
@@ -1469,6 +1508,8 @@ export default function CreateCompareJob() {
               embedUrl={embedUrl} setEmbedUrl={setEmbedUrl}
               embedApiKey={embedApiKey} setEmbedApiKey={setEmbedApiKey}
               embedModel={embedModel} setEmbedModel={setEmbedModel}
+              embedQueryPrefix={embedQueryPrefix} setEmbedQueryPrefix={setEmbedQueryPrefix}
+              embedDocPrefix={embedDocPrefix} setEmbedDocPrefix={setEmbedDocPrefix}
               availableModels={availableModels}
               modelLoading={modelLoading}
               modelError={modelError}

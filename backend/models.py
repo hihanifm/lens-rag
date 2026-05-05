@@ -83,6 +83,8 @@ class SystemConfigResponse(BaseModel):
     hnsw_ef_construction_default: int = 64
     hnsw_ef_search: Optional[str] = None
     hnsw_defaults_note: str
+    compare_embed_query_prefix: str = ""
+    compare_embed_doc_prefix:   str = ""
 
 
 class ColumnInfo(BaseModel):
@@ -245,6 +247,8 @@ class CompareJobCreate(BaseModel):
     embed_url: Optional[str] = None
     embed_api_key: Optional[str] = None
     embed_model: Optional[str] = None
+    embed_query_prefix: Optional[str] = None
+    embed_doc_prefix:   Optional[str] = None
     all_columns_left:  List[str] = Field(default_factory=list)
     all_columns_right: List[str] = Field(default_factory=list)
 
@@ -267,6 +271,8 @@ class CompareJobResponse(BaseModel):
     embed_url: Optional[str] = None
     embed_model: Optional[str] = None
     embed_dims: Optional[int] = None
+    embed_query_prefix: Optional[str] = None
+    embed_doc_prefix:   Optional[str] = None
     all_columns_left:  List[str] = Field(default_factory=list)
     all_columns_right: List[str] = Field(default_factory=list)
     context_columns_left: List[str] = Field(default_factory=list)

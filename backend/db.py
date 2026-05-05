@@ -169,6 +169,12 @@ def init_db():
         cur.execute(
             "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS all_columns_right TEXT[] DEFAULT '{}';"
         )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_query_prefix TEXT;"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_doc_prefix TEXT;"
+        )
 
         # ── Compare runs table ─────────────────────────────────────────────
         cur.execute("""
@@ -276,7 +282,7 @@ def create_compare_schema(job_id: int, dims: int):
             """)
             cur.execute(f"""
                 CREATE INDEX IF NOT EXISTS {schema}_records_emb_idx
-                    ON {schema}.records USING hnsw (embedding vector_cosine_ops);
+                    ON {schema}.records USING hnsw (embedding vector_cosine_ops) WHERE side = 'right';
                 CREATE INDEX IF NOT EXISTS {schema}_records_side_idx
                     ON {schema}.records (side);
             """)

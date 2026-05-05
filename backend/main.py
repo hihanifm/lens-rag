@@ -21,6 +21,8 @@ from config import (
     OPENAI_EMBED_MODEL,
     RERANKER_ENABLED,
     RERANKER_MODEL,
+    EMBED_QUERY_PREFIX,
+    EMBED_DOC_PREFIX,
 )
 
 logging.basicConfig(
@@ -405,6 +407,8 @@ def _get_system_config_response(request: Request | None, project_id: int | None)
         hnsw_ef_construction_default=64,
         hnsw_ef_search=hnsw_ef_search,
         hnsw_defaults_note=hnsw_defaults_note,
+        compare_embed_query_prefix=EMBED_QUERY_PREFIX,
+        compare_embed_doc_prefix=EMBED_DOC_PREFIX,
     )
 
 

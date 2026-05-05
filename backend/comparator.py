@@ -24,6 +24,8 @@ from psycopg2.extras import Json
 
 from config import (
     COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP,
+    EMBED_DOC_PREFIX,
+    EMBED_QUERY_PREFIX,
     EMBEDDING_DIMS,
     LLM_COMPARE_MAX_RIGHTS_CAP,
     LLM_COMPARE_MAX_RIGHTS_DEFAULT,
@@ -282,6 +284,7 @@ def ingest_side(
     display_column: str | None,
     schema_name: str,
     embed_kwargs: dict | None = None,
+    embed_prefix: str = "",
     metrics: dict | None = None,
 ) -> Generator[dict, None, None]:
     """
@@ -315,7 +318,8 @@ def ingest_side(
 
         try:
             t_embed0 = time.monotonic()
-            vector = embed(contextual_content, **(embed_kwargs or {}))
+            text_to_embed = (embed_prefix + contextual_content) if embed_prefix else contextual_content
+            vector = embed(text_to_embed, **(embed_kwargs or {}))
             embed_ms += (time.monotonic() - t_embed0) * 1000.0
         except Exception as e:
             logger.error("embed failed on row %d/%d side=%s — %s: %s", i + 1, total, side, type(e).__name__, e)
@@ -1405,6 +1409,9 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
         if embed_model:
             embed_kwargs["model"] = embed_model
 
+    eff_query_prefix = job.get("embed_query_prefix") if job.get("embed_query_prefix") is not None else EMBED_QUERY_PREFIX
+    eff_doc_prefix   = job.get("embed_doc_prefix")   if job.get("embed_doc_prefix")   is not None else EMBED_DOC_PREFIX
+
     def _set_status(status: str, message: str | None = None):
         with get_cursor() as (cur, _conn):
             cur.execute(
@@ -1431,6 +1438,7 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
             display_column=job.get("display_column_left"),
             schema_name=schema_name,
             embed_kwargs=embed_kwargs,
+            embed_prefix=eff_query_prefix,
             metrics=metrics,
         ):
             yield event
@@ -1450,6 +1458,7 @@ def run_ingest_job(job_id: int) -> Generator[dict, None, None]:
             display_column=job.get("display_column_right"),
             schema_name=schema_name,
             embed_kwargs=embed_kwargs,
+            embed_prefix=eff_doc_prefix,
             metrics=metrics,
         ):
             yield event

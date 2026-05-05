@@ -86,6 +86,24 @@ COMPARE_PIPELINE_MAX_LEFT_ROWS_CAP = int(os.getenv("COMPARE_PIPELINE_MAX_LEFT_RO
 # Compare job uploads: original Excel files persisted after ingest for per-run LLM judge column selection.
 COMPARE_UPLOADS_DIR = os.environ.get("COMPARE_UPLOADS_DIR", "/app/uploads/compare")
 
+# Asymmetric embedding prefixes — prepended to content before embed() at ingest time.
+# Left side (query) and right side (document) are embedded with different prefixes so
+# instruction-aware models (Qwen3-Embedding, BGE-M3, E5, etc.) can project each side
+# into the correct retrieval subspace.
+# Override per-job via embed_query_prefix / embed_doc_prefix on compare_jobs.
+# Set to "" to disable entirely (preserves original behaviour).
+_DEFAULT_QUERY_PREFIX = (
+    "Represent this test case to find semantically equivalent or overlapping test cases. "
+    "Focus on intent, behavior, and validation goals."
+)
+_DEFAULT_DOC_PREFIX = (
+    "Represent this test case for semantic retrieval. "
+    "Focus on functionality, preconditions, steps, and expected results. "
+    "Ignore wording differences and client-specific formatting."
+)
+EMBED_QUERY_PREFIX = os.environ.get("EMBED_QUERY_PREFIX", _DEFAULT_QUERY_PREFIX)
+EMBED_DOC_PREFIX   = os.environ.get("EMBED_DOC_PREFIX",   _DEFAULT_DOC_PREFIX)
+
 # ── Logging ────────────────────────────────────────────────────────────────
 # Set LOG_LEVEL=DEBUG for verbose output. Defaults to INFO.
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("ENV", "dev").lower() == "dev" else "INFO")
