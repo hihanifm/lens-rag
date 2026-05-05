@@ -135,6 +135,9 @@ COMPARE_REVIEW_THRESHOLD=0.60   # amber ≥ this; gray below
 # Compare LLM judge: minimum per-batch max_tokens floor (completion budget also capped at 8192 in code).
 # Reasoning models may need a higher value; truncation (finish_reason=length) is logged on the API server.
 LLM_JUDGE_MAX_TOKENS=2048
+# Compare uploads: uploaded Excels are persisted here permanently (per-job subfolder) so
+# run_pipeline() can re-read them for per-run LLM judge column overrides.
+COMPARE_UPLOADS_DIR=/app/uploads/compare
 
 # Database
 DB_HOST=lens-postgres
@@ -214,8 +217,8 @@ CREATE INDEX ON project_{id}.records USING gin  (search_vector);
 
 ### Compare flavor — `public.compare_jobs` + `public.compare_runs` + per-job schema
 
-- `**public.compare_jobs**` — job metadata, column mapping, optional per-job `embed_url` / `embed_api_key` / `embed_model` / `embed_dims`, optional `notes`. Legacy `top_k` / `rerank_*` columns may exist for migrated rows; new jobs store pipeline settings on **runs**.
-- `**public.compare_runs`** — one row per pipeline execution: `top_k`, `vector_enabled`, `reranker_*`, `llm_judge_*`, `status`, timestamps.
+- `**public.compare_jobs**` — job metadata, column mapping (`context_columns_left/right`, `content_column_left/right`), `all_columns_left/right` (full column list from wizard, used to populate LLM judge pickers), optional per-job `embed_url` / `embed_api_key` / `embed_model` / `embed_dims`, optional `notes`. Legacy `top_k` / `rerank_*` columns may exist for migrated rows; new jobs store pipeline settings on **runs**. Uploaded Excel files are persisted to `{COMPARE_UPLOADS_DIR}/{job_id}/left{ext}` + `right{ext}` (not deleted after ingest).
+- `**public.compare_runs`** — one row per pipeline execution: `top_k`, `vector_enabled`, `reranker_*`, `llm_judge_*` (including `llm_judge_left_columns` / `llm_judge_right_columns` TEXT[] for per-run LLM judge column overrides), `status`, timestamps.
 - **Schema `compare_{job_id}`** — shared `**records**` table (left + right embeddings only). Per-run tables: `**run_{run_id}_matches**` (candidates + `cosine_score`, `rerank_score`, `llm_score`, `final_score`, `rank`) and `**run_{run_id}_decisions**` (`left_id` PK, `matched_right_id` nullable for explicit no-match).
 
 ```sql
@@ -342,13 +345,15 @@ def rrf_merge(vector_results, bm25_results, k=60):
 **Phase 1 — job embedding** (`comparator.run_ingest_job`, driven by `GET /compare/{job_id}/ingest`):
 
 1. Ingest left and right rows into `compare_{job_id}.records` (shared embedder + `ingestion.read_excel` / `build_contextual_content`).
-2. Deletes temp upload files when complete. Job status ends in `ready` (or `error`).
+2. Does **not** delete uploaded files — they are kept at `{COMPARE_UPLOADS_DIR}/{job_id}/` for use by Phase 2. Job status ends in `ready` (or `error`).
 
 **Phase 2 — run pipeline** (`comparator.run_pipeline`, driven by `GET /compare/{job_id}/runs/{run_id}/execute`):
 
 1. For each left row, optional vector retrieval against right embeddings (`top_k` from the run).
 2. Optional reranker (Ollama cross-encoder) and optional LLM judge merge into `final_score` per candidate.
 3. Writes `compare_{job_id}.run_{run_id}_matches` (immutable) with ranks 1..top_k.
+
+**LLM judge content override (per run):** If `llm_judge_left_columns` or `llm_judge_right_columns` is set on the run, `_build_llm_content_map()` in `comparator.py` re-reads the persisted Excel files and rebuilds content strings from the specified columns only (`_build_excel_content_map()` helper), overriding the stored `contextual_content` for just that side. Falls back to `contextual_content` from DB if columns are not set, files are missing, or re-read fails. The UI shows a divergence badge in the run detail when LLM judge columns differ from embedding columns.
 
 SSE progress: `compare_router.py` uses `_job_ingest_progress[job_id]` for Phase 1 and `_run_progress[run_id]` for Phase 2 (background thread updates dict; stream polls ~1 s — similar spirit to `_ingest_progress` in `main.py`).
 
