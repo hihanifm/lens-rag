@@ -723,7 +723,7 @@ your.server {
 | `make prod-down`      | Stop prod stack                                               |
 | `make build-frontend` | Build frontend for prod (`/lens-rag/` base path)              |
 | `make clean`          | Remove old pre-rename containers/volumes; prune images        |
-| `make pip-cache`      | Pre-download Linux wheels into `pip-cache/` for offline build |
+| `make pip-cache`      | Pre-download Linux wheels into `pip-cache/` for offline Docker builds; auto-detects host arch via `uname -m` (arm64 on Mac, x86_64 on lab Linux) — run once after changing `requirements.txt` |
 | `make e2e-up`         | Start dev stack + build, then run Playwright suite            |
 | `make e2e`            | Run Playwright tests (stack must already be up)               |
 | `make e2e-down`       | Tear down stack after tests                                   |
