@@ -1,0 +1,15 @@
+name: "My Comparison"
+label_left: "Source"
+label_right: "Target"
+
+left_file: left.xlsx
+right_file: right.xlsx
+
+left_columns: [Name, Description]
+right_columns: [Title, Specs]
+
+display_column_left: SKU
+display_column_right: PartNumber
+
+llm_left_columns: [Name]
+llm_right_columns: [Title]
