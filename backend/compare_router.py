@@ -1278,12 +1278,27 @@ def run_review_stats(job_id: int, run_id: int):
         )
         no_match = (cur.fetchone() or {}).get("cnt", 0)
 
+        cur.execute(
+            f"SELECT COALESCE(review_outcome, '') AS outcome, COUNT(*) AS cnt"
+            f" FROM {schema}.{dec_table} GROUP BY review_outcome"
+        )
+        outcome_counts = {row["outcome"]: row["cnt"] for row in cur.fetchall()}
+
+    by_outcome = {
+        "no_match":    outcome_counts.get("no_match", 0),
+        "partial":     outcome_counts.get("partial", 0),
+        "fail":        outcome_counts.get("fail", 0),
+        "system_fail": outcome_counts.get("system_fail", 0),
+        "matched_none": outcome_counts.get("", 0),
+    }
+
     return {
         "total_left": total_left,
         "reviewed": reviewed,
         "pending": max(0, total_left - reviewed),
         "no_match": no_match,
         "matched": max(0, reviewed - no_match),
+        "by_outcome": by_outcome,
     }
 
 

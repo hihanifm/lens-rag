@@ -1287,17 +1287,36 @@ function ExportTab({ job, run }) {
   return (
     <div className="space-y-6 max-w-2xl">
       {stats && (
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: 'Reviewed', value: stats.reviewed, color: 'text-blue-600' },
-            { label: 'Pending', value: stats.pending, color: stats.pending > 0 ? 'text-amber-600' : 'text-gray-400' },
-            { label: 'Total Left', value: stats.total_left, color: 'text-gray-700' },
-          ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value?.toLocaleString() ?? '—'}</p>
-              <p className="text-xs text-gray-400 mt-1">{s.label}</p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Reviewed', value: stats.reviewed, color: 'text-blue-600' },
+              { label: 'Pending', value: stats.pending, color: stats.pending > 0 ? 'text-amber-600' : 'text-gray-400' },
+              { label: 'Total Left', value: stats.total_left, color: 'text-gray-700' },
+            ].map(s => (
+              <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+                <p className={`text-2xl font-bold ${s.color}`}>{s.value?.toLocaleString() ?? '—'}</p>
+                <p className="text-xs text-gray-400 mt-1">{s.label}</p>
+              </div>
+            ))}
+          </div>
+          {stats.by_outcome && (
+            <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex flex-wrap gap-x-5 gap-y-1.5">
+              {[
+                { label: 'Matched', value: stats.matched, color: 'text-emerald-600' },
+                { label: 'No match', value: stats.by_outcome.no_match, color: 'text-gray-500' },
+                { label: 'Partial', value: stats.by_outcome.partial, color: 'text-blue-500' },
+                { label: 'Fail', value: stats.by_outcome.fail, color: 'text-red-500' },
+                { label: 'System fail', value: stats.by_outcome.system_fail, color: 'text-orange-500' },
+                { label: 'Matched (no outcome)', value: stats.by_outcome.matched_none, color: 'text-gray-400' },
+              ].map(s => (
+                <span key={s.label} className="text-xs flex items-center gap-1.5">
+                  <span className={`font-semibold ${s.color}`}>{s.value?.toLocaleString() ?? 0}</span>
+                  <span className="text-gray-400">{s.label}</span>
+                </span>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
       <div className="space-y-3">
