@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getProjects, deleteProject, listCompareJobs, deleteCompareJob } from '../api/client'
 import { loadHistory, subscribeHistoryUpdates } from '../utils/history'
 
@@ -232,7 +232,9 @@ function CompareTab() {
 // ── Home ───────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState('search')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') === 'compare' ? 'compare' : 'search'
+  const setActiveTab = (tab) => setSearchParams(tab === 'search' ? {} : { tab }, { replace: true })
   const [now, setNow] = useState(Date.now())
   const [recentHistory, setRecentHistory] = useState(() => loadHistory().slice(0, 5))
   const headerRef = useRef(null)
