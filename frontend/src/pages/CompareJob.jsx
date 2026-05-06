@@ -1359,6 +1359,29 @@ function ExportTab({ job, run }) {
             </button>
           </div>
         </div>
+        <div className="bg-white rounded-xl border border-violet-200 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-gray-900">RAGAS Dataset</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                JSON for RAG evaluation.{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">user_input</code>{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">retrieved_contexts</code>{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">reference</code>{' '}
+                (human-confirmed match, empty if unreviewed){' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">response</code>{' '}
+                (empty — no synthesis). All left rows included.
+              </p>
+            </div>
+            <button
+              onClick={() => handleDownload('ragas')}
+              disabled={downloading === 'ragas'}
+              className="shrink-0 bg-violet-600 text-white px-4 py-2 rounded-lg font-medium text-sm hover:bg-violet-700 transition-colors disabled:opacity-40"
+            >
+              {downloading === 'ragas' ? 'Downloading…' : '⬇ Download RAGAS'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -876,7 +876,15 @@ def export_job_config(job_id: int, run_id: int | None = Query(default=None)):
         if not run_row:
             raise HTTPException(status_code=404, detail="Run not found")
         d.update(_run_to_yaml_dict(dict(run_row)))
-    body = yaml.dump(d, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    class _BlockDumper(yaml.Dumper):
+        pass
+    _BlockDumper.add_representer(
+        list,
+        lambda dumper, data: dumper.represent_sequence(
+            "tag:yaml.org,2002:seq", data, flow_style=False
+        ),
+    )
+    body = yaml.dump(d, Dumper=_BlockDumper, allow_unicode=True, sort_keys=False, default_flow_style=False)
     return Response(
         body,
         media_type="text/yaml",
@@ -1737,8 +1745,8 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
     if job["status"] != "ready":
         raise HTTPException(status_code=400, detail=f"Job not ready (status: {job['status']})")
 
-    if type not in ("raw", "confirmed"):
-        raise HTTPException(status_code=400, detail="type must be 'raw' or 'confirmed'")
+    if type not in ("raw", "confirmed", "ragas"):
+        raise HTTPException(status_code=400, detail="type must be 'raw', 'confirmed', or 'ragas'")
 
     schema = job["schema_name"]
     label_l = job.get("label_left", "Left")
@@ -1950,6 +1958,68 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
             df_unique_right.to_excel(writer, sheet_name=f"Unique {label_r}", index=False)
 
         filename = f"{name_slug}_lens_compare_confirmed.xlsx"
+
+    elif type == "ragas":
+        with get_cursor() as (cur, _conn):
+            cur.execute(
+                f"SELECT id, contextual_content FROM {schema}.records WHERE side = 'left' ORDER BY original_row ASC"
+            )
+            left_rows = {r["id"]: r["contextual_content"] for r in cur.fetchall()}
+
+            cur.execute(
+                f"""
+                SELECT m.left_id, r.contextual_content
+                FROM {schema}.{match_table} m
+                JOIN {schema}.records r ON r.id = m.right_id
+                ORDER BY m.left_id, m.rank ASC
+                """
+            )
+            candidates: dict = {}
+            for row in cur.fetchall():
+                candidates.setdefault(row["left_id"], []).append(row["contextual_content"] or "")
+
+            cur.execute(
+                f"""
+                SELECT left_id,
+                       CASE
+                           WHEN matched_right_ids IS NOT NULL AND cardinality(matched_right_ids) > 0
+                               THEN matched_right_ids
+                           WHEN matched_right_id IS NOT NULL
+                               THEN ARRAY[matched_right_id]
+                           ELSE ARRAY[]::INTEGER[]
+                       END AS right_ids
+                FROM {schema}.{dec_table}
+                """
+            )
+            decisions = {r["left_id"]: r["right_ids"] for r in cur.fetchall()}
+
+            all_matched_ids = list({rid for ids in decisions.values() for rid in (ids or [])})
+            right_content: dict = {}
+            if all_matched_ids:
+                cur.execute(
+                    f"SELECT id, contextual_content FROM {schema}.records WHERE id = ANY(%s)",
+                    [all_matched_ids],
+                )
+                right_content = {r["id"]: r["contextual_content"] or "" for r in cur.fetchall()}
+
+        dataset = []
+        for left_id, user_input in left_rows.items():
+            matched_ids = decisions.get(left_id) or []
+            reference = "\n\n---\n\n".join(right_content[rid] for rid in matched_ids if rid in right_content)
+            dataset.append({
+                "user_input": user_input or "",
+                "retrieved_contexts": candidates.get(left_id, []),
+                "reference": reference,
+                "response": "",
+            })
+
+        from datetime import date as _date
+        filename = f"{name_slug}_lens_compare_ragas_{_date.today().strftime('%Y-%m-%d')}.json"
+        return Response(
+            content=json.dumps(dataset, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     buffer.seek(0)
     return Response(

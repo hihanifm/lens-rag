@@ -381,9 +381,12 @@ export const downloadRunExport = async (jobId, runId, type = 'confirmed', jobNam
     responseType: 'blob',
   })
   const slug = jobName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'compare'
-  const descriptor = type === 'raw' ? 'raw' : 'confirmed'
-  const filename = `${slug}_lens_compare_${descriptor}_${fileDateTime()}.xlsx`
-  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const isRagas = type === 'ragas'
+  const descriptor = type === 'raw' ? 'raw' : isRagas ? 'ragas' : 'confirmed'
+  const ext = isRagas ? 'json' : 'xlsx'
+  const filename = `${slug}_lens_compare_${descriptor}_${fileDateTime()}.${ext}`
+  const mimeType = isRagas ? 'application/json' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  const url = window.URL.createObjectURL(new Blob([response.data], { type: mimeType }))
   const link = document.createElement('a')
   link.href = url
   link.setAttribute('download', filename)
