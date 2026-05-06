@@ -322,6 +322,8 @@ export const getNextRunReviewItem = (
     includeDecided = false,
     textContains = '',
     reviewOutcomeFilter = 'all',
+    sortBy = 'id',
+    sortDir = 'asc',
   } = {},
 ) =>
   api.get(`compare/${jobId}/runs/${runId}/review/next`, {
@@ -333,6 +335,7 @@ export const getNextRunReviewItem = (
       ...(reviewOutcomeFilter && reviewOutcomeFilter !== 'all'
         ? { review_outcome_filter: reviewOutcomeFilter }
         : {}),
+      ...(sortBy !== 'id' ? { sort_by: sortBy, sort_dir: sortDir } : {}),
     },
   }).then(r => r.data)
 

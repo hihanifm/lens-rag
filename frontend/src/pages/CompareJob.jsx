@@ -588,6 +588,8 @@ function ReviewTab({ job, run }) {
   const [textDraft, setTextDraft] = useState('')
   const [textContains, setTextContains] = useState('')
   const [outcomeFilter, setOutcomeFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('id')
+  const [sortDir, setSortDir] = useState('asc')
   const [commentByLeft, setCommentByLeft] = useState(() => new Map())
   const [outcomeByLeft, setOutcomeByLeft] = useState(() => new Map())
   const [failConfirm, setFailConfirm] = useState(null)
@@ -613,6 +615,8 @@ function ReviewTab({ job, run }) {
           includeDecided: true,
           textContains,
           reviewOutcomeFilter: outcomeFilter,
+          sortBy,
+          sortDir,
         })
       )
       const results = await Promise.allSettled(reqs)
@@ -655,7 +659,7 @@ function ReviewTab({ job, run }) {
     } finally {
       setLoading(false)
     }
-  }, [jobId, runId, minScore, rowsShown, textContains, outcomeFilter])
+  }, [jobId, runId, minScore, rowsShown, textContains, outcomeFilter, sortBy, sortDir])
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -941,6 +945,23 @@ function ReviewTab({ job, run }) {
             <option value="fail">Fail</option>
             <option value="system_fail">System failure</option>
             <option value="matched_none">Matched (no outcome)</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500 whitespace-nowrap">Sort</label>
+          <select
+            value={sortBy === 'display' ? `display_${sortDir}` : 'id'}
+            onChange={e => {
+              const v = e.target.value
+              if (v === 'id') { setSortBy('id'); setSortDir('asc') }
+              else if (v === 'display_asc') { setSortBy('display'); setSortDir('asc') }
+              else { setSortBy('display'); setSortDir('desc') }
+            }}
+            className="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+          >
+            <option value="id">Original</option>
+            <option value="display_asc">A → Z</option>
+            <option value="display_desc">Z → A</option>
           </select>
         </div>
       </div>

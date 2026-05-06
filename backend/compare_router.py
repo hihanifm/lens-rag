@@ -1504,6 +1504,8 @@ def next_review_item(
         default=None,
         description="Restrict rows: all (default), pending, matched_none, or a stored review_outcome",
     ),
+    sort_by: str | None = Query(default=None, description="id (default) or display"),
+    sort_dir: str | None = Query(default=None, description="asc (default) or desc"),
 ):
     job = _job_or_404(job_id)
     _run_or_404(run_id, job_id)
@@ -1512,6 +1514,12 @@ def next_review_item(
     dec_table   = f"run_{run_id}_decisions"
     text_frag, text_params = _review_text_contains_clause(schema, match_table, text_contains)
     use_oc_filter, oc_frag, oc_params = _review_outcome_filter_parts(review_outcome_filter)
+
+    if sort_by == "display":
+        _dir = "DESC" if sort_dir == "desc" else "ASC"
+        order_clause = f"ORDER BY COALESCE(r.display_value, '') {_dir}"
+    else:
+        order_clause = "ORDER BY r.id"
 
     if use_oc_filter:
         query = f"""
@@ -1523,7 +1531,7 @@ def next_review_item(
               AND m.final_score >= %s
               {text_frag}
               {oc_frag}
-            ORDER BY r.id
+            {order_clause}
             LIMIT 1 OFFSET %s
         """
         q_params = [min_score, *text_params, *oc_params, offset]
@@ -1535,7 +1543,7 @@ def next_review_item(
             WHERE r.side = 'left'
               AND m.final_score >= %s
               {text_frag}
-            ORDER BY r.id
+            {order_clause}
             LIMIT 1 OFFSET %s
         """
         q_params = [min_score, *text_params, offset]
@@ -1549,7 +1557,7 @@ def next_review_item(
               AND d.left_id IS NULL
               AND m.final_score >= %s
               {text_frag}
-            ORDER BY r.id
+            {order_clause}
             LIMIT 1 OFFSET %s
         """
         q_params = [min_score, *text_params, offset]
