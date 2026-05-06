@@ -1809,7 +1809,7 @@ def export_run(job_id: int, run_id: int, type: str = "confirmed"):
 
         filename = f"{name_slug}_lens_compare_raw.xlsx"
 
-    else:
+    elif type == "confirmed":
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
 
             # Sheet 1: Confirmed Matches
