@@ -5,11 +5,12 @@ batch_compare.py — Automate Compare job creation + execution for a folder tree
 Usage:
     python batch_compare.py <root_folder> [--api-url URL] [--dry-run] [--run-name NAME]
 
-Each immediate subfolder of root_folder is treated as one Compare job. A
-compare.yml config file is required in each subfolder; folders without one
-are skipped with a warning.
+Each immediate subfolder of root_folder is treated as one Compare job. Any
+.yml file in the subfolder is used as the config; folders without one are
+skipped with a warning. If multiple .yml files exist, the first (alphabetically)
+is used.
 
-See compare.yml schema in the project docs or the EXAMPLE_CONFIG string below.
+See the config schema in the project docs or the EXAMPLE_CONFIG string below.
 """
 
 import argparse
@@ -21,7 +22,7 @@ import requests
 import yaml
 
 EXAMPLE_CONFIG = """
-# compare.yml — all fields optional except left_columns / right_columns
+# compare config (.yml) — all fields optional except left_columns / right_columns
 name: "My Job"             # default: subfolder name
 label_left: "Left"         # default: "Left"
 label_right: "Right"       # default: "Right"
@@ -143,10 +144,13 @@ def run_job_folder(folder: pathlib.Path, api_url: str, cli_run_name: str | None,
     _log(f"Folder: {folder.name}")
 
     # ── load config ──────────────────────────────────────────────────────────
-    cfg_path = folder / "compare.yml"
-    if not cfg_path.exists():
-        _warn("No compare.yml found — skipping")
+    yml_files = sorted(folder.glob("*.yml"))
+    if not yml_files:
+        _warn("No .yml config found — skipping")
         return False
+    cfg_path = yml_files[0]
+    if len(yml_files) > 1:
+        _warn(f"Multiple .yml files found — using {cfg_path.name}")
 
     with cfg_path.open() as f:
         cfg = yaml.safe_load(f) or {}
@@ -367,15 +371,13 @@ def main():
         if result is True:
             ok += 1
         elif result is False:
-            # distinguish skip (no yml/files) from actual failure by checking if config existed
-            cfg_path = folder / "compare.yml"
-            if not cfg_path.exists():
+            if not any(folder.glob("*.yml")):
                 skipped += 1
             else:
                 failed += 1
 
     _log(f"\n{'═'*60}")
-    _log(f"Done.  ✓ {ok} succeeded  ✗ {failed} failed  — {skipped} skipped (no compare.yml)")
+    _log(f"Done.  ✓ {ok} succeeded  ✗ {failed} failed  — {skipped} skipped (no .yml config)")
 
 
 if __name__ == "__main__":
