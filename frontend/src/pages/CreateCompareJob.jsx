@@ -1499,8 +1499,9 @@ export default function CreateCompareJob() {
     setFolderImportError('')
     setFolderImporting(true)
     try {
-      const yamlFile = files.find(f => f.name === 'compare.yml' || f.name === 'compare.yaml')
-      if (!yamlFile) throw new Error('No compare.yml found in selected folder')
+      const yamlFiles = files.filter(f => f.name.endsWith('.yml') || f.name.endsWith('.yaml'))
+      if (!yamlFiles.length) throw new Error('No .yml config file found in selected folder')
+      const yamlFile = yamlFiles[0]
 
       // Parse YAML server-side first to get declared filenames
       const previewCfg = await parseCompareYaml(await yamlFile.text())
