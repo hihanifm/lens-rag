@@ -3120,7 +3120,8 @@ export default function CompareJob() {
   const [selectedRun, _setSelectedRun] = useState(null)
   const setSelectedRun = useCallback((run) => {
     _setSelectedRun(run)
-    setSearchParams(run ? { run: run.id } : {}, { replace: true })
+    if (run) setSearchParams({ run: run.id })
+    else setSearchParams({}, { replace: true })
   }, [setSearchParams])
   const initialRunId = searchParams.get('run') ? Number(searchParams.get('run')) : null
   const [showNewRun, setShowNewRun] = useState(false)
