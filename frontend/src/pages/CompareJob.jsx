@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getCompareJob,
@@ -2890,7 +2890,7 @@ function RunDetailPanel({ job, run, onBack, onRunComplete, onRunUpdated, onDupli
 
 // ── Runs panel (list) ──────────────────────────────────────────────────────
 
-function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplicateRun }) {
+function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplicateRun, initialRunId }) {
   const jobId = job.id
   const queryClient = useQueryClient()
   const [deletingId, setDeletingId] = useState(null)
@@ -2904,6 +2904,13 @@ function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplica
       return list.some(r => r.status === 'pending' || r.status === 'running') ? 3000 : false
     },
   })
+
+  useEffect(() => {
+    if (initialRunId && runs.length > 0) {
+      const run = runs.find(r => r.id === initialRunId)
+      if (run) onSelectRun(run)
+    }
+  }, [runs, initialRunId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDelete = async (runId, e) => {
     e.stopPropagation()
@@ -3107,9 +3114,15 @@ function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplica
 
 export default function CompareJob() {
   const { jobId } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('runs')
-  const [selectedRun, setSelectedRun] = useState(null)
+  const [selectedRun, _setSelectedRun] = useState(null)
+  const setSelectedRun = useCallback((run) => {
+    _setSelectedRun(run)
+    setSearchParams(run ? { run: run.id } : {}, { replace: true })
+  }, [setSearchParams])
+  const initialRunId = searchParams.get('run') ? Number(searchParams.get('run')) : null
   const [showNewRun, setShowNewRun] = useState(false)
   const [duplicateSourceRun, setDuplicateSourceRun] = useState(null)
 
@@ -3270,6 +3283,7 @@ export default function CompareJob() {
                 setDuplicateSourceRun(run)
                 setShowNewRun(true)
               }}
+              initialRunId={initialRunId}
             />
           )
         ) : activeTab === 'browse' ? (
