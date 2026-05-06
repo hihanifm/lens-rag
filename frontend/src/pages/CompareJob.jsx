@@ -3060,10 +3060,10 @@ function RunsPanel({ job, onSelectRun, onRunUpdated, onOpenNewRun, onOpenDuplica
                     href={compareConfigExportUrl(jobId, run.id)}
                     download="compare.yml"
                     onClick={(e) => e.stopPropagation()}
-                    className="text-xs text-gray-400 hover:text-blue-500 transition-colors px-1.5 py-0.5 rounded"
+                    className="text-xs font-medium text-gray-500 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 border border-gray-200 hover:border-blue-200 transition-colors px-2 py-0.5 rounded whitespace-nowrap shrink-0"
                     title="Export run config as compare.yml"
                   >
-                    ↓ yml
+                    ↓ config
                   </a>
                   <button
                     type="button"
