@@ -1549,11 +1549,21 @@ export default function CreateCompareJob() {
       setStep(6)
     } catch (err) {
       const detail = err?.response?.data?.detail
-      setFolderImportError(
-        typeof detail === 'object'
-          ? `Column mismatch — missing left: [${detail.missing_left?.join(', ')}] right: [${detail.missing_right?.join(', ')}]`
-          : detail || err.message || 'Import failed'
-      )
+      let msg = err.message || 'Import failed'
+      if (typeof detail === 'string') {
+        msg = detail
+      } else if (Array.isArray(detail)) {
+        msg = detail.map(d => d?.msg ?? JSON.stringify(d)).join('; ') || msg
+      } else if (detail && typeof detail === 'object' && (Array.isArray(detail.missing_left) || Array.isArray(detail.missing_right))) {
+        const ml = Array.isArray(detail.missing_left) ? detail.missing_left : []
+        const mr = Array.isArray(detail.missing_right) ? detail.missing_right : []
+        msg = `Column mismatch — missing left: [${ml.join(', ')}] right: [${mr.join(', ')}]`
+      } else if (detail && typeof detail === 'object' && typeof detail.detail === 'string') {
+        msg = detail.detail
+      } else if (detail && typeof detail === 'object' && detail.message) {
+        msg = detail.message
+      }
+      setFolderImportError(msg)
     } finally {
       setFolderImporting(false)
     }

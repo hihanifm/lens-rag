@@ -892,6 +892,28 @@ def export_job_config(job_id: int, run_id: int | None = Query(default=None)):
     )
 
 
+def _compare_import_column_names(
+    file_bytes: bytes, suffix: str, sheet_name: str | None, side_label: str
+) -> list[str]:
+    """
+    Headers as Compare create/ingest use them: same rules as read_compare_dataframe(sheet_name).
+    Import previously used only the first sheet (pd.read_excel default), which broke round-trips
+    when the job used all-sheet concat or a non-first sheet.
+    """
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
+        tf.write(file_bytes)
+        path = tf.name
+    try:
+        df = read_compare_dataframe(path, (sheet_name or "").strip() or None)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Cannot read {side_label} file: {e}"
+        ) from e
+    finally:
+        os.unlink(path)
+    return [str(c) for c in df.columns if c != "sheet_name"]
+
+
 @router.post("/import-config")
 async def import_compare_config(
     config: UploadFile = File(...),
@@ -921,18 +943,26 @@ async def import_compare_config(
     left_bytes = await left_file.read()
     right_bytes = await right_file.read()
 
-    try:
-        df_left = pd.read_excel(io.BytesIO(left_bytes), nrows=0, dtype=str)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Cannot read left file: {e}")
-    try:
-        df_right = pd.read_excel(io.BytesIO(right_bytes), nrows=0, dtype=str)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Cannot read right file: {e}")
+    left_ext = pathlib.Path(left_file.filename).suffix or ".xlsx"
+    right_ext = pathlib.Path(right_file.filename).suffix or ".xlsx"
+
+    def _sheet_from_yaml(v) -> str | None:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        return None
+
+    cols_left = _compare_import_column_names(
+        left_bytes, left_ext, _sheet_from_yaml(cfg.get("sheet_left")), "left"
+    )
+    cols_right = _compare_import_column_names(
+        right_bytes, right_ext, _sheet_from_yaml(cfg.get("sheet_right")), "right"
+    )
+    colset_left = set(cols_left)
+    colset_right = set(cols_right)
 
     # Column check
-    missing_left = [c for c in (cfg.get("left_columns") or []) if c not in df_left.columns]
-    missing_right = [c for c in (cfg.get("right_columns") or []) if c not in df_right.columns]
+    missing_left = [c for c in (cfg.get("left_columns") or []) if str(c) not in colset_left]
+    missing_right = [c for c in (cfg.get("right_columns") or []) if str(c) not in colset_right]
     if missing_left or missing_right:
         raise HTTPException(
             status_code=400,
@@ -944,8 +974,6 @@ async def import_compare_config(
         )
 
     # Write to tmp files (same pattern as _preview_file)
-    left_ext = pathlib.Path(left_file.filename).suffix or ".xlsx"
-    right_ext = pathlib.Path(right_file.filename).suffix or ".xlsx"
     with tempfile.NamedTemporaryFile(delete=False, suffix=left_ext) as tmp:
         tmp.write(left_bytes)
         tmp_left = tmp.name
@@ -957,8 +985,8 @@ async def import_compare_config(
         "config": cfg,
         "tmp_path_left": tmp_left,
         "tmp_path_right": tmp_right,
-        "columns_left": list(df_left.columns),
-        "columns_right": list(df_right.columns),
+        "columns_left": cols_left,
+        "columns_right": cols_right,
     }
 
 
