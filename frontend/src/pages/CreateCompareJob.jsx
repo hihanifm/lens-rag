@@ -1298,6 +1298,7 @@ export default function CreateCompareJob() {
   const connectionPrefilled = useRef(false)
   const connectionTouched = useRef(false)
   const embedUrlRef = useRef('')
+  const folderConfigMeta = useRef({ used: false, filename: null })
 
   // Pre-fill Connection step from system config on first visit
   useEffect(() => {
@@ -1418,6 +1419,8 @@ export default function CreateCompareJob() {
         embed_doc_prefix:   embedDocPrefix.trim()   || null,
         all_columns_left:  state.columnsLeft  || [],
         all_columns_right: state.columnsRight || [],
+        created_from_config_import: folderConfigMeta.current.used,
+        config_import_filename: folderConfigMeta.current.used ? folderConfigMeta.current.filename : null,
       })
       setCreatedJobId(job.id)
     } catch (e) {
@@ -1518,6 +1521,7 @@ export default function CreateCompareJob() {
 
       const result = await importCompareConfig(yamlFile, leftFile, rightFile)
       const cfg = result.config
+      folderConfigMeta.current = { used: true, filename: yamlFile.name }
 
       // Pre-fill wizard state from parsed config
       connectionPrefilled.current = true

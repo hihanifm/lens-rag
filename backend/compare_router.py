@@ -537,6 +537,9 @@ async def create_compare_job(data: CompareJobCreate):
 
     filters_left_json = json.dumps(lf)
     filters_right_json = json.dumps(rf)
+    cf_import = bool(data.created_from_config_import)
+    cf_name_raw = (data.config_import_filename or "").strip()
+    cf_name = cf_name_raw[:260] if cf_import and cf_name_raw else None
 
     with get_cursor() as (cur, _conn):
         cur.execute(
@@ -551,7 +554,8 @@ async def create_compare_job(data: CompareJobCreate):
                 tmp_path_left, tmp_path_right,
                 embed_dims, embed_url, embed_api_key, embed_model,
                 embed_query_prefix, embed_doc_prefix,
-                all_columns_left, all_columns_right
+                all_columns_left, all_columns_right,
+                created_from_config_import, config_import_filename
             ) VALUES (
                 %s, %s, %s, 'compare_placeholder',
                 %s, %s, %s,
@@ -561,6 +565,7 @@ async def create_compare_job(data: CompareJobCreate):
                 %s, %s,
                 %s, %s,
                 %s, %s, %s, %s,
+                %s, %s,
                 %s, %s,
                 %s, %s
             ) RETURNING id, created_at
@@ -579,6 +584,7 @@ async def create_compare_job(data: CompareJobCreate):
                 data.embed_query_prefix if data.embed_query_prefix is not None else None,
                 data.embed_doc_prefix   if data.embed_doc_prefix   is not None else None,
                 data.all_columns_left or [], data.all_columns_right or [],
+                cf_import, cf_name,
             ],
         )
         row = cur.fetchone()
@@ -1487,6 +1493,8 @@ def compare_config_stats(job_id: int):
         "sheet_name_right": job.get("sheet_name_right"),
         "row_filters_left": [f.model_dump() for f in _decode_job_filters(job.get("row_filters_left"))],
         "row_filters_right": [f.model_dump() for f in _decode_job_filters(job.get("row_filters_right"))],
+        "created_from_config_import": bool(job.get("created_from_config_import")),
+        "config_import_filename": job.get("config_import_filename"),
     }
 
     stats: dict = {
@@ -2087,6 +2095,8 @@ def _serialize_job(row: dict) -> dict:
         "content_column_left":   row.get("content_column_left"),
         "context_columns_right": row.get("context_columns_right") or [],
         "content_column_right":  row.get("content_column_right"),
+        "created_from_config_import": bool(row.get("created_from_config_import")),
+        "config_import_filename": row.get("config_import_filename"),
         "created_at": row["created_at"],
     }
 

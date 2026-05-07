@@ -234,6 +234,8 @@ def run_job_folder(folder: pathlib.Path, api_url: str, cli_run_name: str | None,
             "content_column_right":  right_cols[-1],
             "all_columns_left":      left_preview.get("columns", []),
             "all_columns_right":     right_preview.get("columns", []),
+            "created_from_config_import": True,
+            "config_import_filename": cfg_path.name,
         }
 
         if cfg.get("sheet_left"):

@@ -1605,7 +1605,8 @@ function ConfigStatsTab({ job }) {
               </div>
               <div className="space-y-2">
                 <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Schema</span><span className="font-medium text-gray-900 font-mono">{cfg.schema_name}</span></div>
-                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Created</span><span className="font-medium text-gray-900">{cfg.created_at ? new Date(cfg.created_at).toLocaleDateString() : '—'}</span></div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Created</span><span className="font-medium text-gray-900">{cfg.created_at ? new Date(cfg.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—'}</span></div>
+                <div className="flex gap-3"><span className="text-gray-400 w-40 shrink-0">Origin</span><span className="font-medium text-gray-900">{cfg.created_from_config_import ? `Config import${cfg.config_import_filename ? ` · ${cfg.config_import_filename}` : ''}` : 'Manual wizard'}</span></div>
               </div>
             </div>
           </div>

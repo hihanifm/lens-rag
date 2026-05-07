@@ -210,6 +210,12 @@ function CompareTab() {
                 {' · '}
                 {new Date(j.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}
               </p>
+              {(j.created_from_config_import ?? false) && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  From config import
+                  {j.config_import_filename ? ` · ${j.config_import_filename}` : ''}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <StatusBadge status={j.status} />

@@ -175,6 +175,12 @@ def init_db():
         cur.execute(
             "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_doc_prefix TEXT;"
         )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS created_from_config_import BOOLEAN DEFAULT FALSE;"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS config_import_filename TEXT;"
+        )
 
         # ── Compare runs table ─────────────────────────────────────────────
         cur.execute("""

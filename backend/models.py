@@ -261,6 +261,8 @@ class CompareJobCreate(BaseModel):
     embed_doc_prefix:   Optional[str] = None
     all_columns_left:  List[str] = Field(default_factory=list)
     all_columns_right: List[str] = Field(default_factory=list)
+    created_from_config_import: bool = False
+    config_import_filename: Optional[str] = Field(default=None, max_length=260)
 
 
 class CompareJobResponse(BaseModel):
@@ -289,6 +291,8 @@ class CompareJobResponse(BaseModel):
     content_column_left: Optional[str] = None
     context_columns_right: List[str] = Field(default_factory=list)
     content_column_right: Optional[str] = None
+    created_from_config_import: bool = False
+    config_import_filename: Optional[str] = None
     created_at: datetime
 
     @field_serializer("created_at")
