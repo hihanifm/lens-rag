@@ -1554,14 +1554,16 @@ export default function CreateCompareJob() {
         msg = detail
       } else if (Array.isArray(detail)) {
         msg = detail.map(d => d?.msg ?? JSON.stringify(d)).join('; ') || msg
-      } else if (detail && typeof detail === 'object' && (Array.isArray(detail.missing_left) || Array.isArray(detail.missing_right))) {
-        const ml = Array.isArray(detail.missing_left) ? detail.missing_left : []
-        const mr = Array.isArray(detail.missing_right) ? detail.missing_right : []
-        msg = `Column mismatch — missing left: [${ml.join(', ')}] right: [${mr.join(', ')}]`
-      } else if (detail && typeof detail === 'object' && typeof detail.detail === 'string') {
-        msg = detail.detail
+      } else if (detail && typeof detail === 'object' && (detail.missing_left != null || detail.missing_right != null)) {
+        const ml = Array.isArray(detail.missing_left) ? detail.missing_left.filter(Boolean) : []
+        const mr = Array.isArray(detail.missing_right) ? detail.missing_right.filter(Boolean) : []
+        const mlStr = ml.length ? ml.join(', ') : '—'
+        const mrStr = mr.length ? mr.join(', ') : '—'
+        msg = `Column mismatch — missing left: [${mlStr}] right: [${mrStr}]`
       } else if (detail && typeof detail === 'object' && detail.message) {
         msg = detail.message
+      } else if (detail && typeof detail === 'object') {
+        msg = JSON.stringify(detail)
       }
       setFolderImportError(msg)
     } finally {
