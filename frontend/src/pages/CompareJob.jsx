@@ -1740,6 +1740,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
     setLlmModelsError('')
     setRunNotes(initialRun.notes?.trim() ? initialRun.notes : '')
     setLoadedPresetRef(null)
+    setLlmLeftColumns(initialRun.llm_judge_left_columns || [])
+    setLlmRightColumns(initialRun.llm_judge_right_columns || [])
   }, [initialRun])
 
   useEffect(() => {
@@ -1903,7 +1905,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 pt-6 pb-4 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-900">New Run</h2>
           <p className="text-sm text-gray-500 mt-1">Configure the pipeline for this run. Uses embedded data already stored for this job.</p>

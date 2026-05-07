@@ -50,6 +50,7 @@ Do NOT jump straight into code. Always converse first.
 - **No speculative abstractions** — solve the real problem in front of you; three similar lines beat a premature helper
 - **No comments explaining what code does** — only add a comment when the why is non-obvious (a workaround, a hidden constraint, a subtle invariant)
 - **No cleanup beyond the task** — a bug fix does not need surrounding refactoring; keep diffs small and reviewable
+- **No linting/formatting tools configured** — no ESLint, Prettier, Ruff, Black, or pre-commit hooks; do not search for or install them; follow code style conventions in [BEST_PRACTICES.md](BEST_PRACTICES.md)
 
 Stack-specific detail (React, FastAPI, Git, workflow): [BEST_PRACTICES.md](BEST_PRACTICES.md).
 
@@ -724,6 +725,8 @@ your.server {
 | `make build-frontend` | Build frontend for prod (`/lens-rag/` base path)              |
 | `make clean`          | Remove old pre-rename containers/volumes; prune images        |
 | `make pip-cache`      | Pre-download Linux wheels into `pip-cache/` for offline Docker builds; auto-detects host arch via `uname -m` (arm64 on Mac, x86_64 on lab Linux) — run once after changing `requirements.txt` |
+| `make rebuild-frontend` | Rebuild only the frontend Docker service (faster than full `make build`) |
+| `make prod-logs-split`  | Split prod logs into 2 tmux panes (API + postgres)            |
 | `make e2e-up`         | Start dev stack + build, then run Playwright suite            |
 | `make e2e`            | Run Playwright tests (stack must already be up)               |
 | `make e2e-down`       | Tear down stack after tests                                   |
@@ -740,6 +743,9 @@ npm run e2e:ui    # Playwright interactive UI mode (from frontend/)
 
 # Run a single spec:
 cd frontend && npx playwright test e2e/smoke.spec.ts
+
+# Point at a non-default host:
+E2E_BASE_URL=http://your-host:37001 make e2e
 ```
 
 Test files in `frontend/e2e/`:
