@@ -412,9 +412,12 @@ export const compareConfigExportUrl = (jobId, runId = null) => {
 /** Upload compare.yml + left + right Excel files; returns { config, tmp_path_left, tmp_path_right, columns_left, columns_right } or throws with a detail message. */
 export const importCompareConfig = (configFile, leftFile, rightFile) => {
   const fd = new FormData()
-  fd.append('config', configFile)
-  fd.append('left_file', leftFile)
-  fd.append('right_file', rightFile)
+  // Explicitly pass basename as 3rd arg — browsers using webkitdirectory may send
+  // webkitRelativePath (e.g. "folder/file.xlsx") instead of file.name as the filename.
+  const basename = (f) => f.name.split('/').pop()
+  fd.append('config',     configFile, basename(configFile))
+  fd.append('left_file',  leftFile,   basename(leftFile))
+  fd.append('right_file', rightFile,  basename(rightFile))
   // Use native fetch — same as previewExcel / previewCompareFile: axios default
   // Content-Type: application/json breaks multipart boundary for FormData.
   return fetch(`${API_BASE_URL}/compare/import-config`, { method: 'POST', body: fd }).then(
