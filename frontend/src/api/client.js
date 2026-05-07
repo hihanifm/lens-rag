@@ -415,7 +415,19 @@ export const importCompareConfig = (configFile, leftFile, rightFile) => {
   fd.append('config', configFile)
   fd.append('left_file', leftFile)
   fd.append('right_file', rightFile)
-  return api.post('compare/import-config', fd).then(r => r.data)
+  // Use native fetch — same as previewExcel / previewCompareFile: axios default
+  // Content-Type: application/json breaks multipart boundary for FormData.
+  return fetch(`${API_BASE_URL}/compare/import-config`, { method: 'POST', body: fd }).then(
+    async (r) => {
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const err = new Error(r.statusText || 'Request failed')
+        err.response = { status: r.status, data }
+        throw err
+      }
+      return data
+    }
+  )
 }
 
 /** Parse raw YAML text server-side; returns parsed object. Used for run config pre-fill. */
