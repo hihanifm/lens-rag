@@ -208,7 +208,7 @@ function CompareTab() {
                 {' · '}
                 {j.row_count_right != null ? `${j.row_count_right.toLocaleString()} right` : '—'}
                 {' · '}
-                {new Date(j.created_at).toLocaleDateString()}
+                {new Date(j.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}
               </p>
             </div>
             <div className="flex items-center gap-2">

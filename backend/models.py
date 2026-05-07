@@ -1,6 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from typing import List, Optional, Dict, Any, Literal
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _dt_utc_z(dt: datetime) -> str:
+    """Postgres TIMESTAMP columns are naive; store uses UTC (typical Docker PG). Emit Z so JS Date parses as UTC, not local."""
+    u = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return u.isoformat().replace("+00:00", "Z")
+
+
+def _iso_utc_z(dt: datetime | None) -> str | None:
+    return None if dt is None else _dt_utc_z(dt)
 
 
 class ProjectCreate(BaseModel):
@@ -281,6 +291,10 @@ class CompareJobResponse(BaseModel):
     content_column_right: Optional[str] = None
     created_at: datetime
 
+    @field_serializer("created_at")
+    def _ser_job_created_at(self, v: datetime) -> str:
+        return _dt_utc_z(v)
+
 
 class CompareRunCreate(BaseModel):
     name: Optional[str] = None
@@ -335,6 +349,14 @@ class CompareRunResponse(BaseModel):
     row_count_left: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
+
+    @field_serializer("created_at")
+    def _ser_run_created_at(self, v: datetime) -> str:
+        return _dt_utc_z(v)
+
+    @field_serializer("completed_at")
+    def _ser_run_completed_at(self, v: Optional[datetime]) -> Optional[str]:
+        return _iso_utc_z(v)
 
 
 class CompareJobUpdate(BaseModel):
