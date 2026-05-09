@@ -17,6 +17,7 @@ import {
 import { FileDropZone } from '../components/FileDropZone'
 import {
   DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER,
+  DEFAULT_OLLAMA_EMBEDDING_URL_HINT,
   pickPreferredEmbeddingModel,
 } from '../utils/embeddingModelPreference'
 
@@ -803,13 +804,13 @@ function StepConnection({
             embedUrlRef.current = e.target.value
             setEmbedUrl(e.target.value)
           }}
-          placeholder="e.g. http://192.168.1.10:11434/v1"
+          placeholder={DEFAULT_OLLAMA_EMBEDDING_URL_HINT}
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
         />
         <div className="mt-2 text-xs space-y-1">
           <p className="text-gray-500">Ollama endpoints (click to fill):</p>
           <div className="flex flex-wrap gap-2">
-            {['http://host.docker.internal:11434/v1', 'http://localhost:11434/v1'].map(v => (
+            {[DEFAULT_OLLAMA_EMBEDDING_URL_HINT, 'http://localhost:11434/v1'].map(v => (
               <button
                 key={v}
                 type="button"
@@ -1317,20 +1318,24 @@ export default function CreateCompareJob() {
     connectionPrefilled.current = true
     getSystemConfig().then(cfg => {
       if (connectionTouched.current) return
+      setEmbedQueryPrefix(cfg.compare_embed_query_prefix || '')
+      setEmbedDocPrefix(cfg.compare_embed_doc_prefix || '')
+      if (cfg.embedding_provider === 'openai') {
+        if (!embedUrlRef.current.trim()) {
+          setEmbedUrl('')
+          embedUrlRef.current = ''
+        }
+        setEmbedModel('')
+        setAvailableModels([])
+        setModelError('')
+        return
+      }
       const url = cfg.embedding_url || ''
       if (!embedUrlRef.current.trim()) {
         setEmbedUrl(url)
         embedUrlRef.current = url
       }
-      setEmbedQueryPrefix(cfg.compare_embed_query_prefix || '')
-      setEmbedDocPrefix(cfg.compare_embed_doc_prefix || '')
       if (url) {
-        if (cfg.embedding_provider === 'openai') {
-          setAvailableModels([])
-          setEmbedModel(cfg.embedding_model || '')
-          setModelError('OpenAI endpoints require an API key to list models.')
-          return
-        }
         setModelLoading(true)
         setModelError('')
         fetchModels(url, null)

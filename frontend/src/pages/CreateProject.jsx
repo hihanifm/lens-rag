@@ -4,6 +4,7 @@ import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedd
 import { FileDropZone } from '../components/FileDropZone'
 import {
   DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER,
+  DEFAULT_OLLAMA_EMBEDDING_URL_HINT,
   pickPreferredEmbeddingModel,
 } from '../utils/embeddingModelPreference'
 
@@ -220,21 +221,23 @@ export default function CreateProject() {
     connectionPrefilled.current = true
     getSystemConfig().then(cfg => {
       if (connectionTouched.current) return
-      const url = cfg.embedding_url || ''
       if (cfg?.embedding_url) systemEmbedUrlRef.current = cfg.embedding_url
-      // Only prefill if the user hasn't typed anything yet.
+      if (cfg.embedding_provider === 'openai') {
+        if (!embedUrlRef.current.trim()) {
+          setEmbedUrl('')
+          embedUrlRef.current = ''
+        }
+        setEmbedModel('')
+        setAvailableModels([])
+        setModelError('')
+        return
+      }
+      const url = cfg.embedding_url || ''
       if (!embedUrlRef.current.trim()) {
         setEmbedUrl(url)
         embedUrlRef.current = url
       }
       if (url) {
-        // OpenAI model listing requires an API key; don't auto-fetch on arrival.
-        if (cfg.embedding_provider === 'openai') {
-          setAvailableModels([])
-          setEmbedModel(cfg.embedding_model || '')
-          setModelError('OpenAI endpoints require an API key to list models. Enter key, then click “Fetch available models”.')
-          return
-        }
         setModelLoading(true)
         setModelError('')
         fetchModels(url, null)
@@ -683,7 +686,7 @@ export default function CreateProject() {
                   type="text"
                   value={embedUrl}
                   onChange={e => { connectionTouched.current = true; embedUrlRef.current = e.target.value; setEmbedUrl(e.target.value); setAvailableModels([]); setEmbedModel(''); setModelError('') }}
-                  placeholder="e.g. http://192.168.1.10:11434/v1"
+                  placeholder={DEFAULT_OLLAMA_EMBEDDING_URL_HINT}
                   data-testid="embed-url"
                   className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -695,7 +698,7 @@ export default function CreateProject() {
                     <button
                       type="button"
                       onClick={() => {
-                        const v = 'http://host.docker.internal:11434/v1'
+                        const v = DEFAULT_OLLAMA_EMBEDDING_URL_HINT
                         connectionTouched.current = true
                         embedUrlRef.current = v
                         setEmbedUrl(v)
