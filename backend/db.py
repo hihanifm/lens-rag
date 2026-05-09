@@ -152,7 +152,7 @@ def init_db():
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_api_key TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS embed_model TEXT;")
         # Legacy columns kept for migrate_legacy_compare_jobs() to read initial run config
-        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS top_k INTEGER DEFAULT 3;")
+        cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS top_k INTEGER DEFAULT 10;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_enabled BOOLEAN DEFAULT TRUE;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS rerank_model TEXT;")
         cur.execute("ALTER TABLE public.compare_jobs ADD COLUMN IF NOT EXISTS sheet_name_left TEXT;")
@@ -190,7 +190,7 @@ def init_db():
                 name                  TEXT,
                 status                TEXT NOT NULL DEFAULT 'pending',
                 status_message        TEXT,
-                top_k                 INTEGER NOT NULL DEFAULT 3,
+                top_k                 INTEGER NOT NULL DEFAULT 10,
                 vector_enabled        BOOLEAN NOT NULL DEFAULT TRUE,
                 reranker_enabled      BOOLEAN NOT NULL DEFAULT FALSE,
                 reranker_model        TEXT,
@@ -221,6 +221,12 @@ def init_db():
         )
         cur.execute(
             "ALTER TABLE public.compare_runs ADD COLUMN IF NOT EXISTS llm_judge_right_columns TEXT[];"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_runs ALTER COLUMN top_k SET DEFAULT 10;"
+        )
+        cur.execute(
+            "ALTER TABLE public.compare_jobs ALTER COLUMN top_k SET DEFAULT 10;"
         )
 
         # Global LLM judge domain-overlay presets (Compare runs — reusable named prompts).
@@ -436,7 +442,7 @@ def migrate_legacy_compare_jobs():
     with get_cursor() as (cur, _conn):
         cur.execute("""
             SELECT cj.id, cj.schema_name,
-                   COALESCE(cj.top_k, 3)              AS top_k,
+                   COALESCE(cj.top_k, 10)             AS top_k,
                    COALESCE(cj.rerank_enabled, TRUE)   AS rerank_enabled,
                    cj.rerank_model
             FROM public.compare_jobs cj

@@ -69,7 +69,7 @@ CORS_ORIGINS = [
 ROOT_PATH = os.environ.get("ROOT_PATH", "")
 
 # ── Comparator ─────────────────────────────────────────────────────────────
-COMPARE_TOP_K          = int(os.getenv("COMPARE_TOP_K", "3"))
+COMPARE_TOP_K          = int(os.getenv("COMPARE_TOP_K", "10"))
 COMPARE_MATCH_THRESHOLD  = float(os.getenv("COMPARE_MATCH_THRESHOLD", "0.85"))
 COMPARE_REVIEW_THRESHOLD = float(os.getenv("COMPARE_REVIEW_THRESHOLD", "0.60"))
 

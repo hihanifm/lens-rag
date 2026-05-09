@@ -306,7 +306,7 @@ class CompareJobResponse(BaseModel):
 
 class CompareRunCreate(BaseModel):
     name: Optional[str] = None
-    top_k: int = 3
+    top_k: int = 10
     vector_enabled: bool = True
     # When vector_enabled is false (LLM compares vs many right rows): max rights loaded per left; null uses server default.
     llm_compare_max_rights: Optional[int] = Field(default=None, ge=1, le=500)

@@ -835,7 +835,7 @@ def _job_to_yaml_dict(row: dict) -> dict:
         "embed_query_prefix": row.get("embed_query_prefix"),
         "embed_doc_prefix": row.get("embed_doc_prefix"),
         # run-level fields — defaults (overwritten by _run_to_yaml_dict on run export)
-        "top_k": 5,
+        "top_k": 10,
         "vector_enabled": True,
         "reranker_enabled": False,
         "reranker_url": None,

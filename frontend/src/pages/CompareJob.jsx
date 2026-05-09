@@ -1325,7 +1325,7 @@ function ExportTab({ job, run }) {
             <div>
               <h3 className="font-semibold text-gray-900">Raw Report</h3>
               <p className="text-sm text-gray-500 mt-1">
-                All left rows × top-{run.top_k ?? 3} right candidates. One row per pair. Available immediately.
+                All left rows × top-{run.top_k ?? 10} right candidates. One row per pair. Available immediately.
               </p>
             </div>
             <button
@@ -1682,7 +1682,7 @@ function ConfigStatsTab({ job }) {
 function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
-  const [topK, setTopK] = useState(3)
+  const [topK, setTopK] = useState(10)
   const [vectorEnabled, setVectorEnabled] = useState(true)
   const [llmCompareMaxRights, setLlmCompareMaxRights] = useState('')
   const [rerankerEnabled, setRerankerEnabled] = useState(false)
@@ -1719,7 +1719,7 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
     if (!initialRun) return
     const baseName = initialRun.name?.trim() || `Run #${initialRun.id}`
     setName(`Copy of ${baseName}`)
-    setTopK(initialRun.top_k ?? 3)
+    setTopK(initialRun.top_k ?? 10)
     setVectorEnabled(initialRun.vector_enabled !== false)
     setLlmCompareMaxRights(
       initialRun.llm_compare_max_rights != null ? String(initialRun.llm_compare_max_rights) : '',

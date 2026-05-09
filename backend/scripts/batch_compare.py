@@ -36,7 +36,7 @@ llm_left_columns: [Name]               # optional LLM judge override (default: l
 llm_right_columns: [Title]             # optional LLM judge override (default: right_columns)
 display_column_left: SKU               # optional display column in review UI
 display_column_right: PartNumber
-top_k: 5               # default: 5
+top_k: 10              # default: 10
 vector_enabled: true   # default: true
 reranker_enabled: false
 embed_url: ~
@@ -106,7 +106,7 @@ def derive_run_name(cfg: dict, cli_run_name: str | None) -> str:
         return cli_run_name
     base = cfg.get("name") or "Left vs Right"
     embed_model = cfg.get("embed_model") or "bge-m3"
-    k = cfg.get("top_k", 5)
+    k = cfg.get("top_k", 10)
     parts = [embed_model]
     if cfg.get("llm_judge_enabled"):
         parts.append(cfg.get("llm_judge_model") or "llm")
@@ -274,7 +274,7 @@ def run_job_folder(folder: pathlib.Path, api_url: str, cli_run_name: str | None,
         # ── build run creation payload ────────────────────────────────────────
         run_payload = {
             "name":               run_name,
-            "top_k":              cfg.get("top_k", 5),
+            "top_k":              cfg.get("top_k", 10),
             "vector_enabled":     cfg.get("vector_enabled", True),
             "reranker_enabled":   cfg.get("reranker_enabled", False),
             "llm_judge_enabled":  cfg.get("llm_judge_enabled", False),
