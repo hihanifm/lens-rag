@@ -405,6 +405,7 @@ def _get_system_config_response(request: Request | None, project_id: int | None)
         embedding_provider=EMBEDDING_PROVIDER,
         embedding_url=embedding_url,
         embedding_model=_embedder_module.effective_embed_model(),
+        embedding_model_preferences=list(EMBED_MODEL_PREFERENCES),
         embedding_dims=EMBEDDING_DIMS,
         reranker_enabled=RERANKER_ENABLED,
         reranker_model=RERANKER_MODEL,

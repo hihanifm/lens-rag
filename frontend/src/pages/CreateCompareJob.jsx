@@ -15,6 +15,10 @@ import {
   API_BASE_URL,
 } from '../api/client'
 import { FileDropZone } from '../components/FileDropZone'
+import {
+  DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER,
+  pickPreferredEmbeddingModel,
+} from '../utils/embeddingModelPreference'
 
 const STEPS = ['Names', 'Upload Left', 'Setup Left', 'Upload Right', 'Setup Right', 'Connection', 'Review']
 
@@ -772,15 +776,18 @@ function StepConnection({
     <div className="space-y-5">
       <StepHeader step={5} total={STEPS.length} title="Embedding Model" />
       <p className="text-sm text-gray-500">
-        Override the default embedding model for this job. Leave blank to use the system default.
-        The chosen model will be used for all runs on this job.
+        Optional: point this job at another OpenAI-compatible embedding URL or model.
+        Leave blank to use the shared server default ({' '}
+        <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+        first when Ollama lists it).
       </p>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         <div className="font-semibold mb-0.5">Tip</div>
         <div>
-          Unless you're testing a new embedding model or endpoint, leave these fields blank
-          so the server default is used.
+          New users can leave URL blank—the server picks the default endpoint and prefers{' '}
+          <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+          when your Ollama has it listed.
         </div>
       </div>
 
@@ -869,7 +876,7 @@ function StepConnection({
             type="text"
             value={embedModel}
             onChange={e => setEmbedModel(e.target.value)}
-            placeholder="e.g. bge-m3"
+            placeholder={`e.g. ${DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}`}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
           <p className="text-xs text-gray-400 mt-1">
@@ -879,7 +886,11 @@ function StepConnection({
       )}
 
       {!embedUrl.trim() && (
-        <p className="text-sm text-gray-400">System default will be used.</p>
+        <p className="text-sm text-gray-400">
+          Server default embedding stack will be used (prefers{' '}
+          <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+          via Ollama when installed).
+        </p>
       )}
 
       <div className="border-t border-gray-100 pt-5 space-y-4">
@@ -1326,8 +1337,7 @@ export default function CreateCompareJob() {
           .then(models => {
             const list = Array.isArray(models) ? models : []
             setAvailableModels(list)
-            const def = cfg.embedding_model
-            setEmbedModel(list.includes(def) ? def : (list[0] || ''))
+            setEmbedModel(pickPreferredEmbeddingModel(list, cfg.embedding_model_preferences, cfg.embedding_model))
           })
           .catch(() => setModelError('Could not reach the system endpoint to list models.'))
           .finally(() => setModelLoading(false))
@@ -1342,10 +1352,15 @@ export default function CreateCompareJob() {
     setAvailableModels([])
     setEmbedModel('')
     try {
+      const cfg = await getSystemConfig().catch(() => ({}))
       const raw = await fetchModels(embedUrl.trim(), embedApiKey.trim() || null)
       const models = Array.isArray(raw) ? raw : []
       setAvailableModels(models)
-      if (models.length > 0) setEmbedModel(models[0])
+      if (models.length > 0) {
+        setEmbedModel(
+          pickPreferredEmbeddingModel(models, cfg.embedding_model_preferences, cfg.embedding_model),
+        )
+      }
     } catch {
       setModelError('Could not reach the endpoint. Check the URL and try again.')
     } finally {

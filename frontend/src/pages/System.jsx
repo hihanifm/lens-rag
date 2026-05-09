@@ -93,6 +93,14 @@ export default function System() {
               <Row label="Provider:" value={cfg.embedding_provider} />
               <Row label="Model:" value={cfg.embedding_model} />
               <Row label="Dimensions:" value={String(cfg.embedding_dims)} />
+              <Row
+                label="Preference order:"
+                value={
+                  Array.isArray(cfg.embedding_model_preferences) && cfg.embedding_model_preferences.length > 0
+                    ? cfg.embedding_model_preferences.join(' → ')
+                    : '—'
+                }
+              />
             </InfoCard>
 
             <InfoCard title="Reranker (topic mode)">

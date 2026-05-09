@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { previewExcel, createProject, fetchModels, getSystemConfig, verifyEmbedding, verifyRerank, API_BASE_URL } from '../api/client'
 import { FileDropZone } from '../components/FileDropZone'
+import {
+  DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER,
+  pickPreferredEmbeddingModel,
+} from '../utils/embeddingModelPreference'
 
 const STEPS = [
   'Name',
@@ -237,8 +241,7 @@ export default function CreateProject() {
           .then(models => {
             const list = Array.isArray(models) ? models : []
             setAvailableModels(list)
-            const def = cfg.embedding_model
-            setEmbedModel(list.includes(def) ? def : (list[0] || ''))
+            setEmbedModel(pickPreferredEmbeddingModel(list, cfg.embedding_model_preferences, cfg.embedding_model))
           })
           .catch(() => setModelError('Could not reach the system endpoint to list models.'))
           .finally(() => setModelLoading(false))
@@ -295,10 +298,15 @@ export default function CreateProject() {
     setAvailableModels([])
     setEmbedModel('')
     try {
+      const cfg = await getSystemConfig().catch(() => ({}))
       const raw = await fetchModels(embedUrl.trim(), embedApiKey.trim() || null)
       const models = Array.isArray(raw) ? raw : []
       setAvailableModels(models)
-      if (models.length > 0) setEmbedModel(models[0])
+      if (models.length > 0) {
+        setEmbedModel(
+          pickPreferredEmbeddingModel(models, cfg.embedding_model_preferences, cfg.embedding_model),
+        )
+      }
       else setEmbedModel('')
     } catch (e) {
       setModelError('Could not reach the endpoint. Check the URL and try again.')
@@ -651,16 +659,19 @@ export default function CreateProject() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Embedding Model</h2>
             <p className="text-gray-500 mb-8">
-              Override the default embedding model for this project. Leave blank to use the system default.
-              The chosen model will be used for ingestion and all searches.
+              Optional: override the embedding endpoint or model for this project only.
+              Leave blank to use the shared server default (prefers{' '}
+              <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+              via Ollama when listed).
             </p>
 
             <div className="space-y-4">
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <div className="font-semibold mb-0.5">Tip</div>
                 <div>
-                  Unless you&apos;re debugging performance or testing a new embedding model/endpoint you installed, leave these fields blank
-                  so the server default is used.
+                  New users can leave URL blank—the server picks the default endpoint and prefers{' '}
+                  <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+                  when your Ollama lists it after &quot;Fetch available models&quot;.
                 </div>
               </div>
 
@@ -771,7 +782,7 @@ export default function CreateProject() {
                     type="text"
                     value={embedModel}
                     onChange={e => setEmbedModel(e.target.value)}
-                    placeholder="e.g. bge-m3"
+                    placeholder={`e.g. ${DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}`}
                     data-testid="embed-model-input"
                     className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -782,7 +793,11 @@ export default function CreateProject() {
               )}
 
               {!embedUrl.trim() && (
-                <p className="text-sm text-gray-400">System default will be used (configured by the server admin).</p>
+                <p className="text-sm text-gray-400">
+                  Server default will be used (prefers{' '}
+                  <span className="font-mono">{DEFAULT_EMBEDDING_MODEL_PREFERENCE_ORDER[0]}</span>{' '}
+                  via Ollama when installed—same order as preference list).
+                </p>
               )}
             </div>
 

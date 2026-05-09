@@ -78,6 +78,10 @@ class SystemConfigResponse(BaseModel):
     embedding_provider: str
     embedding_url: str
     embedding_model: str
+    embedding_model_preferences: List[str] = Field(
+        default_factory=list,
+        description="Ordered embedding model IDs the server prefers (first installed wins at startup; UI mirrors this order).",
+    )
     embedding_dims: int
     reranker_enabled: bool
     reranker_model: str
