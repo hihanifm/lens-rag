@@ -30,6 +30,10 @@ import {
 } from '../api/client'
 
 /** Defaults for LLM judge (OpenAI-compatible chat). */
+const LLM_PRESET_INTERNAL = {
+  url: 'http://host.docker.internal:35700/v1',
+  model: 'llama3.2:3b',
+}
 const LLM_PRESET_OLLAMA = {
   url: 'http://host.docker.internal:11434/v1',
   model: 'llama3.2:3b',
@@ -1689,8 +1693,8 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   const [rerankerModel, setRerankerModel] = useState('')
   const [rerankerUrl, setRerankerUrl] = useState('')
   const [llmEnabled, setLlmEnabled] = useState(false)
-  const [llmUrl, setLlmUrl] = useState('')
-  const [llmModel, setLlmModel] = useState('')
+  const [llmUrl, setLlmUrl] = useState(LLM_PRESET_INTERNAL.url)
+  const [llmModel, setLlmModel] = useState(LLM_PRESET_INTERNAL.model)
   const [llmApiKey, setLlmApiKey] = useState('')
   const [llmPrompt, setLlmPrompt] = useState('')
   const [llmModelOptions, setLlmModelOptions] = useState([])
@@ -1762,10 +1766,10 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
   useEffect(() => {
     if (!llmJudgeDefaults) return
     if (!initialRun) {
-      setLlmUrl((u) => (u.trim() ? u : llmJudgeDefaults.default_llm_judge_url || ''))
-      setLlmModel((m) => (m.trim() ? m : llmJudgeDefaults.default_llm_judge_model || ''))
+      setLlmUrl((u) => (u.trim() ? u : LLM_PRESET_INTERNAL.url))
+      setLlmModel((m) => (m.trim() ? m : llmJudgeDefaults.default_llm_judge_model || LLM_PRESET_INTERNAL.model))
     }
-  }, [llmJudgeDefaults])
+  }, [llmJudgeDefaults, initialRun])
 
   useEffect(() => {
     if (!llmModelOptions.length) return
@@ -2098,6 +2102,19 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                       <button
                         type="button"
                         onClick={() => {
+                          setLlmUrl(LLM_PRESET_INTERNAL.url)
+                          setLlmModel(LLM_PRESET_INTERNAL.model)
+                          setLlmApiKey('')
+                          setLlmModelOptions([])
+                          setLlmModelsError('')
+                        }}
+                        className="text-xs px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                      >
+                        Internal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
                           setLlmUrl(LLM_PRESET_OLLAMA.url)
                           setLlmModel(LLM_PRESET_OLLAMA.model)
                           setLlmApiKey('')
@@ -2126,11 +2143,12 @@ function NewRunModal({ onClose, onCreated, job, initialRun = null }) {
                     type="text"
                     value={llmUrl}
                     onChange={e => setLlmUrl(e.target.value)}
-                    placeholder="e.g. http://host.docker.internal:11434/v1"
+                    placeholder={LLM_PRESET_INTERNAL.url}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                   />
                   <p className="text-[11px] text-gray-400 mt-1">
-                    Ollama preset uses Docker→host; use <span className="font-mono">localhost</span> only if the API is reachable from the LENS backend container.
+                    Internal preset (port 35700) is the default for on-prem chat. Ollama preset uses 11434 Docker→host; use{' '}
+                    <span className="font-mono">localhost</span> only if the API is reachable from the LENS backend container.
                   </p>
                 </div>
                 <div>

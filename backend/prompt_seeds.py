@@ -91,6 +91,9 @@ Rules:
 - score must be between 0.0 and 1.0.
 - Do not return markdown, labels, wrapper objects, or extra text.
 - Keep each reason to one concise sentence.
-- Ground each reason only in the provided text and telecom domain terminology.""",
+- Ground each reason only in the provided text and telecom domain terminology.
+- Do not group, summarize, merge, skip, or omit candidates.
+- If candidates are identical, still return separate array items.
+- Each reason must refer only to that one candidate.""",
     },
 ]

@@ -435,8 +435,8 @@ class CompareLlmJudgeDefaultsResponse(BaseModel):
     fixed_suffix: str = Field(
         ...,
         description=(
-            "Tail section embedded in default_system_prompt when llm_judge_prompt is empty; "
-            "not appended when the run supplies a custom judge prompt."
+            "Legacy API field; empty when built-in default is a single monolithic prompt. "
+            "Custom run prompts replace the entire system message."
         ),
     )
     max_tokens: int

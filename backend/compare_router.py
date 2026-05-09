@@ -638,9 +638,8 @@ def list_compare_jobs():
 @router.get("/llm-judge-defaults", response_model=CompareLlmJudgeDefaultsResponse)
 def get_llm_judge_defaults():
     """
-    Expose the built-in judge prompt used when `llm_judge_prompt` is empty, plus the suffix
-    snippet for UI reference (that suffix is part of the default blob only — custom run prompts
-    replace the entire system message).
+    Expose the built-in judge prompt used when `llm_judge_prompt` is empty.
+    `fixed_suffix` is empty when the default is monolithic; custom run prompts replace the entire system message.
     """
     return CompareLlmJudgeDefaultsResponse(
         default_system_prompt=DEFAULT_LLM_JUDGE_PROMPT,
